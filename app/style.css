@@ -1,0 +1,112 @@
+:root {
+  --bg: #f6f4ef; --panel: #efece5; --ink: #1d1c1a; --muted: #77736b; --line: #d9d4c9;
+  --accent: #c2410c; --hot: #0f766e; --field: #fffdf8;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #151514; --panel: #1c1c1a; --ink: #e9e6df; --muted: #8d897f; --line: #2e2d2a; --accent: #fb923c; --hot: #5eead4; --field: #111110; }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { display: flex; background: var(--bg); color: var(--ink);
+  font: 12px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow: hidden; }
+
+#stage { position: relative; flex: 1; min-width: 0; overflow: hidden; }
+#gl, #pad, #faces, #dots { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#pad { touch-action: none; cursor: default; }
+#pad[data-tool=draw], #pad[data-tool=box], #pad[data-tool=scene] { cursor: crosshair; }
+#pad[data-pan] { cursor: grab; }
+#faces, #dots { pointer-events: none; }
+#pad[data-over=port] { cursor: crosshair; }
+#dots i { position: absolute; left: -4px; top: -4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+#marquee { position: absolute; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); pointer-events: none; }
+
+button, select, input, textarea { font: inherit; color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 5px; }
+button { cursor: pointer; }
+button:hover { background: color-mix(in srgb, var(--ink) 9%, transparent); }
+button[aria-pressed=true] { background: color-mix(in srgb, var(--ink) 14%, transparent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+#tools { position: absolute; top: 8px; left: 8px; display: flex; align-items: center; gap: 1px; padding: 3px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+#tools button, #peek { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; }
+#tools hr { width: 1px; height: 16px; margin: 0 4px; border: 0; background: var(--line); }
+#peek { position: absolute; left: 8px; top: 8px; display: none; color: var(--muted); opacity: 0.35; }
+#peek:hover { opacity: 1; }
+
+#side { position: absolute; top: 8px; right: 8px; bottom: 8px; width: 300px; display: flex; flex-direction: column; gap: 8px; padding: 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+#side.empty { display: none; }
+.side-head { display: flex; align-items: center; justify-content: space-between; }
+.side-head .name { font-weight: 600; }
+#side select { background: var(--field); border-color: var(--line); padding: 2px 4px; }
+#side .code { flex: 1; }
+#side .error { margin: 0; min-height: 1.4em; color: var(--accent); white-space: pre-wrap; }
+body.noside #side, body.clean #side, body.clean #tools { display: none; }
+body.clean #peek { display: grid; }
+
+/* ---- shared controls ---- */
+.params { display: flex; flex-direction: column; gap: 3px; }
+.param { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--muted); }
+.param input { width: 5em; padding: 1px 4px; background: var(--field); border-color: var(--line); pointer-events: auto; }
+.code { width: 100%; min-height: 0; padding: 6px; resize: none; background: var(--field); border-color: var(--line);
+  white-space: pre; tab-size: 2; line-height: 1.45; pointer-events: auto; }
+
+/* ---- faces ---- */
+.face { position: absolute; border: 1px solid var(--ink); border-radius: 6px; font-size: 11px; container-type: size; }
+/* A small box keeps only what fits: first the parameters go, then the port names. */
+@container (max-width: 190px) { .face .params { display: none; } }
+@container (max-width: 100px) { .port b, .head { display: none; } }
+.face.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.face.err .head { color: var(--accent); }
+.face.far { background: color-mix(in srgb, var(--ink) 14%, var(--bg)); border-radius: 3px; }
+.face.far > * { display: none; }
+.face.role-code, .face.kind-group { background: color-mix(in srgb, var(--panel) 85%, transparent); }
+.face.kind-group { border-width: 1.5px; }
+.face.kind-group.near { background: transparent; border-style: dashed; }
+.face.kind-line { border: 1px dashed var(--line); }
+.face.kind-line.sel { border-color: var(--accent); }
+.face.role-target { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+/* A visual has no face of its own; selected, it gets a frame to resize by. */
+.face.plain { border: 1px dashed var(--accent); border-radius: 0; box-shadow: none; background: none; }
+.face.plain > * { display: none; }
+.face.sizable::after { content: ''; position: absolute; right: -5px; bottom: -5px; width: 9px; height: 9px; border: 1.5px solid var(--accent); background: var(--bg); border-radius: 2px; }
+/* A sketch container shows the sketch; its code is in the sidebar. */
+.sketch { position: absolute; left: 0; top: 0; border: 0; border-radius: 6px; transform-origin: 0 0; pointer-events: none; }
+.face.near .sketch { pointer-events: auto; }
+.face.is-sketch .body { display: none; }
+.face.is-sketch .head { z-index: 1; }
+
+.head { position: absolute; left: 10px; right: 10px; top: 3px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ports { position: absolute; top: 0; bottom: 0; width: 0; z-index: 2; }
+.ports.ins { left: 0; } .ports.outs { right: 0; }
+.port { position: absolute; left: 0; width: 9px; height: 9px; margin: -4.5px; border-radius: 50%; border: 1.5px solid var(--hot); background: var(--bg); }
+.port b { position: absolute; top: -5px; font-weight: 400; font-style: normal; white-space: nowrap; color: var(--muted); }
+.ins .port b { left: 12px; } .outs .port b { right: 12px; }
+/* Near, the interior takes the inside, so the port names move outside. */
+.face.near .ins .port b { left: auto; right: 12px; } .face.near .outs .port b { right: auto; left: 12px; }
+
+.body { position: absolute; inset: 22px 12px 8px 12px; display: flex; flex-direction: column; gap: 5px; overflow: hidden; }
+.face .params { padding: 0 42px; }
+.face .code { display: none; flex: 1; }
+.face.near .code { display: block; }
+.face.kind-line .body { justify-content: flex-end; }
+.face.kind-line .code { flex: 0 1 40%; }
+
+/* ---- context menu and palette ---- */
+.menu, #palette { position: fixed; z-index: 10; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 28px color-mix(in srgb, #000 22%, transparent); }
+.menu { min-width: 200px; }
+.menu hr, .palette-list hr { height: 1px; margin: 4px 6px; border: 0; background: var(--line); }
+.menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; text-align: left; }
+.menu-item .glyph { display: grid; place-items: center; width: 16px; height: 16px; color: var(--muted); }
+.menu-item .label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.menu-item kbd { font: inherit; color: var(--muted); }
+.menu-item:focus-visible, .menu-item.on { outline: none; background: color-mix(in srgb, var(--ink) 12%, transparent); }
+.menu-item.ask .label { color: var(--muted); }
+#palette { left: 50%; top: 14%; width: min(520px, calc(100vw - 32px)); transform: translateX(-50%); }
+#palette input { width: 100%; padding: 7px 9px; background: var(--field); border-color: var(--line); outline: none; }
+#palette.busy input { opacity: 0.5; }
+.palette-list { margin-top: 4px; }
+.palette-note { margin: 0; padding: 0 9px; color: var(--muted); white-space: pre-wrap; }
+.palette-note:not(:empty) { padding: 5px 9px 3px; }

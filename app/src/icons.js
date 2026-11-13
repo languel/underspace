@@ -1,0 +1,39 @@
+// Glyphs for the toolbar: 16 by 16, drawn with the current colour.
+
+const PATHS = {
+  select: 'M3 2l9 6-4.2 1 2.2 4.2-1.8 1L6 10 3 12.5z',
+  draw: 'M2 12c2-7 4 3 6-3s3-5 6-6',
+  box: 'M4 4h8v8H4z M2.5 8h1.5 M12 8h1.5',
+  code: 'M6 4L2 8l4 4 M10 4l4 4-4 4',
+  collapse: 'M2 2l4 4 M6 3v3H3 M14 14l-4-4 M10 13v-3h3',
+  expand: 'M6 6L2 2 M2 5V2h3 M10 10l4 4 M14 11v3h-3',
+  remove: 'M4 4l8 8 M12 4l-8 8',
+  undo: 'M5 3L2 6l3 3 M2 6h7a4 4 0 010 8H6',
+  fit: 'M2 6V2h4 M10 2h4v4 M14 10v4h-4 M6 14H2v-4',
+  save: 'M8 2v8 M5 7l3 3 3-3 M3 13h10',
+  open: 'M8 10V2 M5 5l3-3 3 3 M3 13h10',
+  clear: 'M3 4h10 M6 4V2h4v2 M4.5 4l.8 10h5.4l.8-10',
+  side: 'M2 3h12v10H2z M10 3v10',
+  redo: 'M11 3l3 3-3 3 M14 6H7a4 4 0 000 8h3',
+  rect: 'M3 4h10v8H3z',
+  ellipse: 'M8 3.5c3.3 0 6 2 6 4.5s-2.7 4.5-6 4.5S2 10.5 2 8s2.700-4.5 6-4.5z',
+  ink: 'M2 12c2-7 4 3 6-3s3-5 6-6',
+  connector: 'M3.5 11.5c3 0 3-7 9-7 M3.5 13a1.500 1.500 0 100-3 1.500 1.500 0 000 3z M12.500 6a1.500 1.500 0 100-3 1.500 1.500 0 000 3z',
+  path: 'M2 12c3-8 5 2 7-2s2-4 5-6 M9.500 11.500a1.500 1.500 0 10-1-2.900',
+  visual: 'M3 4h10v8H3z M3 10l3-3 3 3 2-2 2 2',
+  target: 'M8 2l5 3v6l-5 3-5-3V5z M3 5l5 3 5-3 M8 8v6',
+  enter: 'M13 3v6H4 M7 6L4 9l3 3',
+  up: 'M8 13V4 M4.500 7.500L8 4l3.500 3.500',
+  zoomin: 'M7 12A5 5 0 107 2a5 5 0 000 10z M10.500 10.500L14 14 M5 7h4 M7 5v4',
+  zoomout: 'M7 12A5 5 0 107 2a5 5 0 000 10z M10.500 10.500L14 14 M5 7h4',
+  frame: 'M2 5V2h3 M11 2h3v3 M14 11v3h-3 M5 14H2v-3 M6 6h4v4H6z',
+  palette: 'M3 5l3 3-3 3 M8 11h5',
+  ask: 'M3 3h10v7H8l-3 3v-3H3z',
+  plane: 'M2 11l5-6h7l-5 6z',
+  all: 'M2 2h5v5H2z M9 9h5v5H9z M9 2h5v5H9z M2 9h5v5H2z',
+  demo: 'M5 3l8 5-8 5z',
+  clean: 'M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z M8 6.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3z',
+};
+
+export const icon = (name) =>
+  `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${PATHS[name]}"/></svg>`;

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>underspace</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "../vendor/three/build/three.webgpu.js",
+    "three/webgpu": "../vendor/three/build/three.webgpu.js",
+    "three/tsl": "../vendor/three/build/three.tsl.js",
+    "three/addons/": "../vendor/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+<section id="stage">
+  <canvas id="gl"></canvas>
+  <div id="pad"></div>
+  <div id="faces"></div>
+  <div id="dots"></div>
+  <div id="marquee" hidden></div>
+  <nav id="tools" aria-label="Tools"></nav>
+  <button id="peek" title="Show panels (Tab)" aria-label="Show panels"></button>
+</section>
+<aside id="side" class="empty" aria-label="Code"></aside>
+<div id="palette" role="dialog" aria-label="Command palette" hidden></div>
+<input id="file" type="file" accept="application/json,.json" hidden>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,637 @@
+// Wiring: layout by zoom, gestures, and the action table that the toolbar,
+// keys, context menus and palette all read.
+
+import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, argTypes as T } from './space.js';
+import './patch.js';
+import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, setDrag, isLine, isTarget, hasCode, isWire } from './object.js';
+import { wirePoints } from './bind.js';
+import { createRunner } from './run.js';
+import { createView } from './view.js';
+import { createFaces } from './faces.js';
+import { createSide } from './side.js';
+import { createPalette } from './palette.js';
+import { showMenu, closeMenu } from './menu.js';
+import { scripted, endpoint, listModels } from './assistant.js';
+import { sketchKind } from './sketch.js';
+import { PRESETS } from './presets.js';
+import { icon } from './icons.js';
+
+const $ = (id) => document.getElementById(id);
+const stage = $('stage'), pad = $('pad'), marquee = $('marquee'), dotLayer = $('dots');
+const STORE = 'underspace-take', ASSIST = 'underspace-assistant';
+const round = (v) => Math.round(v * 1e4) / 1e4;
+const get = (id) => state.objects.get(id);
+
+const onParam = (id, name, value) => call('object.set', { id, name, value });
+const onCode = (id, code) => { step.restart(id); call('object.code', { id, code }); };
+const faces = createFaces($('faces'), { onParam, onCode });
+const side = createSide($('side'), { onParam, onCode, presets: PRESETS });
+const step = createRunner();
+const view = await createView({ canvas: $('gl'), stage, onFrame: frame });
+addEventListener('message', (e) => { if (e.data?.underspace) step.report(e.data.underspace, e.data); });
+
+// ---- layout: which objects are visible, at which face, and where -----------
+
+const ROOT = { k: 1, ox: 0, oy: 0 };
+const at = (xf, p) => [xf.ox + p[0] * xf.k, xf.oy + p[1] * xf.k];
+const back = (xf, p) => [(p[0] - xf.ox) / xf.k, (p[1] - xf.oy) / xf.k];
+const FAR = 48; // below this many pixels an object shows its far face
+
+let vis = new Map();  // id -> { o, face, px, xf, blanket }
+let spaces = [];      // open spaces, outermost first: { id, kind, xf, px, plane }
+let lines = [];       // ink in canvas coordinates: { id, pts, color, width }
+let ink3d = [];       // lines inside targets: { id, scene, pts }
+let sceneList = [], dots = [];
+let lastSig = '', dragSig = '', run = null, orbit = null;
+
+function walk(space, xf) {
+  const upp = view.unitsPerPx();
+  for (const o of state.objects.values()) {
+    if (o.space !== space) continue;
+    const sel = state.selection.has(o.id), blanket = blanketOf(o);
+    if (isLine(o)) {
+      const made = run.shown.get(o.id);
+      const pts = (isWire(o) ? wirePoints(state.objects, o) : made ?? ptsOf(o)).map((p) => at(xf, p));
+      lines.push({ id: o.id, pts, color: sel ? 'accent' : isWire(o) ? 'hot' : 'ink', width: isWire(o) ? 1.6 : 2.2 });
+      const cursor = run.cursors.get(o.id);
+      if (cursor) dots.push(view.toScreen(at(xf, cursor)));
+      if (!blanket) { vis.set(o.id, { o, face: 'line', xf }); continue; }
+    }
+    const r = rectOf(o), [l, t] = view.toScreen(at(xf, [r.cx - r.w / 2, r.cy + r.h / 2]));
+    const px = { l, t, w: r.w * xf.k / upp, h: r.h * xf.k / upp };
+    if (o.kind === 'shape' && o.role === 'visual') lines.push({ id: o.id, pts: outline(r, o.shape).map((p) => at(xf, p)), color: sel ? 'accent' : 'ink', width: 2.2 });
+    const face = Math.max(px.w, px.h) < FAR ? 'far' : (px.w > view.size.w * 0.42 || px.h > view.size.h * 0.5) ? 'near' : 'mid';
+    vis.set(o.id, { o, face, px, xf, blanket });
+    if (o.kind === 'group' && face === 'near') {
+      const i = innerXf(o), inner = { k: xf.k * i.k, ox: xf.ox + i.ox * xf.k, oy: xf.oy + i.oy * xf.k };
+      spaces.push({ id: o.id, kind: 'group', xf: inner, px });
+      // A thin line from each port on the blanket to the port it stands for.
+      for (const s of ['ins', 'outs']) for (const p of o.ports[s]) {
+        const target = get(p.inner.id), a = target && portPos(target, s, p.inner.port), b = portPos(o, s, p.name);
+        if (a && b) lines.push({ pts: [at(inner, a), at(xf, b)], color: 'muted', width: 1 });
+      }
+      walk(o.id, inner);
+    }
+    if (isTarget(o) && face !== 'far') {
+      spaces.push({ id: o.id, kind: 'scene', px, plane: o.plane ?? 'view' });
+      const marks = [];
+      for (const m of state.objects.values()) {
+        if (m.space !== o.id || !m.points) continue;
+        const pts = ptsOf(m);
+        if (m.closed) pts.push(pts[0]);
+        marks.push({ pts, color: state.selection.has(m.id) ? 'accent' : 'ink' });
+        ink3d.push({ id: m.id, scene: o.id, pts });
+        vis.set(m.id, { o: m, face: 'line', scene: o.id });
+      }
+      const turn = orbit?.id === o.id ? orbit : null;
+      sceneList.push({
+        id: o.id, px, marks,
+        az: (o.az ?? 0.5) + (turn?.daz ?? 0) + (Number(run.input(o.id, 'spin')) || 0) * Math.PI,
+        el: (o.el ?? 0.3) + (turn?.del ?? 0) + (Number(run.input(o.id, 'tilt')) || 0),
+      });
+    }
+  }
+}
+
+function frame() {
+  run = step(state.objects, performance.now() / 1000);
+  vis = new Map(); spaces = [{ id: null, kind: 'canvas', xf: ROOT }]; lines = []; ink3d = []; sceneList = []; dots = [];
+  walk(null, ROOT);
+  // Lines that code makes can change every frame; a cheap fingerprint tells.
+  let made = 0;
+  for (const pts of run.shown.values()) { const m = pts[pts.length >> 1]; made += pts.length + m[0] * 7 + m[1] * 13; }
+  const sig = `${state.version}|${dragSig}|${spaces.map((s) => s.id).join()}|${made}`;
+  const dirty = sig !== lastSig;
+  lastSig = sig;
+  if (dirty) view.setLines(lines);
+  view.setScenes(sceneList, dirty);
+  faces.update(vis, { run, selection: state.selection, w: view.size.w, h: view.size.h });
+  while (dotLayer.children.length < dots.length) dotLayer.append(document.createElement('i'));
+  while (dotLayer.children.length > dots.length) dotLayer.lastChild.remove();
+  dots.forEach((d, i) => { dotLayer.children[i].style.transform = `translate(${d[0].toFixed(1)}px,${d[1].toFixed(1)}px)`; });
+  const one = state.selection.size === 1 ? get([...state.selection][0]) : null;
+  const shown = one && hasCode(one) ? one : null;
+  side.update(shown, shown && blanketOf(shown), shown && run.errors.get(shown.id));
+}
+
+// ---- pointer geometry ------------------------------------------------------
+
+const local = (e) => { const r = stage.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+const inside = (px, x, y) => x >= px.l && x <= px.l + px.w && y >= px.t && y <= px.t + px.h;
+// The innermost open space under a point. flatOnly skips targets.
+function spaceAt(x, y, flatOnly = false) {
+  for (let i = spaces.length - 1; i >= 0; i--) {
+    const s = spaces[i];
+    if (flatOnly && s.kind === 'scene') continue;
+    if (!s.px || inside(s.px, x, y)) return s;
+  }
+  return spaces[0];
+}
+const toSpace = (s, x, y) => (s.kind === 'scene' ? view.sceneToLocal(s.id, x, y, s.plane) : back(s.xf, view.toWorld(x, y)));
+const unitsPerPx = (s) => view.unitsPerPx() / (s.xf?.k ?? 1);
+
+function segDist(x, y, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], len = dx * dx + dy * dy;
+  const k = len ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / len)) : 0;
+  return Math.hypot(x - (a[0] + k * dx), y - (a[1] + k * dy));
+}
+function onPath(path, x, y, tol = 7) {
+  if (path.length === 1) return Math.hypot(path[0][0] - x, path[0][1] - y) < tol + 1;
+  for (let j = 0; j < path.length - 1; j++) if (path[j] && path[j + 1] && segDist(x, y, path[j], path[j + 1]) < tol) return true;
+  return false;
+}
+const isOpen = (v) => (v.o.kind === 'group' && v.face === 'near') || (isTarget(v.o) && v.face !== 'far');
+
+function pick(x, y) {
+  for (const l of ink3d) if (onPath(l.pts.map((p) => view.sceneToScreen(l.scene, p)), x, y)) return l.id;
+  for (let i = lines.length - 1; i >= 0; i--) if (lines[i].id && onPath(lines[i].pts.map(view.toScreen), x, y)) return lines[i].id; // ink first: it is thin
+  for (const v of [...vis.values()].reverse()) {
+    if (!v.px || !inside(v.px, x, y)) continue;
+    // An open group or target is picked by its top strip or its edge.
+    const p = v.px;
+    if (isOpen(v) && !(y - p.t < 20 || x - p.l < 8 || p.l + p.w - x < 8 || p.t + p.h - y < 8)) continue;
+    return v.o.id;
+  }
+  return null;
+}
+
+// A port under the pointer, on any object showing its blanket.
+function portAt(x, y) {
+  for (const v of vis.values()) {
+    if (!v.blanket || v.face === 'far' || !v.px) continue;
+    for (const s of ['outs', 'ins']) for (const name of v.blanket[s]) {
+      const q = view.toScreen(at(v.xf, portPos(v.o, s, name)));
+      if (Math.hypot(q[0] - x, q[1] - y) < 9) return { v, side: s, name };
+    }
+  }
+  return null;
+}
+
+// ---- gestures: what a press means depends on what is under it --------------
+
+let tool = 'select';
+let gesture = null; // what the pointer is doing between down and up
+let spaceKey = false, pointer = null;
+const touches = new Map();
+const MAKE = { rect: { role: 'visual', shape: 'rect' }, ellipse: { role: 'visual', shape: 'ellipse' }, code: { role: 'code', shape: 'rect' }, target: { role: 'target', shape: 'rect' } };
+
+function setTool(name) {
+  tool = name;
+  for (const b of document.querySelectorAll('[data-tool]')) b.setAttribute('aria-pressed', String(b.dataset.tool === name));
+  pad.dataset.tool = name;
+}
+function showMarquee(a, b) {
+  marquee.hidden = false;
+  marquee.style.cssText = `left:${Math.min(a[0], b[0])}px;top:${Math.min(a[1], b[1])}px;width:${Math.abs(a[0] - b[0])}px;height:${Math.abs(a[1] - b[1])}px`;
+}
+function startDraw(s, p, wire = false) {
+  const q = toSpace(s, p[0], p[1]);
+  if (q) gesture = { kind: 'draw', s, pts: [q], last: p, wire };
+}
+
+pad.addEventListener('pointerdown', (e) => {
+  document.activeElement?.blur?.();
+  closeMenu();
+  const p = local(e);
+  try { pad.setPointerCapture(e.pointerId); } catch {} // a scripted pointer has nothing to capture
+  if (e.pointerType === 'touch') {
+    touches.set(e.pointerId, p);
+    if (touches.size === 2) { cancelGesture(); gesture = { kind: 'pinch' }; return; }
+  }
+  if (e.button === 1 || (e.button === 0 && spaceKey)) { gesture = { kind: 'pan', last: p }; return; }
+  if (e.button !== 0) return;
+
+  const here = spaceAt(p[0], p[1]), port = portAt(p[0], p[1]);
+  // Alt-drag inside a target turns it.
+  if (e.altKey && here.kind === 'scene') { const o = get(here.id); gesture = { kind: 'orbit', id: o.id, start: p, az: o.az ?? 0.5, el: o.el ?? 0.3 }; return; }
+  // A drag that starts on a port draws a connector, whatever the tool.
+  if (port) { const s = spaces.find((x) => x.id === port.v.o.space) ?? spaces[0]; startDraw(s, p, true); return; }
+  // The corner of the selected shape resizes it.
+  const one = state.selection.size === 1 ? vis.get([...state.selection][0]) : null;
+  if (one?.px && one.o.rect && Math.hypot(p[0] - (one.px.l + one.px.w), p[1] - (one.px.t + one.px.h)) < 10) {
+    gesture = { kind: 'resize', id: one.o.id, k: one.xf.k, rect: { ...one.o.rect }, start: p, next: null }; return;
+  }
+  if (tool === 'draw') startDraw(here, p);
+  else if (MAKE[tool]) {
+    const flat = tool === 'code' || tool === 'target';
+    gesture = { kind: 'rect', make: MAKE[tool], s: spaceAt(p[0], p[1], flat), start: p, end: p };
+  } else {
+    const id = pick(p[0], p[1]);
+    if (id) {
+      if (e.shiftKey) {
+        const ids = new Set(state.selection); ids.has(id) ? ids.delete(id) : ids.add(id);
+        call('select.set', { ids: [...ids] });
+      } else if (!state.selection.has(id)) call('select.set', { ids: [id] });
+      const v = vis.get(id);
+      if (v.scene) return; // lines inside a target are selected, not dragged
+      // Only what shares the picked object's space moves with it.
+      const ids = [...state.selection].filter((i) => get(i)?.space === v.o.space);
+      gesture = { kind: 'move', k: v.xf.k, ids, start: p, dx: 0, dy: 0, moved: false };
+    } else gesture = { kind: 'marquee', s: here, start: p, end: p };
+  }
+});
+
+pad.addEventListener('pointermove', (e) => {
+  const p = local(e);
+  pointer = p;
+  if (touches.has(e.pointerId)) {
+    const before = touches.get(e.pointerId);
+    if (gesture?.kind === 'pinch' && touches.size === 2) {
+      const other = [...touches.entries()].find(([id]) => id !== e.pointerId)[1];
+      const d0 = Math.hypot(before[0] - other[0], before[1] - other[1]), d1 = Math.hypot(p[0] - other[0], p[1] - other[1]), u = view.unitsPerPx();
+      view.cam.cx -= (p[0] - before[0]) / 2 * u; view.cam.cy += (p[1] - before[1]) / 2 * u;
+      if (d0 > 1) view.zoomAt((p[0] + other[0]) / 2, (p[1] + other[1]) / 2, d1 / d0);
+    }
+    touches.set(e.pointerId, p);
+  }
+  if (!gesture) { pad.dataset.over = portAt(p[0], p[1]) ? 'port' : ''; return; }
+  const g = gesture;
+  if (g.kind === 'pan') {
+    const u = view.unitsPerPx();
+    view.cam.cx -= (p[0] - g.last[0]) * u; view.cam.cy += (p[1] - g.last[1]) * u; g.last = p;
+  } else if (g.kind === 'draw') {
+    if (Math.hypot(p[0] - g.last[0], p[1] - g.last[1]) < 1.5) return;
+    const q = toSpace(g.s, p[0], p[1]);
+    if (!q) return;
+    g.pts.push(q); g.last = p;
+    if (g.s.kind === 'scene') view.setPreview(g.pts, g.s.id);
+    else view.setPreview(g.pts.map((pt) => at(g.s.xf, pt)), null, g.wire ? 'hot' : 'accent');
+  } else if (g.kind === 'move') {
+    const u = view.unitsPerPx() / g.k;
+    g.dx = (p[0] - g.start[0]) * u; g.dy = -(p[1] - g.start[1]) * u;
+    if (!g.moved && Math.hypot(p[0] - g.start[0], p[1] - g.start[1]) < 3) return;
+    g.moved = true;
+    setDrag({ ids: new Set(g.ids), dx: g.dx, dy: g.dy });
+    dragSig = g.dx + ',' + g.dy;
+  } else if (g.kind === 'resize') {
+    // The top left corner stays; the dragged corner follows the pointer.
+    const u = view.unitsPerPx() / g.k, r = g.rect;
+    const w = Math.max(0.2, r.w + (p[0] - g.start[0]) * u), h = Math.max(0.2, r.h + (p[1] - g.start[1]) * u);
+    g.next = { cx: round(r.cx - r.w / 2 + w / 2), cy: round(r.cy + r.h / 2 - h / 2), w: round(w), h: round(h) };
+    setDrag({ ids: new Set([g.id]), rect: g.next });
+    dragSig = w + ',' + h;
+  } else if (g.kind === 'orbit') {
+    orbit = { id: g.id, daz: -(p[0] - g.start[0]) * 0.01, del: (p[1] - g.start[1]) * 0.01 };
+  } else if (g.kind === 'rect' || g.kind === 'marquee') { g.end = p; showMarquee(g.start, g.end); }
+});
+
+function cancelGesture() {
+  gesture = null; marquee.hidden = true; view.setPreview(null); setDrag(null); dragSig = ''; orbit = null;
+}
+
+// A rectangle or ellipse drawn inside a target: a closed line on its plane.
+function shapeIn3d(g) {
+  const basis = view.planeBasis(g.s.id, g.s.plane), a = toSpace(g.s, g.start[0], g.start[1]), b = toSpace(g.s, g.end[0], g.end[1]);
+  if (!basis || !a || !b) return;
+  const dot = (p, q) => p[0] * q[0] + p[1] * q[1] + p[2] * q[2];
+  const r = { cx: (dot(a, basis.u) + dot(b, basis.u)) / 2, cy: (dot(a, basis.v) + dot(b, basis.v)) / 2, w: Math.abs(dot(a, basis.u) - dot(b, basis.u)), h: Math.abs(dot(a, basis.v) - dot(b, basis.v)) };
+  const points = outline(r, g.make.shape).slice(0, -1).map(([x, y]) => [0, 1, 2].map((i) => round(basis.u[i] * x + basis.v[i] * y)));
+  const id = call('line.add', { space: g.s.id, points, closed: true });
+  call('select.set', { ids: [id] });
+}
+
+function endGesture(e) {
+  touches.delete(e.pointerId);
+  const g = gesture;
+  gesture = null;
+  marquee.hidden = true;
+  if (!g) return;
+  if (g.kind === 'draw') {
+    view.setPreview(null);
+    // A line begun on a port reaches further for the port at its other end.
+    const tol = g.s.kind === 'scene' ? 0 : (g.wire ? 26 : 14) * unitsPerPx(g.s);
+    if (g.pts.length > 1 || !g.wire) call('line.add', { space: g.s.id, points: g.pts.map((q) => q.map(round)), tol: round(tol) });
+  } else if (g.kind === 'move') {
+    setDrag(null); dragSig = '';
+    if (g.moved) call('object.move', { ids: g.ids, dx: round(g.dx), dy: round(g.dy) });
+  } else if (g.kind === 'resize') {
+    setDrag(null); dragSig = '';
+    if (g.next) call('object.resize', { id: g.id, rect: g.next });
+  } else if (g.kind === 'orbit') {
+    const o = orbit; orbit = null;
+    if (o) call('target.set', { id: g.id, az: round(g.az + o.daz), el: round(Math.max(-1.5, Math.min(1.5, g.el + o.del))) });
+  } else if (g.kind === 'rect') {
+    const tiny = Math.hypot(g.end[0] - g.start[0], g.end[1] - g.start[1]) < 8;
+    if (g.s.kind === 'scene') { if (!tiny) batch(() => shapeIn3d(g)); }
+    else addShape(g.s, g.make, g.start, tiny ? null : g.end);
+    setTool('select');
+  } else if (g.kind === 'marquee') {
+    const [x0, x1] = [Math.min(g.start[0], g.end[0]), Math.max(g.start[0], g.end[0])];
+    const [y0, y1] = [Math.min(g.start[1], g.end[1]), Math.max(g.start[1], g.end[1])];
+    const within = (q) => q && q[0] >= x0 && q[0] <= x1 && q[1] >= y0 && q[1] <= y1;
+    const ids = [];
+    if (x1 - x0 > 3 || y1 - y0 > 3) {
+      if (g.s.kind === 'scene') { for (const l of ink3d) if (l.scene === g.s.id && l.pts.some((pt) => within(view.sceneToScreen(l.scene, pt)))) ids.push(l.id); }
+      else {
+        const ink = new Map(lines.filter((l) => l.id).map((l) => [l.id, l.pts]));
+        for (const [id, v] of vis) {
+          if (v.o.space !== g.s.id) continue;
+          const hitBox = v.px && v.px.l < x1 && v.px.l + v.px.w > x0 && v.px.t < y1 && v.px.t + v.px.h > y0;
+          if (ink.get(id)?.some((pt) => within(view.toScreen(pt))) || hitBox) ids.push(id);
+        }
+      }
+    }
+    if (ids.length || state.selection.size) call('select.set', { ids });
+  }
+}
+pad.addEventListener('pointerup', endGesture);
+pad.addEventListener('pointercancel', endGesture);
+
+// A shape in a flat space, from a drag or (end = null) at a default size.
+function addShape(s, make, start, end, extra = {}) {
+  const a = toSpace(s, start[0], start[1]), u = unitsPerPx(s);
+  const size = make.role === 'target' ? [360, 260] : make.role === 'code' ? [170, 110] : [120, 120];
+  let rect = { cx: a[0], cy: a[1], w: size[0] * u, h: size[1] * u };
+  if (end) { const b = toSpace(s, end[0], end[1]); rect = { cx: (a[0] + b[0]) / 2, cy: (a[1] + b[1]) / 2, w: Math.abs(a[0] - b[0]), h: Math.abs(a[1] - b[1]) }; }
+  for (const k in rect) rect[k] = round(rect[k]);
+  return batch(() => {
+    const id = call('shape.add', { space: s.id, rect, shape: make.shape, role: make.role, ...(make.role === 'code' ? { preset: 'osc' } : {}), ...extra });
+    call('select.set', { ids: [id] });
+    return id;
+  });
+}
+
+// Wheel pans; pinch or ctrl+wheel zooms about the pointer.
+pad.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const p = local(e);
+  if (e.ctrlKey || e.metaKey) view.zoomAt(p[0], p[1], Math.exp(-e.deltaY * 0.01));
+  else { const u = view.unitsPerPx(); view.cam.cx += e.deltaX * u; view.cam.cy -= e.deltaY * u; }
+}, { passive: false });
+addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+
+// ---- navigation ------------------------------------------------------------
+
+const worldRect = (v) => { const r = rectOf(v.o), c = at(v.xf, [r.cx, r.cy]); return { cx: c[0], cy: c[1], w: r.w * v.xf.k, h: r.h * v.xf.k }; };
+function frameIds(ids, fill = 0.8) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const id of ids) {
+    const v = vis.get(id) ?? (get(id)?.space === null ? { o: get(id), xf: ROOT } : null);
+    if (!v?.xf || v.o.bind) continue;
+    const r = worldRect(v);
+    x0 = Math.min(x0, r.cx - r.w / 2); x1 = Math.max(x1, r.cx + r.w / 2); y0 = Math.min(y0, r.cy - r.h / 2); y1 = Math.max(y1, r.cy + r.h / 2);
+  }
+  if (x0 === Infinity) return false;
+  view.frame({ cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) }, fill);
+  return true;
+}
+function fit() {
+  if (!frameIds([...state.objects.values()].filter((o) => o.space === null).map((o) => o.id))) { view.cam.cx = 0; view.cam.cy = 0; view.cam.zoom = 1; }
+}
+const centre = () => [view.size.w / 2, view.size.h / 2];
+// Step out of the space in the middle of the view: show its object from outside.
+function goUp() {
+  const s = spaceAt(...centre());
+  if (s.id === null) return fit();
+  const parent = get(s.id).space;
+  if (parent === null) fit(); else frameIds([parent], 0.82);
+}
+pad.addEventListener('dblclick', (e) => {
+  const p = local(e), v = vis.get(pick(p[0], p[1]));
+  if (!v || !v.px) return fit();
+  frameIds([v.o.id], 0.82);
+});
+
+// ---- the assistant ---------------------------------------------------------
+
+const assist = { base: 'http://127.0.0.1:11434', model: '', ...JSON.parse(localStorage.getItem(ASSIST) || '{}') };
+const saveAssist = () => localStorage.setItem(ASSIST, JSON.stringify(assist));
+
+// Text to objects: the scripted engine first, a local model when it has no answer.
+async function ask(text) {
+  let plan = scripted(text), by = 'assistant';
+  if (!plan) {
+    if (!assist.base) throw new Error('no model endpoint set');
+    if (!assist.model) { assist.model = (await listModels(assist.base))[0]; saveAssist(); }
+    plan = await endpoint(text, assist); by = assist.model;
+  }
+  // New work goes in the space in the middle of the view, below what is there.
+  const s = spaceAt(...centre(), true);
+  let where = back(s.xf, view.toWorld(...centre())), low = Infinity, x0 = Infinity, x1 = -Infinity;
+  for (const o of state.objects.values()) {
+    if (o.space !== s.id || o.bind) continue;
+    const r = rectOf(o);
+    low = Math.min(low, r.cy - r.h / 2); x0 = Math.min(x0, r.cx - r.w / 2); x1 = Math.max(x1, r.cx + r.w / 2);
+  }
+  if (low !== Infinity) where = [(x0 + x1) / 2, low - 3.2];
+  const made = [];
+  batch(() => {
+    for (const cmd of plan.commands) {
+      const args = { ...cmd.args };
+      if (cmd.name === 'patch.add') { args.at ??= where.map(round); args.space ??= s.id; }
+      const r = call(cmd.name, args, by);
+      if (r?.ids) made.push(...Object.values(r.ids));
+      if (r?.group) made.push(r.group);
+    }
+  });
+  if (made.length) requestAnimationFrame(() => frameIds(made.filter(get), 0.6));
+  return plan.say;
+}
+
+// ---- actions: one table for toolbar, keys, menus and the palette -----------
+// { id, title, icon, keys, group, bar, menu, when(ctx), run(ctx) }
+
+function context(hitId) {
+  const sel = [...state.selection].map(get).filter(Boolean), p = pointer ?? centre();
+  const hit = hitId !== undefined ? get(hitId) : null, here = spaceAt(p[0], p[1]);
+  const target = sel.find(isTarget) ?? (here.kind === 'scene' ? get(here.id) : null);
+  return { sel, one: sel.length === 1 ? sel[0] : null, hit, p, here, target, lines: sel.filter(isLine), shapes: sel.filter((o) => o.kind === 'shape'), groups: sel.filter((o) => o.kind === 'group') };
+}
+const ids = (list) => list.map((o) => o.id);
+const setRole = (list, role) => batch(() => { for (const o of list) call('object.role', { id: o.id, role, ...(role === 'connector' ? { tol: round(40 * view.unitsPerPx()) } : {}) }); });
+const nudge = (c, dx, dy, e) => {
+  const u = (e?.shiftKey ? 40 : 8) * view.unitsPerPx();
+  if (c.sel.length) call('object.move', { ids: ids(c.sel), dx: round(dx * u), dy: round(dy * u) });
+  else { view.cam.cx += dx * u * 6; view.cam.cy += dy * u * 6; }
+};
+const cycle = (dir) => {
+  const s = spaceAt(...(pointer ?? centre())), list = [...state.objects.values()].filter((o) => o.space === s.id && !o.bind);
+  if (!list.length) return;
+  const i = list.findIndex((o) => state.selection.has(o.id));
+  call('select.set', { ids: [list[(i + dir + list.length) % list.length].id] });
+};
+const addHere = (c, make, extra) => { const s = spaceAt(c.p[0], c.p[1], true); addShape(s, make, c.p, null, extra); };
+const can = (list, role) => list.some((o) => o.role !== role);
+
+const ACTIONS = [
+  // tools
+  { id: 'tool.select', title: 'Select', icon: 'select', keys: 'v', group: 'tool', bar: true, tool: 'select' },
+  { id: 'tool.draw', title: 'Draw', icon: 'draw', keys: 'd', group: 'tool', bar: true, tool: 'draw' },
+  { id: 'tool.rect', title: 'Rectangle', icon: 'rect', keys: 'r', group: 'tool', bar: true, tool: 'rect' },
+  { id: 'tool.ellipse', title: 'Ellipse', icon: 'ellipse', keys: 'o', group: 'tool', bar: true, tool: 'ellipse' },
+  { id: 'tool.code', title: 'Code container', icon: 'box', keys: 'b', group: 'tool', bar: true, tool: 'code' },
+  // roles: the same key means "tool" with nothing selected and "make this one" with a selection
+  { id: 'role.target', title: 'Make render target', icon: 'target', keys: 't', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'target'), run: (c) => setRole(c.shapes, 'target') },
+  { id: 'tool.target', title: 'Render target', icon: 'target', keys: 't', group: 'tool', bar: true, tool: 'target' },
+  { id: 'role.code', title: 'Make code container', icon: 'code', keys: 'c', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'code'), run: (c) => setRole(c.shapes, 'code') },
+  { id: 'role.path', title: 'Make path', icon: 'path', keys: 'c', group: 'role', menu: true, when: (c) => c.lines.length && can(c.lines, 'path'), run: (c) => setRole(c.lines, 'path') },
+  { id: 'role.connector', title: 'Make connector', icon: 'connector', keys: 'w', group: 'role', menu: true, when: (c) => c.lines.some((o) => !o.bind), run: (c) => setRole(c.lines, 'connector') },
+  { id: 'role.ink', title: 'Make plain ink', icon: 'ink', keys: 'x', group: 'role', menu: true, when: (c) => c.lines.length && can(c.lines, 'ink'), run: (c) => setRole(c.lines, 'ink') },
+  { id: 'role.visual', title: 'Make visual', icon: 'visual', keys: 'x', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'visual'), run: (c) => setRole(c.shapes, 'visual') },
+  // structure
+  { id: 'collapse', title: 'Collapse into a group', icon: 'collapse', keys: 'g', group: 'edit', bar: true, menu: true, when: (c) => c.sel.some((o) => !o.bind), run: (c) => call('group.collapse', { ids: ids(c.sel) }) },
+  { id: 'expand', title: 'Expand group', icon: 'expand', keys: ['e', 'shift+g'], group: 'edit', bar: true, menu: true, when: (c) => c.groups.length, run: (c) => batch(() => c.groups.forEach((g) => call('group.expand', { id: g.id }))) },
+  { id: 'copycode', title: 'Copy code', icon: 'code', keys: 'mod+c', group: 'edit', menu: true, when: (c) => c.one && hasCode(c.one), run: (c) => navigator.clipboard?.writeText(c.one.code) },
+  { id: 'remove', title: 'Delete', icon: 'remove', keys: ['backspace', 'delete'], group: 'edit', bar: true, menu: true, when: (c) => c.sel.length, run: (c) => call('object.remove', { ids: ids(c.sel) }) },
+  // drawing plane of a target
+  ...['view', 'front', 'top', 'side'].map((plane) => ({
+    id: 'plane.' + plane, title: `Draw on the ${plane} plane`, icon: 'plane', group: 'plane', menu: true,
+    when: (c) => c.target && (c.target.plane ?? 'view') !== plane, run: (c) => call('target.set', { id: c.target.id, plane }),
+  })),
+  { id: 'plane.next', title: 'Next drawing plane', icon: 'plane', keys: 'p', group: 'plane', when: (c) => c.target, run: (c) => { const all = ['view', 'front', 'top', 'side']; call('target.set', { id: c.target.id, plane: all[(all.indexOf(c.target.plane ?? 'view') + 1) % 4] }); } },
+  // adding, at the pointer
+  { id: 'add.code', title: 'Add code container', icon: 'box', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => addHere(c, MAKE.code) },
+  { id: 'add.target', title: 'Add render target', icon: 'target', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => addHere(c, MAKE.target) },
+  { id: 'add.rect', title: 'Add rectangle', icon: 'rect', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => addHere(c, MAKE.rect) },
+  { id: 'add.ellipse', title: 'Add ellipse', icon: 'ellipse', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => addHere(c, MAKE.ellipse) },
+  ...Object.keys(PRESETS).filter((k) => !['path', 'wave', 'blank'].includes(k)).map((k) => ({ id: 'add.' + k, title: 'Add ' + k, icon: 'box', group: 'add', when: (c) => !c.hit, run: (c) => addHere(c, MAKE.code, { preset: k }) })),
+  ...['path', 'wave'].map((k) => ({ id: 'code.' + k, title: `Path code: ${k}`, icon: 'path', group: 'role', menu: true, when: (c) => c.lines.length && !c.lines.some((o) => o.bind), run: (c) => batch(() => c.lines.forEach((o) => { call('object.role', { id: o.id, role: 'path' }); call('object.code', { id: o.id, code: PRESETS[k] }); })) })),
+  // navigation
+  { id: 'enter', title: 'Go into', icon: 'enter', keys: 'enter', group: 'nav', menu: true, when: (c) => c.one?.rect || (c.one && blanketOf(c.one)), run: (c) => frameIds([c.one.id], 0.82) },
+  { id: 'deselect', title: 'Deselect', keys: 'escape', group: 'nav', when: (c) => c.sel.length, run: () => call('select.set', { ids: [] }) },
+  { id: 'up', title: 'Go up a level', icon: 'up', keys: 'escape', group: 'nav', run: goUp },
+  { id: 'frame', title: 'Frame the selection', icon: 'frame', keys: ['shift+f', '2'], group: 'nav', menu: true, when: (c) => c.sel.length, run: (c) => frameIds(ids(c.sel), 0.6) },
+  { id: 'fit', title: 'Fit everything', icon: 'fit', keys: ['f', '1'], group: 'nav', bar: true, menu: true, when: (c) => !c.hit, run: fit },
+  { id: 'zoomin', title: 'Zoom in', icon: 'zoomin', keys: ['=', 'shift++'], group: 'nav', run: () => view.zoomAt(...(pointer ?? centre()), 1.3) },
+  { id: 'zoomout', title: 'Zoom out', icon: 'zoomout', keys: '-', group: 'nav', run: () => view.zoomAt(...(pointer ?? centre()), 1 / 1.3) },
+  { id: 'left', title: 'Left', keys: ['arrowleft', 'shift+arrowleft'], group: 'nav', hidden: true, run: (c, e) => nudge(c, -1, 0, e) },
+  { id: 'right', title: 'Right', keys: ['arrowright', 'shift+arrowright'], group: 'nav', hidden: true, run: (c, e) => nudge(c, 1, 0, e) },
+  { id: 'upward', title: 'Up', keys: ['arrowup', 'shift+arrowup'], group: 'nav', hidden: true, run: (c, e) => nudge(c, 0, 1, e) },
+  { id: 'down', title: 'Down', keys: ['arrowdown', 'shift+arrowdown'], group: 'nav', hidden: true, run: (c, e) => nudge(c, 0, -1, e) },
+  { id: 'next', title: 'Select next', keys: ']', group: 'nav', run: () => cycle(1) },
+  { id: 'prev', title: 'Select previous', keys: '[', group: 'nav', run: () => cycle(-1) },
+  { id: 'all', title: 'Select all here', icon: 'all', keys: 'mod+a', group: 'nav', menu: true, when: (c) => !c.hit, run: (c) => call('select.set', { ids: [...state.objects.values()].filter((o) => o.space === c.here.id).map((o) => o.id) }) },
+  // history and file
+  { id: 'undo', title: 'Undo', icon: 'undo', keys: 'mod+z', group: 'file', bar: true, run: undo },
+  { id: 'redo', title: 'Redo', icon: 'redo', keys: ['mod+shift+z', 'mod+y'], group: 'file', bar: true, run: redo },
+  { id: 'save', title: 'Save take', icon: 'save', keys: 'mod+s', group: 'file', run: saveTake },
+  { id: 'open', title: 'Open take', icon: 'open', keys: 'mod+o', group: 'file', run: () => $('file').click() },
+  { id: 'clear', title: 'Clear everything', icon: 'clear', group: 'file', run: () => call('space.clear') },
+  { id: 'demo', title: 'Build the demo', icon: 'demo', group: 'file', run: demo },
+  // panels and the assistant
+  { id: 'palette', title: 'Command palette', icon: 'palette', keys: ['mod+k', '/'], group: 'panel', bar: true, menu: true, when: (c) => !c.hit, run: () => palette.toggle() },
+  { id: 'side', title: 'Code sidebar', icon: 'side', keys: '\\', group: 'panel', bar: true, run: () => document.body.classList.toggle('noside') },
+  { id: 'clean', title: 'Hide panels', icon: 'clean', keys: 'tab', group: 'panel', bar: true, run: () => document.body.classList.toggle('clean') },
+  { id: 'assist.base', title: 'Assistant: model endpoint', icon: 'ask', group: 'panel', run: () => palette.prompt('http://127.0.0.1:11434', assist.base, (v) => { assist.base = v; assist.model = ''; saveAssist(); }) },
+  { id: 'assist.model', title: 'Assistant: model name', icon: 'ask', group: 'panel', run: () => palette.prompt('model', assist.model, (v) => { assist.model = v; saveAssist(); }) },
+];
+for (const a of ACTIONS) if (a.tool) a.run = () => setTool(a.tool);
+
+const SYMBOL = { mod: '⌘', shift: '⇧', alt: '⌥', backspace: '⌫', enter: '↵', escape: 'esc', arrowleft: '←', arrowright: '→', arrowup: '↑', arrowdown: '↓', tab: 'tab' };
+const keysOf = (a) => [a.keys ?? []].flat();
+const showKey = (a) => { const k = keysOf(a)[0]; return k ? k.split('+').map((s) => SYMBOL[s] ?? s.toUpperCase()).join('') : ''; };
+const asItem = (a, c) => ({ title: a.title, icon: a.icon, keys: showKey(a), run: () => a.run(c) });
+const allowed = (a, c) => !a.when || a.when(c);
+
+function saveTake() {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(take)], { type: 'application/json' }));
+  a.download = 'underspace-take.json'; a.click(); URL.revokeObjectURL(a.href);
+}
+$('file').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (f) try { loadTake(JSON.parse(await f.text())); fit(); } catch (err) { console.warn(err.message); }
+});
+
+// Toolbar: the actions marked `bar`, in table order, with a gap between groups.
+let lastGroup = null;
+for (const a of ACTIONS.filter((x) => x.bar)) {
+  if (lastGroup && a.group !== lastGroup) $('tools').append(document.createElement('hr'));
+  lastGroup = a.group;
+  const b = document.createElement('button'), key = showKey(a);
+  b.title = key ? `${a.title} (${key})` : a.title; b.setAttribute('aria-label', a.title); b.innerHTML = icon(a.icon);
+  if (a.tool) b.dataset.tool = a.tool;
+  b.onclick = () => { const c = context(); if (allowed(a, c)) a.run(c); };
+  $('tools').append(b);
+}
+$('peek').innerHTML = icon('clean');
+$('peek').onclick = () => document.body.classList.toggle('clean');
+
+const palette = createPalette($('palette'), { ask, getActions: () => { const c = context(); return ACTIONS.filter((a) => !a.hidden && a.id !== 'palette' && allowed(a, c)).map((a) => asItem(a, c)); } });
+
+// Context menu: the actions that apply to what was clicked, grouped.
+pad.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const p = local(e), id = pick(p[0], p[1]);
+  pointer = p;
+  if (id && !state.selection.has(id)) call('select.set', { ids: [id] });
+  const c = context(id ?? null), items = [];
+  let group = null;
+  for (const a of ACTIONS) {
+    if (!a.menu || !allowed(a, c)) continue;
+    if (group && a.group !== group) items.push(null);
+    group = a.group; items.push(asItem(a, c));
+  }
+  showMenu(items, e.clientX, e.clientY);
+});
+
+// Keys: the first action bound to the key whose context holds.
+const keyOf = (e) => [(e.metaKey || e.ctrlKey) && 'mod', e.shiftKey && 'shift', e.altKey && 'alt', e.key === ' ' ? 'space' : e.key.toLowerCase()].filter(Boolean).join('+');
+addEventListener('keydown', (e) => {
+  if (e.target.closest?.('input, textarea, select, .menu')) return;
+  if (e.key === ' ') { spaceKey = true; pad.dataset.pan = '1'; e.preventDefault(); return; }
+  const k = keyOf(e), c = context();
+  if (k === 'mod+c' && !(c.one && hasCode(c.one))) return; // let the browser copy
+  const a = ACTIONS.find((x) => keysOf(x).includes(k) && allowed(x, c));
+  if (a) { e.preventDefault(); a.run(c, e); }
+});
+addEventListener('keyup', (e) => { if (e.key === ' ') { spaceKey = false; delete pad.dataset.pan; } });
+
+// Paste code onto the canvas: it becomes a code container at the pointer.
+// A whole p5.js or three.js sketch runs as it is.
+addEventListener('paste', (e) => {
+  if (e.target.closest?.('input, textarea')) return;
+  const code = e.clipboardData?.getData('text/plain') ?? '';
+  if (!code.trim() || !(sketchKind(code) || /\breturn\b|\/\/\s*(in|out|param)\s*:|=>|\bfunction\b/.test(code))) return;
+  e.preventDefault();
+  const c = context(), s = spaceAt(c.p[0], c.p[1], true), u = unitsPerPx(s), a = toSpace(s, c.p[0], c.p[1]);
+  const size = sketchKind(code) ? [320, 240] : [170, 110];
+  batch(() => {
+    const id = call('shape.add', { space: s.id, role: 'code', code, rect: { cx: round(a[0]), cy: round(a[1]), w: round(size[0] * u), h: round(size[1] * u) } });
+    call('select.set', { ids: [id] });
+  });
+});
+
+// ---- the door for agents ---------------------------------------------------
+// The same registry, with the view added as commands that are not recorded.
+
+define({ name: 'view.fit', doc: 'Show everything.', record: false, run: () => fit() });
+define({ name: 'view.frame', doc: 'Show these objects; a single object is opened to its near face.', args: { ids: T.ids }, required: ['ids'], record: false, run: (a) => frameIds(a.ids, a.ids.length === 1 ? 0.82 : 0.6) });
+define({ name: 'view.zoom', doc: 'Zoom by a factor about the middle of the view.', args: { factor: T.num }, required: ['factor'], record: false, run: (a) => view.zoomAt(...centre(), a.factor) });
+define({ name: 'tool.set', doc: 'Choose the pointer tool.', args: { name: { enum: ['select', 'draw', 'rect', 'ellipse', 'code', 'target'] } }, required: ['name'], record: false, run: (a) => setTool(a.name) });
+define({ name: 'space.read', doc: 'Read the document: every object with its role, space, rectangle, ports and code.', record: false, run: () => [...state.objects.values()].map((o) => ({ id: o.id, kind: o.kind, role: o.role, space: o.space, rect: o.rect, name: blanketOf(o)?.name, ins: blanketOf(o)?.ins, outs: blanketOf(o)?.outs, params: o.params, code: hasCode(o) ? o.code : undefined, bind: o.bind, points: o.points?.length })) });
+define({ name: 'assistant.ask', doc: 'Ask the built-in assistant to build something from a sentence.', args: { text: T.str }, required: ['text'], record: false, run: (a) => ask(a.text) });
+
+window.underspace = { call, batch, tools, commands: tools, state, take, undo, redo, view, ask, actions: ACTIONS, backend: view.backend };
+// WebMCP, where the browser has it: every command is offered as a tool.
+try {
+  const mc = navigator.modelContext;
+  if (mc?.registerTool) for (const t of tools()) mc.registerTool({ name: t.name.replace('.', '_'), description: t.description, inputSchema: t.inputSchema, execute: async (args) => ({ content: [{ type: 'text', text: JSON.stringify((await call(t.name, args, 'webmcp')) ?? null) }] }) });
+} catch (e) { console.warn('webmcp:', e.message); }
+
+// ---- keep the take between visits; ?demo builds a small example ------------
+
+let saveTimer = 0;
+onChange(() => { clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { localStorage.setItem(STORE, JSON.stringify(take)); } catch {} }, 400); });
+
+function demo() {
+  const c = (name, args) => call(name, args, 'demo');
+  batch(() => {
+    c('space.clear');
+    const r = c('patch.add', { at: [0, 1.4], nodes: [{ key: 'osc', preset: 'osc' }, { key: 'scale', preset: 'scale' }, { key: 'view', role: 'target' }], links: ['osc.y -> scale.x', 'scale.y -> view.spin'] });
+    const curl = c('line.add', { points: Array.from({ length: 40 }, (_, i) => [round(-5.6 + i * 0.12), round(-2.6 + Math.sin(i * 0.4) * 0.7)]), role: 'path' });
+    const from = portPos(get(curl), 'outs', 'y'), to = portPos(get(r.ids.view), 'ins', 'tilt');
+    c('line.add', { points: Array.from({ length: 12 }, (_, i) => { const u = i / 11; return [round(from[0] + (to[0] - from[0]) * u), round(from[1] + (to[1] - from[1]) * u - Math.sin(u * Math.PI) * 0.4)]; }), tol: 0.05 });
+    for (let k = 0; k < 3; k++) c('line.add', { space: r.ids.view, points: Array.from({ length: 30 }, (_, i) => [round(Math.cos(i * 0.3 + k * 2) * (1 + i * 0.08)), round(Math.sin(i * 0.3 + k * 2) * (1 + i * 0.08)), round(k - 1)]) });
+    c('select.set', { ids: [] });
+  });
+  requestAnimationFrame(fit);
+}
+
+const query = new URLSearchParams(location.search);
+if (query.has('demo')) demo();
+else if (!query.has('new')) {
+  try { const saved = JSON.parse(localStorage.getItem(STORE)); if (saved) loadTake(saved); } catch { localStorage.removeItem(STORE); }
+}
+setTool('select');
+requestAnimationFrame(fit);

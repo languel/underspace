@@ -2,8 +2,10 @@
 
 Read `HANDOFF.md` first: it holds the design, the state of this folder and the next steps.
 
-- This folder is **spike A**, a throwaway. Do not grow it into the product.
+- `app/` is the product. The root page (`index.html`, `src/`) is **spike A** and `spike-b/` is **spike B**: throwaways, do not grow them.
 - Static site, no build: `python3 -m http.server 5310`. Tests: `npm test`.
 - three.js r187 (WebGPU renderer, TSL) is vendored in `vendor/three/`; do not swap it for a CDN.
-- Every state change must go through `call()` in `src/space.js` so it is recorded in the take.
+- Every state change must go through `call()` in `app/src/space.js` so it is recorded in the take. Every user-facing action goes in the `ACTIONS` table in `app/src/main.js` so it has a key, a menu entry and a palette entry.
+- UI is glyphs with hover tips. No explanatory text on screen.
+- Object code is plain JS. Do not invent syntax.
 - A new capability is one file. Nothing becomes shared kernel code until two things need it.

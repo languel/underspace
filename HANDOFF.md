@@ -269,6 +269,57 @@ Shortcuts taken (do not carry into the kernel as they are):
 5. Is the header-comment blanket (`// in:`, `// out:`, `// param:`) an
    acceptable way to declare ports, compared with AMS's `@param`?
 
+## 5c. The app (`app/`), started 13 Nov 2026
+
+The owner found spike B very promising and asked for the full
+implementation. `app/` is that: it began as a copy of spike B's proven
+parts and is **not** a throwaway. Open `http://127.0.0.1:5310/app/`
+(`?demo`, `?new`, `?gl` as before). `app/README.md` has the keys.
+
+What the owner asked for, and where it is:
+
+| Asked | Where |
+| --- | --- |
+| Everything reachable by gesture, shortcut, assistant and outside agent | One registry: `define()` and `call()` in `src/space.js`. One action table (`ACTIONS` in `src/main.js`) feeds the toolbar, keys, context menus and palette. `underspace.tools()` lists every command with a JSON schema; WebMCP registration is attempted when the browser has it. |
+| Context-dependent gestures | Each action has `when(ctx)`; the first action bound to a key whose context holds runs (T is the target tool, or "make this shape a target"). A drag from a port draws a connector in any tool; the corner of the selection resizes; Alt-drag in a target turns it. |
+| A line is a connector or a path; a shape is a visual, a render target or a code container | `kind` (line, shape, group) plus `role`, changed in place by `object.role`. See the header of `src/object.js`. |
+| Command palette that builds elements or whole subscenes from conversation | `src/palette.js` (⌘K or /). `src/assistant.js`: a scripted engine ("2 osc into mix into target") and a local OpenAI-compatible endpoint. Both produce the arguments of one command, `patch.add` (`src/patch.js`), which lays out and wires a subscene and is checked before it runs; a failed check goes back to the model, up to two times. |
+| Context menus, navigation and tool shortcuts | `src/menu.js`; the `nav` group of `ACTIONS`. |
+| The same vocabulary in 3D | Inside a target the draw, rectangle and ellipse tools work on its drawing plane (view, front, top, side; P cycles). The results are 3D lines. |
+| JS stays the language; paste whole p5.js or three.js sketches | `src/sketch.js`: a code container whose code is a standalone sketch runs in its own frame as its face; `inp`, `p` and `out()` connect it to its ports. Paste code on the canvas to make one. |
+| A path made by code, or drawn and then given the role; a path sends itself to an input | A path's code may return `points` (the `wave` preset) and is then drawn as those. Connectors carry numbers or paths; the `path` preset outputs `path`, the `follow` preset takes one. |
+
+Checked in a browser on WebGPU, by pointer or scripted pointer events: the
+demo; palette with the scripted engine; the endpoint engine against Ollama
+(`gemma4`, about 30 s, a valid collapsed patch with code it wrote);
+rectangle tool, context menu, role change; a pasted p5.js sketch and a
+three.js sketch running as objects with ports; `wave` and `follow`; an
+ellipse on a target's top plane; Alt-drag orbit; resize with undo and
+redo; port-drag connector. 16 unit tests.
+
+Not checked: touch (pinch and two-finger pan are written, never run),
+WebMCP (no browser here has it), WebGL, light theme, Safari and Firefox,
+the deployed copy.
+
+Known gaps and shortcuts:
+
+- p5.js is loaded from cdnjs inside sketch frames. It should be vendored
+  like three.js; that needs the owner's say (a download into the repo).
+- Sketch frames are `allow-scripts allow-same-origin`, so they are not a
+  sandbox. Without same-origin a local server cannot serve the vendored
+  three.js to them.
+- From `languel.github.io` the page cannot reach a local Ollama unless
+  `OLLAMA_ORIGINS` allows that origin. The scripted engine always works.
+- Lines inside a target can be selected and deleted, not moved. No code
+  containers inside a target.
+- No copy/paste of objects, no rename UI, no fill or colour for visuals.
+- Still from spike B: one frame of delay per connector, all ink rebuilt on
+  change, plain textarea editor, take format not yet AMS's.
+- The assistant only adds (`patch.add`). It does not yet read or edit what
+  is there, and there is no in-browser model tier.
+- No TypeScript contracts were written: the owner asked that the language
+  stay JS, and the registry's schemas are the contract for now.
+
 ## 6. Next steps
 
 In this order, unless the owner says otherwise.
@@ -278,15 +329,15 @@ In this order, unless the owner says otherwise.
    <https://languel.github.io/underspace/>. `.github/workflows/pages.yml`
    runs `npm test`, then publishes only `index.html`, `src/` and `vendor/`
    on every push to `main`. A new top-level folder or page must be added to
-   the `cp` line there or it will not be deployed (`spike-b/` is).
+   the `cp` line there or it will not be deployed (`spike-b/` and `app/` are).
 2. **Get the owner's answers on spike A** (below). They decide what the
    kernel looks like.
 3. ~~Spike B, "the object".~~ Built 13 Nov 2026 in `spike-b/` (throwaway,
    see section 5b). **Next: the owner tries it and answers the questions in
    5b.** Those and the spike A answers decide the kernel.
-4. Kernel, from what the two spikes prove: space, object, clock, commands,
-   takes (AMS format), with a handful of brush, view and object types. Write
-   the kernel contracts in TypeScript (proposed, not yet agreed).
+4. Kernel: under way as `app/` (section 5c). Still to do from this step:
+   takes in AMS format, a clock, brushes (AMS's brush and sculpt kit),
+   reading and sound from spike A, loop without restart.
 5. Timeline and clip editing over takes (bring AMS's take model and playback
    first; editing features as needed).
 6. Agent: engine layer from seloai, loop from threecoder Studio, scoped to
