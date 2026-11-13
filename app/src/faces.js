@@ -68,7 +68,7 @@ export function createFaces(layer, { onParam, onCode }) {
       if (el && !!el.code !== hasCode(o)) { el.remove(); els.delete(id); el = null; } // its role changed
       if (!el) els.set(id, el = create(o));
       el.style.cssText = `left:${p.l.toFixed(1)}px;top:${p.t.toFixed(1)}px;width:${p.w.toFixed(1)}px;height:${p.h.toFixed(1)}px`;
-      const error = run.errors.get(id), kind = plain || v.face === 'far' ? null : hasCode(o) ? sketchKind(o.code) : null;
+      const error = run.errors.get(id), kind = plain || v.face === 'far' ? null : hasCode(o) && o.role !== 'score' ? sketchKind(o.code) : null;
       el.className = `face kind-${o.kind} role-${o.role ?? 'group'} ${v.face}${sel ? ' sel' : ''}${error ? ' err' : ''}${kind ? ' is-sketch' : ''}${plain ? ' plain' : ''}${o.rect && sel && selection.size === 1 ? ' sizable' : ''}`;
       if (plain || v.face === 'far') { if (el.frame) sketch(el, v, null); continue; }
       const b = v.blanket;

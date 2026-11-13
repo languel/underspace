@@ -20,7 +20,7 @@ unit tests.
 | Kind | Roles |
 | --- | --- |
 | line | ink, connector (bound to two ports), path (code that reads or makes the line) |
-| shape | visual, code container, render target (a 3D space inside) |
+| shape | visual, code container, render target (a 3D space inside), score (plays the lines drawn in it) |
 | group | made by collapsing; its ports are the connectors that were cut |
 
 Code is plain JS. A code container holds either a function body with a
@@ -44,11 +44,13 @@ or with a shape selected, makes it a render target.
 
 | Key | Does |
 | --- | --- |
-| V D R O B T | select, draw, rectangle, ellipse, code container, render target |
-| C / T / X | selection becomes code (a line: a path) / a render target / plain |
+| V D R O B T S | select, draw, rectangle, ellipse, code container, render target, score |
+| Space (tap) | play or stop the selected scores, or all of them; hold and drag to pan |
+| C / T / S / X | selection becomes code (a line: a path) / a render target / a score / plain |
 | W | selected line becomes a connector to the nearest ports |
 | drag from a port | draw a connector, in any tool |
 | G / E | collapse into a group / expand |
+| ⌘D | duplicate |
 | Enter, Esc | go into the selection / deselect, then go up a level |
 | F or 1, ⇧F or 2, + − | fit all, frame the selection, zoom |
 | arrows | nudge the selection, or pan |
@@ -59,6 +61,13 @@ or with a shape selected, makes it a render target.
 | ⌘Z, ⇧⌘Z | undo, redo |
 | \, Tab | sidebar, hide every panel |
 | right-click | context menu |
+
+## Scores
+
+Draw a score frame (S) and draw lines in it: across is time, up is pitch.
+Its code is a brush, chosen in the sidebar; `bpm`, `beats`, `low`, `high`,
+`scale` and `grid` are its parameters. It loops without restarting, so
+lines drawn while it plays join in on the next pass.
 
 ## For agents
 

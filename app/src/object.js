@@ -10,16 +10,17 @@
 //        role 'visual'     something to look at
 //             'target'     a render target: its interior is a 3D space
 //             'code'       a code container
+//             'score'      a frame that reads the lines in it as sound; its code is a brush
 //   kind 'group'   rect, inner (its interior frame), ports (the cut wires)
 //
 // Code objects (path, code) carry `code` and `params`; the blanket is declared
 // in the code's header. Coordinates are local to the object's space (y up);
 // `space` is the id of the group or target it lives in, or null for the canvas.
 
-export const ROLES = { line: ['ink', 'connector', 'path'], shape: ['visual', 'target', 'code'] };
+export const ROLES = { line: ['ink', 'connector', 'path'], shape: ['visual', 'target', 'code', 'score'] };
 export const isLine = (o) => o.kind === 'line';
 export const isTarget = (o) => o.kind === 'shape' && o.role === 'target';
-export const hasCode = (o) => o.role === 'code' || o.role === 'path';
+export const hasCode = (o) => o.role === 'code' || o.role === 'path' || o.role === 'score';
 export const isWire = (o) => o.role === 'connector' && !!o.bind;
 
 const parsed = new Map();

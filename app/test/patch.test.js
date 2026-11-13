@@ -82,3 +82,37 @@ test('the scripted assistant turns a chain into a patch', () => {
   assert.equal(scripted('2 osc, ramp into mix').commands[0].args.nodes.length, 4);
   assert.equal(scripted('please write me a poem'), null);
 });
+
+test('a score reads the lines in its frame: across is time, up is pitch', async () => {
+  const { read } = await import('../src/score.js');
+  const rect = { cx: 0, cy: 0, w: 8, h: 4 };
+  const r = read([{ id: 'a', points: [[-4, -2], [0, 0], [4, 2]] }, { id: 'out', points: [[9, 9]] }], rect, { bpm: 120, beats: 8, low: 48, high: 72 });
+  assert.equal(r.duration, 4);
+  assert.equal(r.voices.length, 1, 'a line outside the frame is not heard');
+  assert.deepEqual(r.voices[0].events.map((e) => [e.time, e.midi]), [[0, 48], [2, 60], [4, 72]]);
+  const snapped = read([{ id: 'a', points: [[-3.7, -1.9]] }], rect, { bpm: 120, beats: 8, low: 48, high: 72, scale: 2, grid: 1 });
+  assert.equal(snapped.voices[0].events[0].time, 0);
+  assert.equal(snapped.voices[0].events[0].midi, 48, 'snapped to C major');
+});
+
+test('object.copy duplicates objects with the connectors between them', () => {
+  fresh();
+  const r = call('patch.add', { nodes: [{ key: 'a', preset: 'osc' }, { key: 'b', preset: 'scale' }], links: ['a -> b'] });
+  const made = call('object.copy', { ids: [r.ids.a, r.ids.b], dx: 1, dy: -1 });
+  assert.equal(made.length, 2);
+  assert.equal(wires().length, 2);
+  const w = wires()[1];
+  assert.deepEqual([w.bind.from.id, w.bind.to.id], made, 'the copy is wired to the copies');
+  assert.equal(state.objects.get(made[0]).rect.cx, state.objects.get(r.ids.a).rect.cx + 1);
+  undo();
+  assert.equal(state.objects.size, 3);
+});
+
+test('a role keeps its own code when a shape changes role and back', () => {
+  fresh();
+  const s = call('shape.add', { rect: { cx: 0, cy: 0, w: 4, h: 2 }, role: 'code', preset: 'osc' });
+  call('object.role', { id: s, role: 'score' });
+  assert.match(state.objects.get(s).code, /^\/\/ glissando/);
+  call('object.role', { id: s, role: 'code' });
+  assert.match(state.objects.get(s).code, /^\/\/ osc/);
+});

@@ -9,6 +9,7 @@ import { ROLES, parseBlanket, blanketOf, ptsOf, isTarget } from './object.js';
 import { bindFor, wirePoints } from './bind.js';
 import { collapse, expand } from './collapse.js';
 import { PRESETS } from './presets.js';
+import { BRUSHES } from './brushes.js';
 
 export const state = {
   objects: new Map(),   // id -> object, see object.js
@@ -77,12 +78,13 @@ define({
 
 define({
   name: 'shape.add',
-  doc: 'Add a shape. role: "visual" (something to look at), "code" (a code container; give code, or a preset name), "target" (a render target with a 3D interior).',
-  args: { space: T.space, rect: T.rect, shape: { enum: ['rect', 'ellipse'] }, role: { enum: ROLES.shape }, code: T.str, preset: { enum: Object.keys(PRESETS) } },
+  doc: 'Add a shape. role: "visual" (something to look at), "code" (a code container; give code, or a preset name), "target" (a render target with a 3D interior), "score" (a frame that plays the lines drawn in it; its code is a brush).',
+  args: { space: T.space, rect: T.rect, shape: { enum: ['rect', 'ellipse'] }, role: { enum: ROLES.shape }, code: T.str, preset: { enum: [...Object.keys(PRESETS), ...Object.keys(BRUSHES)] } },
   required: ['rect'],
   run(a) {
     const o = { id: newId(), kind: 'shape', role: a.role ?? 'visual', shape: a.shape ?? 'rect', space: a.space ?? null, rect: { ...a.rect } };
     if (o.role === 'code') { o.code = a.code ?? PRESETS[a.preset] ?? PRESETS.blank; o.params = {}; }
+    if (o.role === 'score') { o.code = a.code ?? BRUSHES[a.preset] ?? BRUSHES.glissando; o.params = {}; }
     state.objects.set(o.id, o);
     return o.id;
   },
@@ -90,7 +92,7 @@ define({
 
 define({
   name: 'object.role',
-  doc: 'Change what an object is. A line: "ink", "connector" (binds to the ports nearest its ends, within tol), "path". A shape: "visual", "target", "code".',
+  doc: 'Change what an object is. A line: "ink", "connector" (binds to the ports nearest its ends, within tol), "path". A shape: "visual", "target", "code", "score".',
   args: { id: T.id, role: { enum: [...ROLES.line, ...ROLES.shape] }, tol: T.num },
   required: ['id', 'role'],
   run(a) {
@@ -104,9 +106,11 @@ define({
       return true;
     }
     if (o.bind) unbind(o);
+    // Each role keeps its own code, so changing role and back loses nothing.
+    if (o.code != null) (o.stash ??= {})[o.role] = o.code;
     o.role = a.role;
-    if (a.role === 'path') { o.code ??= PRESETS.path; o.params ??= {}; }
-    if (a.role === 'code') { o.code ??= PRESETS.blank; o.params ??= {}; }
+    const fresh = { path: PRESETS.path, code: PRESETS.blank, score: BRUSHES.glissando }[a.role];
+    if (fresh) { o.code = o.stash?.[a.role] ?? fresh; o.params ??= {}; } else delete o.code;
     prune(o);
     return true;
   },
@@ -117,7 +121,7 @@ define({
   args: { id: T.id, code: T.str }, required: ['id', 'code'],
   run(a) {
     const o = state.objects.get(a.id);
-    if (!o || (o.role !== 'code' && o.role !== 'path')) return false;
+    if (!o || !['code', 'path', 'score'].includes(o.role)) return false;
     o.code = a.code; o.params ??= {};
     parseBlanket(o.code);
     prune(o);
@@ -145,6 +149,31 @@ define({
 define({
   name: 'object.resize', doc: 'Give a shape or group a new rectangle.', args: { id: T.id, rect: T.rect }, required: ['id', 'rect'],
   run(a) { const o = state.objects.get(a.id); if (o?.rect) o.rect = { cx: a.rect.cx, cy: a.rect.cy, w: Math.max(0.05, a.rect.w), h: Math.max(0.05, a.rect.h) }; },
+});
+
+define({
+  name: 'object.copy', doc: 'Duplicate objects, with what is inside them and the connectors between them, offset by dx, dy. Returns the new ids.',
+  args: { ids: T.ids, dx: T.num, dy: T.num }, required: ['ids'],
+  run(a) {
+    const map = new Map(), order = [];
+    const add = (id) => { if (map.has(id) || !state.objects.has(id)) return; map.set(id, null); order.push(id); for (const o of [...state.objects.values()]) if (o.space === id) add(o.id); };
+    for (const id of a.ids) if (!state.objects.get(id)?.bind) add(id);
+    for (const w of state.objects.values()) if (w.bind && !map.has(w.id) && map.has(w.bind.from.id) && map.has(w.bind.to.id)) { map.set(w.id, null); order.push(w.id); }
+    for (const id of order) map.set(id, newId());
+    const top = [];
+    for (const id of order) {
+      const c = structuredClone(state.objects.get(id));
+      c.id = map.get(id);
+      if (map.has(c.space)) c.space = map.get(c.space);
+      else if (c.rect) { c.rect.cx += a.dx ?? 0; c.rect.cy += a.dy ?? 0; top.push(c.id); }
+      else { if (!c.bind) top.push(c.id); c.off = [(c.off?.[0] ?? 0) + (a.dx ?? 0), (c.off?.[1] ?? 0) + (a.dy ?? 0)]; }
+      if (c.bind) { c.bind.from.id = map.get(c.bind.from.id); c.bind.to.id = map.get(c.bind.to.id); }
+      for (const side of ['ins', 'outs']) for (const p of c.ports?.[side] ?? []) p.inner.id = map.get(p.inner.id) ?? p.inner.id;
+      state.objects.set(c.id, c);
+    }
+    state.selection = new Set(top);
+    return top;
+  },
 });
 
 define({

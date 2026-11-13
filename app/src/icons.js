@@ -32,6 +32,9 @@ const PATHS = {
   plane: 'M2 11l5-6h7l-5 6z',
   all: 'M2 2h5v5H2z M9 9h5v5H9z M9 2h5v5H9z M2 9h5v5H2z',
   demo: 'M5 3l8 5-8 5z',
+  play: 'M5 3l8 5-8 5z',
+  score: 'M2 4h12v8H2z M4 9c2-4 3 1 5-2s2-1 3-2',
+  copy: 'M5 5h8v8H5z M3 11V3h8',
   clean: 'M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z M8 6.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3z',
 };
 

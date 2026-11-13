@@ -50,7 +50,7 @@ export function createRunner() {
     const next = new Map(), errors = new Map(), cursors = new Map(), shown = new Map();
     for (const o of objects.values()) {
       if (!hasCode(o) || o.code == null) continue;
-      if (sketchKind(o.code)) {
+      if (o.role === 'score' || sketchKind(o.code)) {
         next.set(o.id, external.get(o.id) ?? {});
         if (externalErrors.has(o.id)) errors.set(o.id, externalErrors.get(o.id));
         continue;

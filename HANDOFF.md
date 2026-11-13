@@ -289,13 +289,29 @@ What the owner asked for, and where it is:
 | JS stays the language; paste whole p5.js or three.js sketches | `src/sketch.js`: a code container whose code is a standalone sketch runs in its own frame as its face; `inp`, `p` and `out()` connect it to its ports. Paste code on the canvas to make one. |
 | A path made by code, or drawn and then given the role; a path sends itself to an input | A path's code may return `points` (the `wave` preset) and is then drawn as those. Connectors carry numbers or paths; the `path` preset outputs `path`, the `follow` preset takes one. |
 
+Added in a second pass the same day:
+
+- **Scores** (the *Pithoprakta* example): a shape with the `score` role is a
+  frame; the lines in it are read with across as time and up as pitch
+  (`src/score.js`, from spike A's reading, now relative to the frame).
+  Its code is a brush (`src/brushes.js`: glissando, pizzicato, clusters);
+  tempo, length, range, scale and grid are parameters in the brush's
+  header. `src/sound.js` schedules one pass at a time and asks for the
+  score afresh each pass, so the loop never restarts and what is drawn
+  while it plays is heard from the next pass (the owner's answer 3). Its
+  `pos` output can drive other objects. Space (a tap) plays and stops.
+- **Duplicate** (⌘D, `object.copy`), with contents and inner connectors.
+- Each role keeps its own code when an object changes role and back.
+
 Checked in a browser on WebGPU, by pointer or scripted pointer events: the
 demo; palette with the scripted engine; the endpoint engine against Ollama
 (`gemma4`, about 30 s, a valid collapsed patch with code it wrote);
 rectangle tool, context menu, role change; a pasted p5.js sketch and a
 three.js sketch running as objects with ports; `wave` and `follow`; an
 ellipse on a target's top plane; Alt-drag orbit; resize with undo and
-redo; port-drag connector. 16 unit tests.
+redo; port-drag connector; a score looping across passes with a line
+added while it played, Space to start and stop. 19 unit tests.
+Sound itself was not heard: only that scheduling runs and does not throw.
 
 Not checked: touch (pinch and two-finger pan are written, never run),
 WebMCP (no browser here has it), WebGL, light theme, Safari and Firefox,
@@ -336,8 +352,9 @@ In this order, unless the owner says otherwise.
    see section 5b). **Next: the owner tries it and answers the questions in
    5b.** Those and the spike A answers decide the kernel.
 4. Kernel: under way as `app/` (section 5c). Still to do from this step:
-   takes in AMS format, a clock, brushes (AMS's brush and sculpt kit),
-   reading and sound from spike A, loop without restart.
+   takes in AMS format, one shared clock (scores run on the audio clock,
+   code objects on the frame clock), AMS's brush and sculpt kit for ink,
+   editing a score's edits mid-pass rather than at the next pass.
 5. Timeline and clip editing over takes (bring AMS's take model and playback
    first; editing features as needed).
 6. Agent: engine layer from seloai, loop from threecoder Studio, scoped to

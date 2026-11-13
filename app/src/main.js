@@ -14,6 +14,9 @@ import { showMenu, closeMenu } from './menu.js';
 import { scripted, endpoint, listModels } from './assistant.js';
 import { sketchKind } from './sketch.js';
 import { PRESETS } from './presets.js';
+import { BRUSHES } from './brushes.js';
+import { read as readScore } from './score.js';
+import * as sound from './sound.js';
 import { icon } from './icons.js';
 
 const $ = (id) => document.getElementById(id);
@@ -25,7 +28,7 @@ const get = (id) => state.objects.get(id);
 const onParam = (id, name, value) => call('object.set', { id, name, value });
 const onCode = (id, code) => { step.restart(id); call('object.code', { id, code }); };
 const faces = createFaces($('faces'), { onParam, onCode });
-const side = createSide($('side'), { onParam, onCode, presets: PRESETS });
+const side = createSide($('side'), { onParam, onCode, presets: (o) => (o.role === 'score' ? BRUSHES : PRESETS) });
 const step = createRunner();
 const view = await createView({ canvas: $('gl'), stage, onFrame: frame });
 addEventListener('message', (e) => { if (e.data?.underspace) step.report(e.data.underspace, e.data); });
@@ -41,7 +44,7 @@ let vis = new Map();  // id -> { o, face, px, xf, blanket }
 let spaces = [];      // open spaces, outermost first: { id, kind, xf, px, plane }
 let lines = [];       // ink in canvas coordinates: { id, pts, color, width }
 let ink3d = [];       // lines inside targets: { id, scene, pts }
-let sceneList = [], dots = [];
+let sceneList = [], dots = []; // dots: [x, y] a path's cursor, [x, y, h] a score's playhead
 let lastSig = '', dragSig = '', run = null, orbit = null;
 
 function walk(space, xf) {
@@ -62,6 +65,7 @@ function walk(space, xf) {
     if (o.kind === 'shape' && o.role === 'visual') lines.push({ id: o.id, pts: outline(r, o.shape).map((p) => at(xf, p)), color: sel ? 'accent' : 'ink', width: 2.2 });
     const face = Math.max(px.w, px.h) < FAR ? 'far' : (px.w > view.size.w * 0.42 || px.h > view.size.h * 0.5) ? 'near' : 'mid';
     vis.set(o.id, { o, face, px, xf, blanket });
+    if (o.role === 'score') { const pos = sound.position(o.id); if (pos >= 0 && face !== 'far') dots.push([px.l + px.w * pos, px.t, px.h]); }
     if (o.kind === 'group' && face === 'near') {
       const i = innerXf(o), inner = { k: xf.k * i.k, ox: xf.ox + i.ox * xf.k, oy: xf.oy + i.oy * xf.k };
       spaces.push({ id: o.id, kind: 'group', xf: inner, px });
@@ -93,7 +97,28 @@ function walk(space, xf) {
   }
 }
 
+// ---- scores ----------------------------------------------------------------
+
+// What a score will play on its next pass: the lines in its frame, read now.
+function scoreOf(id) {
+  const o = get(id);
+  if (!o || o.role !== 'score') return null;
+  const b = blanketOf(o), params = {};
+  for (const q of b.params) params[q.name] = o.params?.[q.name] ?? q.value;
+  const lines = [...state.objects.values()].filter((l) => isLine(l) && !l.bind && l.space === o.space).map((l) => ({ id: l.id, points: run?.shown.get(l.id) ?? ptsOf(l) }));
+  return { ...readScore(lines, rectOf(o), params), source: o.code };
+}
+const scores = () => [...state.objects.values()].filter((o) => o.role === 'score');
+const play = (id) => sound.start(id, () => scoreOf(id), (error) => step.report(id, { error: error ?? '' }));
+// Space: stop what is playing; otherwise play the selected scores, or all of them.
+function togglePlay(c = context()) {
+  if (sound.playing().length) return sound.stopAll();
+  const chosen = c.sel.filter((o) => o.role === 'score');
+  for (const o of chosen.length ? chosen : scores()) play(o.id);
+}
+
 function frame() {
+  for (const id of sound.playing()) { if (get(id)?.role === 'score') step.report(id, { out: { pos: sound.position(id) } }); else sound.stop(id); }
   run = step(state.objects, performance.now() / 1000);
   vis = new Map(); spaces = [{ id: null, kind: 'canvas', xf: ROOT }]; lines = []; ink3d = []; sceneList = []; dots = [];
   walk(null, ROOT);
@@ -108,7 +133,11 @@ function frame() {
   faces.update(vis, { run, selection: state.selection, w: view.size.w, h: view.size.h });
   while (dotLayer.children.length < dots.length) dotLayer.append(document.createElement('i'));
   while (dotLayer.children.length > dots.length) dotLayer.lastChild.remove();
-  dots.forEach((d, i) => { dotLayer.children[i].style.transform = `translate(${d[0].toFixed(1)}px,${d[1].toFixed(1)}px)`; });
+  dots.forEach((d, i) => {
+    const el = dotLayer.children[i];
+    el.className = d[2] ? 'bar' : '';
+    el.style.cssText = `transform:translate(${d[0].toFixed(1)}px,${d[1].toFixed(1)}px)` + (d[2] ? `;height:${d[2].toFixed(1)}px` : '');
+  });
   const one = state.selection.size === 1 ? get([...state.selection][0]) : null;
   const shown = one && hasCode(one) ? one : null;
   side.update(shown, shown && blanketOf(shown), shown && run.errors.get(shown.id));
@@ -140,7 +169,8 @@ function onPath(path, x, y, tol = 7) {
   for (let j = 0; j < path.length - 1; j++) if (path[j] && path[j + 1] && segDist(x, y, path[j], path[j + 1]) < tol) return true;
   return false;
 }
-const isOpen = (v) => (v.o.kind === 'group' && v.face === 'near') || (isTarget(v.o) && v.face !== 'far');
+// Open objects show what is in them: they are picked by their edge, not their middle.
+const isOpen = (v) => (v.o.kind === 'group' && v.face === 'near') || (isTarget(v.o) && v.face !== 'far') || (v.o.role === 'score' && v.face !== 'far');
 
 function pick(x, y) {
   for (const l of ink3d) if (onPath(l.pts.map((p) => view.sceneToScreen(l.scene, p)), x, y)) return l.id;
@@ -171,9 +201,9 @@ function portAt(x, y) {
 
 let tool = 'select';
 let gesture = null; // what the pointer is doing between down and up
-let spaceKey = false, pointer = null;
+let spaceKey = false, spaceUsed = false, spaceAt0 = 0, pointer = null;
 const touches = new Map();
-const MAKE = { rect: { role: 'visual', shape: 'rect' }, ellipse: { role: 'visual', shape: 'ellipse' }, code: { role: 'code', shape: 'rect' }, target: { role: 'target', shape: 'rect' } };
+const MAKE = { rect: { role: 'visual', shape: 'rect' }, ellipse: { role: 'visual', shape: 'ellipse' }, code: { role: 'code', shape: 'rect' }, target: { role: 'target', shape: 'rect' }, score: { role: 'score', shape: 'rect' } };
 
 function setTool(name) {
   tool = name;
@@ -198,7 +228,7 @@ pad.addEventListener('pointerdown', (e) => {
     touches.set(e.pointerId, p);
     if (touches.size === 2) { cancelGesture(); gesture = { kind: 'pinch' }; return; }
   }
-  if (e.button === 1 || (e.button === 0 && spaceKey)) { gesture = { kind: 'pan', last: p }; return; }
+  if (e.button === 1 || (e.button === 0 && spaceKey)) { gesture = { kind: 'pan', last: p }; spaceUsed = true; return; }
   if (e.button !== 0) return;
 
   const here = spaceAt(p[0], p[1]), port = portAt(p[0], p[1]);
@@ -213,7 +243,7 @@ pad.addEventListener('pointerdown', (e) => {
   }
   if (tool === 'draw') startDraw(here, p);
   else if (MAKE[tool]) {
-    const flat = tool === 'code' || tool === 'target';
+    const flat = tool === 'code' || tool === 'target' || tool === 'score';
     gesture = { kind: 'rect', make: MAKE[tool], s: spaceAt(p[0], p[1], flat), start: p, end: p };
   } else {
     const id = pick(p[0], p[1]);
@@ -340,7 +370,7 @@ pad.addEventListener('pointercancel', endGesture);
 // A shape in a flat space, from a drag or (end = null) at a default size.
 function addShape(s, make, start, end, extra = {}) {
   const a = toSpace(s, start[0], start[1]), u = unitsPerPx(s);
-  const size = make.role === 'target' ? [360, 260] : make.role === 'code' ? [170, 110] : [120, 120];
+  const size = make.role === 'target' ? [360, 260] : make.role === 'score' ? [460, 240] : make.role === 'code' ? [170, 110] : [120, 120];
   let rect = { cx: a[0], cy: a[1], w: size[0] * u, h: size[1] * u };
   if (end) { const b = toSpace(s, end[0], end[1]); rect = { cx: (a[0] + b[0]) / 2, cy: (a[1] + b[1]) / 2, w: Math.abs(a[0] - b[0]), h: Math.abs(a[1] - b[1]) }; }
   for (const k in rect) rect[k] = round(rect[k]);
@@ -463,14 +493,19 @@ const ACTIONS = [
   // roles: the same key means "tool" with nothing selected and "make this one" with a selection
   { id: 'role.target', title: 'Make render target', icon: 'target', keys: 't', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'target'), run: (c) => setRole(c.shapes, 'target') },
   { id: 'tool.target', title: 'Render target', icon: 'target', keys: 't', group: 'tool', bar: true, tool: 'target' },
+  { id: 'role.score', title: 'Make score', icon: 'score', keys: 's', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'score'), run: (c) => setRole(c.shapes, 'score') },
+  { id: 'tool.score', title: 'Score', icon: 'score', keys: 's', group: 'tool', bar: true, tool: 'score' },
   { id: 'role.code', title: 'Make code container', icon: 'code', keys: 'c', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'code'), run: (c) => setRole(c.shapes, 'code') },
   { id: 'role.path', title: 'Make path', icon: 'path', keys: 'c', group: 'role', menu: true, when: (c) => c.lines.length && can(c.lines, 'path'), run: (c) => setRole(c.lines, 'path') },
   { id: 'role.connector', title: 'Make connector', icon: 'connector', keys: 'w', group: 'role', menu: true, when: (c) => c.lines.some((o) => !o.bind), run: (c) => setRole(c.lines, 'connector') },
   { id: 'role.ink', title: 'Make plain ink', icon: 'ink', keys: 'x', group: 'role', menu: true, when: (c) => c.lines.length && can(c.lines, 'ink'), run: (c) => setRole(c.lines, 'ink') },
   { id: 'role.visual', title: 'Make visual', icon: 'visual', keys: 'x', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'visual'), run: (c) => setRole(c.shapes, 'visual') },
+  // sound: a tap of Space plays or stops (holding it and dragging pans)
+  { id: 'play', title: 'Play or stop', icon: 'play', keys: 'mod+enter', group: 'play', bar: true, menu: true, when: (c) => scores().length, run: (c) => togglePlay(c) },
   // structure
   { id: 'collapse', title: 'Collapse into a group', icon: 'collapse', keys: 'g', group: 'edit', bar: true, menu: true, when: (c) => c.sel.some((o) => !o.bind), run: (c) => call('group.collapse', { ids: ids(c.sel) }) },
   { id: 'expand', title: 'Expand group', icon: 'expand', keys: ['e', 'shift+g'], group: 'edit', bar: true, menu: true, when: (c) => c.groups.length, run: (c) => batch(() => c.groups.forEach((g) => call('group.expand', { id: g.id }))) },
+  { id: 'copy', title: 'Duplicate', icon: 'copy', keys: 'mod+d', group: 'edit', menu: true, when: (c) => c.sel.some((o) => !o.bind), run: (c) => { const u = round(24 * unitsPerPx(c.here.kind === 'scene' ? spaces[0] : spaces.find((s) => s.id === c.sel[0].space) ?? spaces[0])); call('object.copy', { ids: ids(c.sel), dx: u, dy: -u }); } },
   { id: 'copycode', title: 'Copy code', icon: 'code', keys: 'mod+c', group: 'edit', menu: true, when: (c) => c.one && hasCode(c.one), run: (c) => navigator.clipboard?.writeText(c.one.code) },
   { id: 'remove', title: 'Delete', icon: 'remove', keys: ['backspace', 'delete'], group: 'edit', bar: true, menu: true, when: (c) => c.sel.length, run: (c) => call('object.remove', { ids: ids(c.sel) }) },
   // drawing plane of a target
@@ -569,13 +604,17 @@ pad.addEventListener('contextmenu', (e) => {
 const keyOf = (e) => [(e.metaKey || e.ctrlKey) && 'mod', e.shiftKey && 'shift', e.altKey && 'alt', e.key === ' ' ? 'space' : e.key.toLowerCase()].filter(Boolean).join('+');
 addEventListener('keydown', (e) => {
   if (e.target.closest?.('input, textarea, select, .menu')) return;
-  if (e.key === ' ') { spaceKey = true; pad.dataset.pan = '1'; e.preventDefault(); return; }
+  if (e.key === ' ') { if (!spaceKey) { spaceUsed = false; spaceAt0 = performance.now(); } spaceKey = true; pad.dataset.pan = '1'; e.preventDefault(); return; }
   const k = keyOf(e), c = context();
   if (k === 'mod+c' && !(c.one && hasCode(c.one))) return; // let the browser copy
   const a = ACTIONS.find((x) => keysOf(x).includes(k) && allowed(x, c));
   if (a) { e.preventDefault(); a.run(c, e); }
 });
-addEventListener('keyup', (e) => { if (e.key === ' ') { spaceKey = false; delete pad.dataset.pan; } });
+addEventListener('keyup', (e) => {
+  if (e.key !== ' ' || !spaceKey) return;
+  spaceKey = false; delete pad.dataset.pan;
+  if (!spaceUsed && performance.now() - spaceAt0 < 400 && scores().length) togglePlay(); // a tap, not a hold
+});
 
 // Paste code onto the canvas: it becomes a code container at the pointer.
 // A whole p5.js or three.js sketch runs as it is.
@@ -598,8 +637,10 @@ addEventListener('paste', (e) => {
 define({ name: 'view.fit', doc: 'Show everything.', record: false, run: () => fit() });
 define({ name: 'view.frame', doc: 'Show these objects; a single object is opened to its near face.', args: { ids: T.ids }, required: ['ids'], record: false, run: (a) => frameIds(a.ids, a.ids.length === 1 ? 0.82 : 0.6) });
 define({ name: 'view.zoom', doc: 'Zoom by a factor about the middle of the view.', args: { factor: T.num }, required: ['factor'], record: false, run: (a) => view.zoomAt(...centre(), a.factor) });
-define({ name: 'tool.set', doc: 'Choose the pointer tool.', args: { name: { enum: ['select', 'draw', 'rect', 'ellipse', 'code', 'target'] } }, required: ['name'], record: false, run: (a) => setTool(a.name) });
+define({ name: 'tool.set', doc: 'Choose the pointer tool.', args: { name: { enum: ['select', 'draw', 'rect', 'ellipse', 'code', 'target', 'score'] } }, required: ['name'], record: false, run: (a) => setTool(a.name) });
 define({ name: 'space.read', doc: 'Read the document: every object with its role, space, rectangle, ports and code.', record: false, run: () => [...state.objects.values()].map((o) => ({ id: o.id, kind: o.kind, role: o.role, space: o.space, rect: o.rect, name: blanketOf(o)?.name, ins: blanketOf(o)?.ins, outs: blanketOf(o)?.outs, params: o.params, code: hasCode(o) ? o.code : undefined, bind: o.bind, points: o.points?.length })) });
+define({ name: 'score.play', doc: 'Start a score looping. What is drawn or changed while it plays is heard from the next pass.', args: { id: T.id }, required: ['id'], record: false, run: (a) => play(a.id) });
+define({ name: 'score.stop', doc: 'Stop one score, or every score when no id is given.', args: { id: T.id }, record: false, run: (a) => (a.id ? sound.stop(a.id) : sound.stopAll()) });
 define({ name: 'assistant.ask', doc: 'Ask the built-in assistant to build something from a sentence.', args: { text: T.str }, required: ['text'], record: false, run: (a) => ask(a.text) });
 
 window.underspace = { call, batch, tools, commands: tools, state, take, undo, redo, view, ask, actions: ACTIONS, backend: view.backend };
@@ -623,6 +664,9 @@ function demo() {
     const from = portPos(get(curl), 'outs', 'y'), to = portPos(get(r.ids.view), 'ins', 'tilt');
     c('line.add', { points: Array.from({ length: 12 }, (_, i) => { const u = i / 11; return [round(from[0] + (to[0] - from[0]) * u), round(from[1] + (to[1] - from[1]) * u - Math.sin(u * Math.PI) * 0.4)]; }), tol: 0.05 });
     for (let k = 0; k < 3; k++) c('line.add', { space: r.ids.view, points: Array.from({ length: 30 }, (_, i) => [round(Math.cos(i * 0.3 + k * 2) * (1 + i * 0.08)), round(Math.sin(i * 0.3 + k * 2) * (1 + i * 0.08)), round(k - 1)]) });
+    // a score: three lines in a frame, across is time and up is pitch
+    c('shape.add', { role: 'score', rect: { cx: 0, cy: -7.2, w: 11, h: 4 } });
+    for (let k = 0; k < 3; k++) c('line.add', { points: Array.from({ length: 24 }, (_, i) => [round(-5 + k * 0.8 + i * 0.36), round(-8.6 + k * 0.9 + Math.sin(i * 0.45 + k) * 0.7 + i * 0.04)]) });
     c('select.set', { ids: [] });
   });
   requestAnimationFrame(fit);

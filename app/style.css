@@ -18,6 +18,7 @@ body { display: flex; background: var(--bg); color: var(--ink);
 #pad[data-pan] { cursor: grab; }
 #faces, #dots { pointer-events: none; }
 #pad[data-over=port] { cursor: crosshair; }
+#dots i.bar { left: 0; top: 0; width: 1.5px; border-radius: 0; }
 #dots i { position: absolute; left: -4px; top: -4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 #marquee { position: absolute; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); pointer-events: none; }
 
@@ -67,6 +68,8 @@ body.clean #peek { display: grid; }
 .face.kind-line { border: 1px dashed var(--line); }
 .face.kind-line.sel { border-color: var(--accent); }
 .face.role-target { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.face.role-score { background: none; border-color: var(--muted); }
+.face.role-score .body { display: none; } /* its interior is the drawing; the brush is in the sidebar */
 /* A visual has no face of its own; selected, it gets a frame to resize by. */
 .face.plain { border: 1px dashed var(--accent); border-radius: 0; box-shadow: none; background: none; }
 .face.plain > * { display: none; }
