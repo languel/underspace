@@ -22,7 +22,8 @@ export function createFaces(layer, { onParam, onCode }) {
     el.body = h('div', 'body'); el.params = h('div', 'params');
     el.body.append(el.params);
     if (hasCode(o)) { el.code = codeArea(onCode); el.body.append(el.code); }
-    el.append(el.head, el.ins, el.outs, el.body);
+    el.note = h('div', 'note');
+    el.append(el.head, el.ins, el.outs, el.body, el.note);
     layer.append(el);
     return el;
   }
@@ -57,7 +58,7 @@ export function createFaces(layer, { onParam, onCode }) {
   function update(vis, { run, selection, w, h: stageH }) {
     const seen = new Set();
     for (const [id, v] of vis) {
-      const o = v.o, sel = selection.has(id), plain = !v.blanket;
+      const o = v.o, sel = selection.has(id), isNote = o.role === 'note', plain = !v.blanket && !isNote;
       if (v.face === 'line' || !v.px) continue;
       if (plain && !(sel && o.rect)) continue;                 // a visual gets a frame only while selected
       if (v.face === 'far' && o.kind === 'line') continue;
@@ -71,6 +72,13 @@ export function createFaces(layer, { onParam, onCode }) {
       const error = run.errors.get(id), kind = plain || v.face === 'far' ? null : hasCode(o) && o.role !== 'score' ? sketchKind(o.code) : null;
       el.className = `face kind-${o.kind} role-${o.role ?? 'group'} ${v.face}${sel ? ' sel' : ''}${error ? ' err' : ''}${kind ? ' is-sketch' : ''}${plain ? ' plain' : ''}${o.rect && sel && selection.size === 1 ? ' sizable' : ''}`;
       if (plain || v.face === 'far') { if (el.frame) sketch(el, v, null); continue; }
+      if (isNote) {
+        if (el.note.textContent !== (o.text ?? '')) el.note.textContent = o.text ?? '';
+        el.note.style.color = o.style?.stroke ?? ''; el.style.background = o.style?.fill ?? ''; el.style.opacity = o.style?.opacity ?? '';
+        // the lettering scales with the note, as ink does not
+        el.note.style.fontSize = Math.max(6, v.px.h * 0.22).toFixed(1) + 'px';
+        continue;
+      }
       const b = v.blanket;
       el.head.textContent = error ? `${b.name} · ${error}` : b.name;
       ports(el.ins, b.ins, b.ins.join(' '));

@@ -8,7 +8,16 @@ import { wirePoints } from './bind.js';
 import { createRunner } from './run.js';
 import { createView } from './view.js';
 import { createFaces } from './faces.js';
-import { createSide } from './side.js';
+import { createPanels } from './panel.js';
+import { codePanel } from './panels/code.js';
+import { propertiesPanel } from './panels/properties.js';
+import { outlinerPanel } from './panels/outliner.js';
+import { examplesPanel } from './panels/examples.js';
+import { docsPanel } from './panels/docs.js';
+import { helpPanel } from './panels/help.js';
+import { settingsPanel } from './panels/settings.js';
+import { settings, setSetting, onSettings } from './settings.js';
+import { colorField } from './controls.js';
 import { createPalette } from './palette.js';
 import { showMenu, closeMenu } from './menu.js';
 import { scripted, endpoint, listModels } from './assistant.js';
@@ -21,14 +30,13 @@ import { icon } from './icons.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage'), pad = $('pad'), marquee = $('marquee'), dotLayer = $('dots');
-const STORE = 'underspace-take', ASSIST = 'underspace-assistant';
+const STORE = 'underspace-take';
 const round = (v) => Math.round(v * 1e4) / 1e4;
 const get = (id) => state.objects.get(id);
 
 const onParam = (id, name, value) => call('object.set', { id, name, value });
 const onCode = (id, code) => { step.restart(id); call('object.code', { id, code }); };
 const faces = createFaces($('faces'), { onParam, onCode });
-const side = createSide($('side'), { onParam, onCode, presets: (o) => (o.role === 'score' ? BRUSHES : PRESETS) });
 const step = createRunner();
 const view = await createView({ canvas: $('gl'), stage, onFrame: frame });
 addEventListener('message', (e) => { if (e.data?.underspace) step.report(e.data.underspace, e.data); });
@@ -50,19 +58,19 @@ let lastSig = '', dragSig = '', run = null, orbit = null;
 function walk(space, xf) {
   const upp = view.unitsPerPx();
   for (const o of state.objects.values()) {
-    if (o.space !== space) continue;
-    const sel = state.selection.has(o.id), blanket = blanketOf(o);
+    if (o.space !== space || o.hidden) continue;
+    const sel = state.selection.has(o.id), blanket = blanketOf(o), st = o.style ?? {};
     if (isLine(o)) {
       const made = run.shown.get(o.id);
       const pts = (isWire(o) ? wirePoints(state.objects, o) : made ?? ptsOf(o)).map((p) => at(xf, p));
-      lines.push({ id: o.id, pts, color: sel ? 'accent' : isWire(o) ? 'hot' : 'ink', width: isWire(o) ? 1.6 : 2.2 });
+      lines.push({ id: o.id, pts, color: sel ? 'accent' : st.stroke ?? (isWire(o) ? 'hot' : 'ink'), width: st.width ?? (isWire(o) ? 1.6 : 2.2), opacity: st.opacity, fill: o.closed ? st.fill : null });
       const cursor = run.cursors.get(o.id);
       if (cursor) dots.push(view.toScreen(at(xf, cursor)));
       if (!blanket) { vis.set(o.id, { o, face: 'line', xf }); continue; }
     }
     const r = rectOf(o), [l, t] = view.toScreen(at(xf, [r.cx - r.w / 2, r.cy + r.h / 2]));
     const px = { l, t, w: r.w * xf.k / upp, h: r.h * xf.k / upp };
-    if (o.kind === 'shape' && o.role === 'visual') lines.push({ id: o.id, pts: outline(r, o.shape).map((p) => at(xf, p)), color: sel ? 'accent' : 'ink', width: 2.2 });
+    if (o.kind === 'shape' && o.role === 'visual') lines.push({ id: o.id, pts: outline(r, o.shape).map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'ink', width: st.width ?? 2.2, opacity: st.opacity, fill: st.fill });
     const face = Math.max(px.w, px.h) < FAR ? 'far' : (px.w > view.size.w * 0.42 || px.h > view.size.h * 0.5) ? 'near' : 'mid';
     vis.set(o.id, { o, face, px, xf, blanket });
     if (o.role === 'score') { const pos = sound.position(o.id); if (pos >= 0 && face !== 'far') dots.push([px.l + px.w * pos, px.t, px.h]); }
@@ -80,10 +88,10 @@ function walk(space, xf) {
       spaces.push({ id: o.id, kind: 'scene', px, plane: o.plane ?? 'view' });
       const marks = [];
       for (const m of state.objects.values()) {
-        if (m.space !== o.id || !m.points) continue;
+        if (m.space !== o.id || !m.points || m.hidden) continue;
         const pts = ptsOf(m);
         if (m.closed) pts.push(pts[0]);
-        marks.push({ pts, color: state.selection.has(m.id) ? 'accent' : 'ink' });
+        marks.push({ pts, color: state.selection.has(m.id) ? 'accent' : m.style?.stroke ?? 'ink' });
         ink3d.push({ id: m.id, scene: o.id, pts });
         vis.set(m.id, { o: m, face: 'line', scene: o.id });
       }
@@ -138,9 +146,17 @@ function frame() {
     el.className = d[2] ? 'bar' : '';
     el.style.cssText = `transform:translate(${d[0].toFixed(1)}px,${d[1].toFixed(1)}px)` + (d[2] ? `;height:${d[2].toFixed(1)}px` : '');
   });
-  const one = state.selection.size === 1 ? get([...state.selection][0]) : null;
-  const shown = one && hasCode(one) ? one : null;
-  side.update(shown, shown && blanketOf(shown), shown && run.errors.get(shown.id));
+  panels.update();
+  zoomLabel.textContent = Math.round(view.cam.zoom * 100) + '%';
+  // The grid is the stage's own background, moved and scaled with the view.
+  if (settings.grid) {
+    let cell = settings.gridSize / view.unitsPerPx();
+    while (cell < 14) cell *= 5;
+    const o = view.toScreen([0, 0]);
+    stage.style.setProperty('--g', cell.toFixed(2) + 'px');
+    stage.style.setProperty('--gx', (o[0] % cell).toFixed(2) + 'px');
+    stage.style.setProperty('--gy', (o[1] % cell).toFixed(2) + 'px');
+  }
 }
 
 // ---- pointer geometry ------------------------------------------------------
@@ -173,10 +189,11 @@ function onPath(path, x, y, tol = 7) {
 const isOpen = (v) => (v.o.kind === 'group' && v.face === 'near') || (isTarget(v.o) && v.face !== 'far') || (v.o.role === 'score' && v.face !== 'far');
 
 function pick(x, y) {
-  for (const l of ink3d) if (onPath(l.pts.map((p) => view.sceneToScreen(l.scene, p)), x, y)) return l.id;
-  for (let i = lines.length - 1; i >= 0; i--) if (lines[i].id && onPath(lines[i].pts.map(view.toScreen), x, y)) return lines[i].id; // ink first: it is thin
+  const free = (id) => !get(id)?.locked;
+  for (const l of ink3d) if (free(l.id) && onPath(l.pts.map((p) => view.sceneToScreen(l.scene, p)), x, y)) return l.id;
+  for (let i = lines.length - 1; i >= 0; i--) if (lines[i].id && free(lines[i].id) && onPath(lines[i].pts.map(view.toScreen), x, y)) return lines[i].id; // ink first: it is thin
   for (const v of [...vis.values()].reverse()) {
-    if (!v.px || !inside(v.px, x, y)) continue;
+    if (!v.px || v.o.locked || !inside(v.px, x, y)) continue;
     // An open group or target is picked by its top strip or its edge.
     const p = v.px;
     if (isOpen(v) && !(y - p.t < 20 || x - p.l < 8 || p.l + p.w - x < 8 || p.t + p.h - y < 8)) continue;
@@ -203,7 +220,10 @@ let tool = 'select';
 let gesture = null; // what the pointer is doing between down and up
 let spaceKey = false, spaceUsed = false, spaceAt0 = 0, pointer = null;
 const touches = new Map();
-const MAKE = { rect: { role: 'visual', shape: 'rect' }, ellipse: { role: 'visual', shape: 'ellipse' }, code: { role: 'code', shape: 'rect' }, target: { role: 'target', shape: 'rect' }, score: { role: 'score', shape: 'rect' } };
+const MAKE = { rect: { role: 'visual', shape: 'rect' }, ellipse: { role: 'visual', shape: 'ellipse' }, code: { role: 'code', shape: 'rect' }, target: { role: 'target', shape: 'rect' }, score: { role: 'score', shape: 'rect' }, note: { role: 'note', shape: 'rect' } };
+// The look new lines and shapes take, from the toolbar swatches.
+const newStyle = (fillable) => { const st = {}; if (settings.stroke) st.stroke = settings.stroke; if (fillable && settings.fill) st.fill = settings.fill; if (settings.width !== 2.2) st.width = settings.width; return Object.keys(st).length ? { style: st } : {}; };
+const snap = (v) => (settings.snap ? Math.round(v / settings.gridSize) * settings.gridSize : v);
 
 function setTool(name) {
   tool = name;
@@ -228,7 +248,7 @@ pad.addEventListener('pointerdown', (e) => {
     touches.set(e.pointerId, p);
     if (touches.size === 2) { cancelGesture(); gesture = { kind: 'pinch' }; return; }
   }
-  if (e.button === 1 || (e.button === 0 && spaceKey)) { gesture = { kind: 'pan', last: p }; spaceUsed = true; return; }
+  if (e.button === 1 || (e.button === 0 && (spaceKey || tool === 'pan'))) { gesture = { kind: 'pan', last: p }; spaceUsed = true; return; }
   if (e.button !== 0) return;
 
   const here = spaceAt(p[0], p[1]), port = portAt(p[0], p[1]);
@@ -242,8 +262,9 @@ pad.addEventListener('pointerdown', (e) => {
     gesture = { kind: 'resize', id: one.o.id, k: one.xf.k, rect: { ...one.o.rect }, start: p, next: null }; return;
   }
   if (tool === 'draw') startDraw(here, p);
+  else if (tool === 'line') { const q = toSpace(here, p[0], p[1]); if (q) gesture = { kind: 'line', s: here, a: q, b: q, start: p }; }
   else if (MAKE[tool]) {
-    const flat = tool === 'code' || tool === 'target' || tool === 'score';
+    const flat = tool !== 'rect' && tool !== 'ellipse';
     gesture = { kind: 'rect', make: MAKE[tool], s: spaceAt(p[0], p[1], flat), start: p, end: p };
   } else {
     const id = pick(p[0], p[1]);
@@ -286,9 +307,17 @@ pad.addEventListener('pointermove', (e) => {
     g.pts.push(q); g.last = p;
     if (g.s.kind === 'scene') view.setPreview(g.pts, g.s.id);
     else view.setPreview(g.pts.map((pt) => at(g.s.xf, pt)), null, g.wire ? 'hot' : 'accent');
+  } else if (g.kind === 'line') {
+    // Shift holds a straight line to steps of 15 degrees.
+    let q = p;
+    if (e.shiftKey) { const dx = p[0] - g.start[0], dy = p[1] - g.start[1], a = Math.round(Math.atan2(dy, dx) / (Math.PI / 12)) * (Math.PI / 12), d = Math.hypot(dx, dy); q = [g.start[0] + Math.cos(a) * d, g.start[1] + Math.sin(a) * d]; }
+    const b = toSpace(g.s, q[0], q[1]);
+    if (!b) return;
+    g.b = b;
+    if (g.s.kind === 'scene') view.setPreview([g.a, g.b], g.s.id); else view.setPreview([g.a, g.b].map((pt) => at(g.s.xf, pt)));
   } else if (g.kind === 'move') {
     const u = view.unitsPerPx() / g.k;
-    g.dx = (p[0] - g.start[0]) * u; g.dy = -(p[1] - g.start[1]) * u;
+    g.dx = snap((p[0] - g.start[0]) * u); g.dy = snap(-(p[1] - g.start[1]) * u);
     if (!g.moved && Math.hypot(p[0] - g.start[0], p[1] - g.start[1]) < 3) return;
     g.moved = true;
     setDrag({ ids: new Set(g.ids), dx: g.dx, dy: g.dy });
@@ -330,7 +359,11 @@ function endGesture(e) {
     view.setPreview(null);
     // A line begun on a port reaches further for the port at its other end.
     const tol = g.s.kind === 'scene' ? 0 : (g.wire ? 26 : 14) * unitsPerPx(g.s);
-    if (g.pts.length > 1 || !g.wire) call('line.add', { space: g.s.id, points: g.pts.map((q) => q.map(round)), tol: round(tol) });
+    if (g.pts.length > 1 || !g.wire) call('line.add', { space: g.s.id, points: g.pts.map((q) => q.map(round)), tol: round(tol), ...(g.wire ? {} : newStyle(false)) });
+  } else if (g.kind === 'line') {
+    view.setPreview(null);
+    const flat = g.s.kind !== 'scene', pts = [g.a, g.b].map((q) => q.map((v, i) => round(flat && i < 2 ? snap(v) : v)));
+    if (Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1], (pts[0][2] ?? 0) - (pts[1][2] ?? 0)) > 1e-3) call('line.add', { space: g.s.id, points: pts, tol: flat ? round(14 * unitsPerPx(g.s)) : 0, ...newStyle(false) });
   } else if (g.kind === 'move') {
     setDrag(null); dragSig = '';
     if (g.moved) call('object.move', { ids: g.ids, dx: round(g.dx), dy: round(g.dy) });
@@ -343,7 +376,7 @@ function endGesture(e) {
   } else if (g.kind === 'rect') {
     const tiny = Math.hypot(g.end[0] - g.start[0], g.end[1] - g.start[1]) < 8;
     if (g.s.kind === 'scene') { if (!tiny) batch(() => shapeIn3d(g)); }
-    else addShape(g.s, g.make, g.start, tiny ? null : g.end);
+    else { addShape(g.s, g.make, g.start, tiny ? null : g.end); if (g.make.role === 'note') panels.show('properties'); }
     setTool('select');
   } else if (g.kind === 'marquee') {
     const [x0, x1] = [Math.min(g.start[0], g.end[0]), Math.max(g.start[0], g.end[0])];
@@ -355,7 +388,7 @@ function endGesture(e) {
       else {
         const ink = new Map(lines.filter((l) => l.id).map((l) => [l.id, l.pts]));
         for (const [id, v] of vis) {
-          if (v.o.space !== g.s.id) continue;
+          if (v.o.space !== g.s.id || v.o.locked) continue;
           const hitBox = v.px && v.px.l < x1 && v.px.l + v.px.w > x0 && v.px.t < y1 && v.px.t + v.px.h > y0;
           if (ink.get(id)?.some((pt) => within(view.toScreen(pt))) || hitBox) ids.push(id);
         }
@@ -370,12 +403,13 @@ pad.addEventListener('pointercancel', endGesture);
 // A shape in a flat space, from a drag or (end = null) at a default size.
 function addShape(s, make, start, end, extra = {}) {
   const a = toSpace(s, start[0], start[1]), u = unitsPerPx(s);
-  const size = make.role === 'target' ? [360, 260] : make.role === 'score' ? [460, 240] : make.role === 'code' ? [170, 110] : [120, 120];
+  const size = make.role === 'target' ? [360, 260] : make.role === 'score' ? [460, 240] : make.role === 'code' ? [170, 110] : make.role === 'note' ? [180, 70] : [120, 120];
   let rect = { cx: a[0], cy: a[1], w: size[0] * u, h: size[1] * u };
   if (end) { const b = toSpace(s, end[0], end[1]); rect = { cx: (a[0] + b[0]) / 2, cy: (a[1] + b[1]) / 2, w: Math.abs(a[0] - b[0]), h: Math.abs(a[1] - b[1]) }; }
+  if (settings.snap && end) { const x0 = snap(rect.cx - rect.w / 2), x1 = snap(rect.cx + rect.w / 2), y0 = snap(rect.cy - rect.h / 2), y1 = snap(rect.cy + rect.h / 2); rect = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(settings.gridSize, x1 - x0), h: Math.max(settings.gridSize, y1 - y0) }; }
   for (const k in rect) rect[k] = round(rect[k]);
   return batch(() => {
-    const id = call('shape.add', { space: s.id, rect, shape: make.shape, role: make.role, ...(make.role === 'code' ? { preset: 'osc' } : {}), ...extra });
+    const id = call('shape.add', { space: s.id, rect, shape: make.shape, role: make.role, ...(make.role === 'code' ? { preset: 'osc' } : {}), ...(make.role === 'visual' ? newStyle(true) : {}), ...extra });
     call('select.set', { ids: [id] });
     return id;
   });
@@ -424,26 +458,29 @@ pad.addEventListener('dblclick', (e) => {
 
 // ---- the assistant ---------------------------------------------------------
 
-const assist = { base: 'http://127.0.0.1:11434', model: '', ...JSON.parse(localStorage.getItem(ASSIST) || '{}') };
-const saveAssist = () => localStorage.setItem(ASSIST, JSON.stringify(assist));
 
-// Text to objects: the scripted engine first, a local model when it has no answer.
-async function ask(text) {
-  let plan = scripted(text), by = 'assistant';
-  if (!plan) {
-    if (!assist.base) throw new Error('no model endpoint set');
-    if (!assist.model) { assist.model = (await listModels(assist.base))[0]; saveAssist(); }
-    plan = await endpoint(text, assist); by = assist.model;
-  }
-  // New work goes in the space in the middle of the view, below what is there.
-  const s = spaceAt(...centre(), true);
-  let where = back(s.xf, view.toWorld(...centre())), low = Infinity, x0 = Infinity, x1 = -Infinity;
+// A free place in a space: below everything in it, or the middle of the view.
+function below(s) {
+  let low = Infinity, x0 = Infinity, x1 = -Infinity;
   for (const o of state.objects.values()) {
     if (o.space !== s.id || o.bind) continue;
     const r = rectOf(o);
     low = Math.min(low, r.cy - r.h / 2); x0 = Math.min(x0, r.cx - r.w / 2); x1 = Math.max(x1, r.cx + r.w / 2);
   }
-  if (low !== Infinity) where = [(x0 + x1) / 2, low - 3.2];
+  return low === Infinity ? back(s.xf ?? ROOT, view.toWorld(...centre())) : [(x0 + x1) / 2, low - 3.2];
+}
+
+// Text to objects: the scripted engine first, a local model when it has no answer.
+async function ask(text) {
+  let plan = scripted(text), by = 'assistant';
+  if (!plan) {
+    if (!settings.assistBase) throw new Error('no model endpoint set');
+    if (!settings.assistModel) setSetting('assistModel', (await listModels(settings.assistBase))[0]);
+    plan = await endpoint(text, { base: settings.assistBase, model: settings.assistModel }); by = settings.assistModel;
+  }
+  // New work goes in the space in the middle of the view, below what is there.
+  const s = spaceAt(...centre(), true);
+  const where = below(s);
   const made = [];
   batch(() => {
     for (const cmd of plan.commands) {
@@ -459,7 +496,17 @@ async function ask(text) {
 }
 
 // ---- actions: one table for toolbar, keys, menus and the palette -----------
-// { id, title, icon, keys, group, bar, menu, when(ctx), run(ctx) }
+// { id, title, icon, keys, group, bar: 'tools' | 'edit', menu, when(ctx), run(ctx) }
+
+const PANELS = [
+  { id: 'code', title: 'Code', icon: 'code', keys: 'mod+;', make: codePanel },
+  { id: 'properties', title: 'Properties', icon: 'props', keys: 'alt+;', make: propertiesPanel },
+  { id: 'outliner', title: 'Outliner', icon: 'tree', make: outlinerPanel },
+  { id: 'examples', title: 'Examples', icon: 'examples', make: examplesPanel },
+  { id: 'docs', title: 'Docs', icon: 'book', make: docsPanel },
+  { id: 'help', title: 'Shortcuts', icon: 'help', keys: 'shift+?', make: helpPanel },
+  { id: 'settings', title: 'Settings', icon: 'gear', keys: 'mod+,', make: settingsPanel },
+];
 
 function context(hitId) {
   const sel = [...state.selection].map(get).filter(Boolean), p = pointer ?? centre();
@@ -485,29 +532,37 @@ const can = (list, role) => list.some((o) => o.role !== role);
 
 const ACTIONS = [
   // tools
-  { id: 'tool.select', title: 'Select', icon: 'select', keys: 'v', group: 'tool', bar: true, tool: 'select' },
-  { id: 'tool.draw', title: 'Draw', icon: 'draw', keys: 'd', group: 'tool', bar: true, tool: 'draw' },
-  { id: 'tool.rect', title: 'Rectangle', icon: 'rect', keys: 'r', group: 'tool', bar: true, tool: 'rect' },
-  { id: 'tool.ellipse', title: 'Ellipse', icon: 'ellipse', keys: 'o', group: 'tool', bar: true, tool: 'ellipse' },
-  { id: 'tool.code', title: 'Code container', icon: 'box', keys: 'b', group: 'tool', bar: true, tool: 'code' },
+  { id: 'tool.select', title: 'Select', icon: 'select', keys: 'v', group: 'tool', bar: 'tools', tool: 'select' },
+  { id: 'tool.pan', title: 'Pan', icon: 'pan', keys: 'h', group: 'tool', bar: 'tools', tool: 'pan' },
+  { id: 'tool.draw', title: 'Draw', icon: 'draw', keys: 'd', group: 'tool', bar: 'tools', tool: 'draw' },
+  { id: 'tool.line', title: 'Straight line', icon: 'line', keys: 'l', group: 'tool', bar: 'tools', tool: 'line' },
+  { id: 'tool.rect', title: 'Rectangle', icon: 'rect', keys: 'r', group: 'tool', bar: 'tools', tool: 'rect' },
+  { id: 'tool.ellipse', title: 'Ellipse', icon: 'ellipse', keys: 'o', group: 'tool', bar: 'tools', tool: 'ellipse' },
+  { id: 'tool.note', title: 'Note', icon: 'note', keys: 'n', group: 'tool', bar: 'tools', tool: 'note' },
+  { id: 'tool.code', title: 'Code container', icon: 'box', keys: 'b', group: 'tool2', bar: 'tools', tool: 'code' },
   // roles: the same key means "tool" with nothing selected and "make this one" with a selection
   { id: 'role.target', title: 'Make render target', icon: 'target', keys: 't', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'target'), run: (c) => setRole(c.shapes, 'target') },
-  { id: 'tool.target', title: 'Render target', icon: 'target', keys: 't', group: 'tool', bar: true, tool: 'target' },
+  { id: 'tool.target', title: 'Render target', icon: 'target', keys: 't', group: 'tool2', bar: 'tools', tool: 'target' },
   { id: 'role.score', title: 'Make score', icon: 'score', keys: 's', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'score'), run: (c) => setRole(c.shapes, 'score') },
-  { id: 'tool.score', title: 'Score', icon: 'score', keys: 's', group: 'tool', bar: true, tool: 'score' },
+  { id: 'tool.score', title: 'Score', icon: 'score', keys: 's', group: 'tool2', bar: 'tools', tool: 'score' },
   { id: 'role.code', title: 'Make code container', icon: 'code', keys: 'c', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'code'), run: (c) => setRole(c.shapes, 'code') },
   { id: 'role.path', title: 'Make path', icon: 'path', keys: 'c', group: 'role', menu: true, when: (c) => c.lines.length && can(c.lines, 'path'), run: (c) => setRole(c.lines, 'path') },
   { id: 'role.connector', title: 'Make connector', icon: 'connector', keys: 'w', group: 'role', menu: true, when: (c) => c.lines.some((o) => !o.bind), run: (c) => setRole(c.lines, 'connector') },
   { id: 'role.ink', title: 'Make plain ink', icon: 'ink', keys: 'x', group: 'role', menu: true, when: (c) => c.lines.length && can(c.lines, 'ink'), run: (c) => setRole(c.lines, 'ink') },
   { id: 'role.visual', title: 'Make visual', icon: 'visual', keys: 'x', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'visual'), run: (c) => setRole(c.shapes, 'visual') },
   // sound: a tap of Space plays or stops (holding it and dragging pans)
-  { id: 'play', title: 'Play or stop', icon: 'play', keys: 'mod+enter', group: 'play', bar: true, menu: true, when: (c) => scores().length, run: (c) => togglePlay(c) },
+  { id: 'play', title: 'Play or stop', icon: 'play', keys: 'mod+enter', group: 'play', bar: 'edit', menu: true, when: (c) => scores().length, run: (c) => togglePlay(c) },
   // structure
-  { id: 'collapse', title: 'Collapse into a group', icon: 'collapse', keys: 'g', group: 'edit', bar: true, menu: true, when: (c) => c.sel.some((o) => !o.bind), run: (c) => call('group.collapse', { ids: ids(c.sel) }) },
-  { id: 'expand', title: 'Expand group', icon: 'expand', keys: ['e', 'shift+g'], group: 'edit', bar: true, menu: true, when: (c) => c.groups.length, run: (c) => batch(() => c.groups.forEach((g) => call('group.expand', { id: g.id }))) },
+  { id: 'collapse', title: 'Collapse into a group', icon: 'collapse', keys: 'g', group: 'edit', menu: true, when: (c) => c.sel.some((o) => !o.bind), run: (c) => call('group.collapse', { ids: ids(c.sel) }) },
+  { id: 'expand', title: 'Expand group', icon: 'expand', keys: ['e', 'shift+g'], group: 'edit', menu: true, when: (c) => c.groups.length, run: (c) => batch(() => c.groups.forEach((g) => call('group.expand', { id: g.id }))) },
   { id: 'copy', title: 'Duplicate', icon: 'copy', keys: 'mod+d', group: 'edit', menu: true, when: (c) => c.sel.some((o) => !o.bind), run: (c) => { const u = round(24 * unitsPerPx(c.here.kind === 'scene' ? spaces[0] : spaces.find((s) => s.id === c.sel[0].space) ?? spaces[0])); call('object.copy', { ids: ids(c.sel), dx: u, dy: -u }); } },
   { id: 'copycode', title: 'Copy code', icon: 'code', keys: 'mod+c', group: 'edit', menu: true, when: (c) => c.one && hasCode(c.one), run: (c) => navigator.clipboard?.writeText(c.one.code) },
-  { id: 'remove', title: 'Delete', icon: 'remove', keys: ['backspace', 'delete'], group: 'edit', bar: true, menu: true, when: (c) => c.sel.length, run: (c) => call('object.remove', { ids: ids(c.sel) }) },
+  { id: 'front', title: 'Bring to front', icon: 'front', keys: 'mod+]', group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'front' }) },
+  { id: 'back', title: 'Send to back', icon: 'back', keys: 'mod+[', group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'back' }) },
+  { id: 'hide', title: 'Hide', icon: 'hide', keys: 'shift+h', group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.flag', { ids: ids(c.sel), hidden: true }) },
+  { id: 'lock', title: 'Lock', icon: 'lock', keys: 'shift+l', group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.flag', { ids: ids(c.sel), locked: true }) },
+  { id: 'showall', title: 'Show and unlock everything', icon: 'clean', group: 'edit', when: () => [...state.objects.values()].some((o) => o.hidden || o.locked), run: () => call('object.flag', { ids: [...state.objects.values()].filter((o) => o.hidden || o.locked).map((o) => o.id), hidden: false, locked: false }) },
+  { id: 'remove', title: 'Delete', icon: 'remove', keys: ['backspace', 'delete'], group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.remove', { ids: ids(c.sel) }) },
   // drawing plane of a target
   ...['view', 'front', 'top', 'side'].map((plane) => ({
     id: 'plane.' + plane, title: `Draw on the ${plane} plane`, icon: 'plane', group: 'plane', menu: true,
@@ -518,6 +573,8 @@ const ACTIONS = [
   { id: 'add.code', title: 'Add code container', icon: 'box', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => addHere(c, MAKE.code) },
   { id: 'add.target', title: 'Add render target', icon: 'target', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => addHere(c, MAKE.target) },
   { id: 'add.rect', title: 'Add rectangle', icon: 'rect', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => addHere(c, MAKE.rect) },
+  { id: 'add.score', title: 'Add score', icon: 'score', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => addHere(c, MAKE.score) },
+  { id: 'add.note', title: 'Add note', icon: 'note', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => { addHere(c, MAKE.note); panels.show('properties'); } },
   { id: 'add.ellipse', title: 'Add ellipse', icon: 'ellipse', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => addHere(c, MAKE.ellipse) },
   ...Object.keys(PRESETS).filter((k) => !['path', 'wave', 'blank'].includes(k)).map((k) => ({ id: 'add.' + k, title: 'Add ' + k, icon: 'box', group: 'add', when: (c) => !c.hit, run: (c) => addHere(c, MAKE.code, { preset: k }) })),
   ...['path', 'wave'].map((k) => ({ id: 'code.' + k, title: `Path code: ${k}`, icon: 'path', group: 'role', menu: true, when: (c) => c.lines.length && !c.lines.some((o) => o.bind), run: (c) => batch(() => c.lines.forEach((o) => { call('object.role', { id: o.id, role: 'path' }); call('object.code', { id: o.id, code: PRESETS[k] }); })) })),
@@ -526,7 +583,8 @@ const ACTIONS = [
   { id: 'deselect', title: 'Deselect', keys: 'escape', group: 'nav', when: (c) => c.sel.length, run: () => call('select.set', { ids: [] }) },
   { id: 'up', title: 'Go up a level', icon: 'up', keys: 'escape', group: 'nav', run: goUp },
   { id: 'frame', title: 'Frame the selection', icon: 'frame', keys: ['shift+f', '2'], group: 'nav', menu: true, when: (c) => c.sel.length, run: (c) => frameIds(ids(c.sel), 0.6) },
-  { id: 'fit', title: 'Fit everything', icon: 'fit', keys: ['f', '1'], group: 'nav', bar: true, menu: true, when: (c) => !c.hit, run: fit },
+  { id: 'fit', title: 'Fit everything', icon: 'fit', keys: ['f', '1'], group: 'nav', menu: true, when: (c) => !c.hit, run: fit },
+  { id: 'zoom100', title: 'Zoom to 100%', icon: 'frame', keys: '0', group: 'nav', run: () => { view.zoomAt(...centre(), 1 / view.cam.zoom); } },
   { id: 'zoomin', title: 'Zoom in', icon: 'zoomin', keys: ['=', 'shift++'], group: 'nav', run: () => view.zoomAt(...(pointer ?? centre()), 1.3) },
   { id: 'zoomout', title: 'Zoom out', icon: 'zoomout', keys: '-', group: 'nav', run: () => view.zoomAt(...(pointer ?? centre()), 1 / 1.3) },
   { id: 'left', title: 'Left', keys: ['arrowleft', 'shift+arrowleft'], group: 'nav', hidden: true, run: (c, e) => nudge(c, -1, 0, e) },
@@ -537,18 +595,19 @@ const ACTIONS = [
   { id: 'prev', title: 'Select previous', keys: '[', group: 'nav', run: () => cycle(-1) },
   { id: 'all', title: 'Select all here', icon: 'all', keys: 'mod+a', group: 'nav', menu: true, when: (c) => !c.hit, run: (c) => call('select.set', { ids: [...state.objects.values()].filter((o) => o.space === c.here.id).map((o) => o.id) }) },
   // history and file
-  { id: 'undo', title: 'Undo', icon: 'undo', keys: 'mod+z', group: 'file', bar: true, run: undo },
-  { id: 'redo', title: 'Redo', icon: 'redo', keys: ['mod+shift+z', 'mod+y'], group: 'file', bar: true, run: redo },
+  { id: 'undo', title: 'Undo', icon: 'undo', keys: 'mod+z', group: 'history', bar: 'edit', run: undo },
+  { id: 'redo', title: 'Redo', icon: 'redo', keys: ['mod+shift+z', 'mod+y'], group: 'history', bar: 'edit', run: redo },
   { id: 'save', title: 'Save take', icon: 'save', keys: 'mod+s', group: 'file', run: saveTake },
   { id: 'open', title: 'Open take', icon: 'open', keys: 'mod+o', group: 'file', run: () => $('file').click() },
   { id: 'clear', title: 'Clear everything', icon: 'clear', group: 'file', run: () => call('space.clear') },
   { id: 'demo', title: 'Build the demo', icon: 'demo', group: 'file', run: demo },
   // panels and the assistant
-  { id: 'palette', title: 'Command palette', icon: 'palette', keys: ['mod+k', '/'], group: 'panel', bar: true, menu: true, when: (c) => !c.hit, run: () => palette.toggle() },
-  { id: 'side', title: 'Code sidebar', icon: 'side', keys: '\\', group: 'panel', bar: true, run: () => document.body.classList.toggle('noside') },
-  { id: 'clean', title: 'Hide panels', icon: 'clean', keys: 'tab', group: 'panel', bar: true, run: () => document.body.classList.toggle('clean') },
-  { id: 'assist.base', title: 'Assistant: model endpoint', icon: 'ask', group: 'panel', run: () => palette.prompt('http://127.0.0.1:11434', assist.base, (v) => { assist.base = v; assist.model = ''; saveAssist(); }) },
-  { id: 'assist.model', title: 'Assistant: model name', icon: 'ask', group: 'panel', run: () => palette.prompt('model', assist.model, (v) => { assist.model = v; saveAssist(); }) },
+  { id: 'palette', title: 'Command palette', icon: 'palette', keys: ['mod+k', '/'], group: 'panel', bar: 'edit', menu: true, when: (c) => !c.hit, run: () => palette.toggle() },
+  { id: 'side', title: 'Side panel', icon: 'side', keys: '\\', group: 'panel', run: () => panels.toggle() },
+  ...PANELS.map((d) => ({ id: 'panel.' + d.id, title: d.title, icon: d.icon, keys: d.keys, group: 'panel', run: () => panels.show(d.id) })),
+  { id: 'grid', title: 'Grid', icon: 'grid', keys: "mod+'", group: 'panel', run: () => setSetting('grid', !settings.grid) },
+  { id: 'snap', title: 'Snap to the grid', icon: 'grid', keys: "mod+shift+'", group: 'panel', run: () => setSetting('snap', !settings.snap) },
+  { id: 'clean', title: 'Hide the interface', icon: 'clean', keys: ['tab', 'alt+z', 'mod+.'], group: 'panel', run: () => document.body.classList.toggle('clean') },
 ];
 for (const a of ACTIONS) if (a.tool) a.run = () => setTool(a.tool);
 
@@ -568,19 +627,96 @@ $('file').addEventListener('change', async (e) => {
   if (f) try { loadTake(JSON.parse(await f.text())); fit(); } catch (err) { console.warn(err.message); }
 });
 
-// Toolbar: the actions marked `bar`, in table order, with a gap between groups.
-let lastGroup = null;
-for (const a of ACTIONS.filter((x) => x.bar)) {
-  if (lastGroup && a.group !== lastGroup) $('tools').append(document.createElement('hr'));
-  lastGroup = a.group;
-  const b = document.createElement('button'), key = showKey(a);
-  b.title = key ? `${a.title} (${key})` : a.title; b.setAttribute('aria-label', a.title); b.innerHTML = icon(a.icon);
-  if (a.tool) b.dataset.tool = a.tool;
-  b.onclick = () => { const c = context(); if (allowed(a, c)) a.run(c); };
-  $('tools').append(b);
+// Islands: the tools in the middle, file and history at the left, the panel
+// tabs at the right, zoom at the bottom. Each button is an action.
+function island(el, name) {
+  let lastGroup = null;
+  for (const a of ACTIONS.filter((x) => x.bar === name)) {
+    if (lastGroup && a.group !== lastGroup) el.append(document.createElement('hr'));
+    lastGroup = a.group;
+    const b = document.createElement('button'), key = showKey(a);
+    b.title = key ? `${a.title} (${key})` : a.title; b.setAttribute('aria-label', a.title); b.innerHTML = icon(a.icon);
+    if (a.tool) b.dataset.tool = a.tool;
+    b.onclick = () => { const c = context(); if (allowed(a, c)) a.run(c); };
+    el.append(b);
+  }
 }
+const runAction = (id, c = context()) => { const a = ACTIONS.find((x) => x.id === id); if (a && allowed(a, c)) a.run(c); };
+const glyph = (name, title, onClick) => { const b = document.createElement('button'); b.title = title; b.setAttribute('aria-label', title); b.innerHTML = icon(name); b.onclick = onClick; return b; };
+
+// File menu: everything in the file group, then the panels that explain.
+$('edit').append(glyph('menu', 'Menu', (e) => {
+  const c = context(), r = e.currentTarget.getBoundingClientRect();
+  const pickIds = ['save', 'open', 'demo', 'clear', null, 'showall', 'grid', 'snap', null, 'panel.examples', 'panel.docs', 'panel.help', 'panel.settings'];
+  showMenu(pickIds.map((id) => { const a = id && ACTIONS.find((x) => x.id === id); return a && allowed(a, c) ? asItem(a, c) : null; }), r.left, r.bottom + 6);
+}), document.createElement('hr'));
+island($('edit'), 'edit');
+island($('tools'), 'tools');
+
+// Stroke and fill: new marks take them, and so does the selection.
+function swatch(key, title) {
+  const b = document.createElement('button');
+  b.className = 'swatch-button ' + key; b.title = title; b.setAttribute('aria-label', title);
+  const paint = () => { b.style.setProperty('--c', settings[key] ?? (key === 'stroke' ? 'var(--ink)' : 'transparent')); b.classList.toggle('none', !settings[key]); };
+  b.onclick = () => {
+    const r = b.getBoundingClientRect(), pop = document.createElement('div');
+    pop.className = 'menu popover';
+    pop.append(colorField(settings[key], (c) => {
+      setSetting(key, c);
+      const sel = context().sel.filter((o) => !o.bind && o.kind !== 'group');
+      if (sel.length) call('object.style', { ids: ids(sel), style: { [key]: c } });
+      pop.remove();
+    }));
+    document.body.append(pop);
+    pop.style.left = r.left + 'px'; pop.style.top = r.bottom + 6 + 'px';
+    setTimeout(() => addEventListener('pointerdown', function away(ev) { if (!pop.contains(ev.target)) { pop.remove(); removeEventListener('pointerdown', away, true); } }, true));
+  };
+  onSettings((k) => { if (k === key) paint(); });
+  paint();
+  return b;
+}
+$('tools').append(document.createElement('hr'), swatch('stroke', 'Stroke'), swatch('fill', 'Fill'));
+
+const zoomLabel = document.createElement('button');
+zoomLabel.className = 'zoom-label'; zoomLabel.title = 'Zoom to 100% (0)'; zoomLabel.onclick = () => runAction('zoom100');
+const gridButton = glyph('grid', "Grid (⌘')", () => runAction('grid'));
+$('zoom').append(glyph('minus', 'Zoom out (−)', () => view.zoomAt(...centre(), 1 / 1.3)), zoomLabel, glyph('plus', 'Zoom in (+)', () => view.zoomAt(...centre(), 1.3)), glyph('fit', 'Fit everything (F)', fit), document.createElement('hr'), gridButton);
+
 $('peek').innerHTML = icon('clean');
 $('peek').onclick = () => document.body.classList.toggle('clean');
+
+// What the panels may use.
+const app = {
+  state, call, batch, get, tools, PRESETS, BRUSHES, actions: ACTIONS, onParam, onCode, frameIds, runAction,
+  run: () => run, setRole, keysShown: (a) => showKey(a),
+  presetsFor: (o) => (o.role === 'score' ? BRUSHES : PRESETS),
+  addExample(ex) {
+    const s = spaces[0], before = new Set(state.objects.keys());
+    batch(() => {
+      const c = (name, args) => call(name, args, 'example');
+      const made = ex.build(c, below(s).map(round));
+      for (const [from, out, to, inn] of made?.connect ?? []) {
+        const p = portPos(get(from), 'outs', out), q = portPos(get(to), 'ins', inn);
+        c('line.add', { points: Array.from({ length: 12 }, (_, i) => { const u = i / 11; return [round(p[0] + (q[0] - p[0]) * u), round(p[1] + (q[1] - p[1]) * u + Math.sin(u * Math.PI) * 0.4)]; }), tol: 0.05 });
+      }
+      c('select.set', { ids: [] });
+    });
+    const made = [...state.objects.keys()].filter((id) => !before.has(id) && get(id).space === null);
+    requestAnimationFrame(() => frameIds(made, 0.6));
+  },
+};
+const panels = createPanels($('tabs'), $('side'), app, PANELS);
+$('tabs').append(document.createElement('hr'), glyph('clean', 'Hide the interface (Tab)', () => document.body.classList.toggle('clean')));
+
+// Settings that change what is on screen.
+function applySettings() {
+  document.documentElement.dataset.theme = settings.theme === 'auto' ? '' : settings.theme;
+  stage.classList.toggle('grid', settings.grid);
+  gridButton.setAttribute('aria-pressed', String(settings.grid));
+  view.readTheme();
+}
+onSettings(applySettings);
+applySettings();
 
 const palette = createPalette($('palette'), { ask, getActions: () => { const c = context(); return ACTIONS.filter((a) => !a.hidden && a.id !== 'palette' && allowed(a, c)).map((a) => asItem(a, c)); } });
 
@@ -637,7 +773,7 @@ addEventListener('paste', (e) => {
 define({ name: 'view.fit', doc: 'Show everything.', record: false, run: () => fit() });
 define({ name: 'view.frame', doc: 'Show these objects; a single object is opened to its near face.', args: { ids: T.ids }, required: ['ids'], record: false, run: (a) => frameIds(a.ids, a.ids.length === 1 ? 0.82 : 0.6) });
 define({ name: 'view.zoom', doc: 'Zoom by a factor about the middle of the view.', args: { factor: T.num }, required: ['factor'], record: false, run: (a) => view.zoomAt(...centre(), a.factor) });
-define({ name: 'tool.set', doc: 'Choose the pointer tool.', args: { name: { enum: ['select', 'draw', 'rect', 'ellipse', 'code', 'target', 'score'] } }, required: ['name'], record: false, run: (a) => setTool(a.name) });
+define({ name: 'tool.set', doc: 'Choose the pointer tool.', args: { name: { enum: ['select', 'pan', 'draw', 'line', 'rect', 'ellipse', 'note', 'code', 'target', 'score'] } }, required: ['name'], record: false, run: (a) => setTool(a.name) });
 define({ name: 'space.read', doc: 'Read the document: every object with its role, space, rectangle, ports and code.', record: false, run: () => [...state.objects.values()].map((o) => ({ id: o.id, kind: o.kind, role: o.role, space: o.space, rect: o.rect, name: blanketOf(o)?.name, ins: blanketOf(o)?.ins, outs: blanketOf(o)?.outs, params: o.params, code: hasCode(o) ? o.code : undefined, bind: o.bind, points: o.points?.length })) });
 define({ name: 'score.play', doc: 'Start a score looping. What is drawn or changed while it plays is heard from the next pass.', args: { id: T.id }, required: ['id'], record: false, run: (a) => play(a.id) });
 define({ name: 'score.stop', doc: 'Stop one score, or every score when no id is given.', args: { id: T.id }, record: false, run: (a) => (a.id ? sound.stop(a.id) : sound.stopAll()) });

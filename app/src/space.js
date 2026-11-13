@@ -36,6 +36,7 @@ const T = {
   space: { type: ['string', 'null'], description: 'id of the group or target to work in; null or omitted for the canvas' },
   rect: { type: 'object', description: '{ cx, cy, w, h } in the space\'s units (y up)', properties: { cx: { type: 'number' }, cy: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' } } },
   num: { type: 'number' }, str: { type: 'string' },
+  style: { type: 'object', description: '{ stroke, fill, width, opacity }: colours as CSS hex, null for the default', properties: { stroke: { type: ['string', 'null'] }, fill: { type: ['string', 'null'] }, width: { type: 'number' }, opacity: { type: 'number' } } },
 };
 export { T as argTypes };
 
@@ -62,12 +63,13 @@ function bindInto(o, b) {
 define({
   name: 'line.add',
   doc: 'Draw a line. With tol > 0, a line whose ends land on an output and an input port becomes a connector. role "path" attaches code that reads the line.',
-  args: { space: T.space, points: { type: 'array', description: '[[x, y], ...]; [x, y, z] inside a target' }, tol: T.num, role: { enum: ROLES.line }, closed: { type: 'boolean' } },
+  args: { space: T.space, points: { type: 'array', description: '[[x, y], ...]; [x, y, z] inside a target' }, tol: T.num, role: { enum: ROLES.line }, closed: { type: 'boolean' }, style: T.style },
   required: ['points'],
   run(a) {
     const space = a.space ?? null;
     const o = { id: newId(), kind: 'line', role: 'ink', space, points: a.points.map((p) => p.slice(0, 3)), off: [0, 0] };
     if (a.closed) o.closed = true;
+    if (a.style) o.style = { ...a.style };
     const b = a.tol > 0 && o.points.length > 1 ? bindFor(inSpace(space), o.points, a.tol) : null;
     if (b) bindInto(o, b);
     else if (a.role === 'path') { o.role = 'path'; o.code = PRESETS.path; o.params = {}; }
@@ -78,13 +80,15 @@ define({
 
 define({
   name: 'shape.add',
-  doc: 'Add a shape. role: "visual" (something to look at), "code" (a code container; give code, or a preset name), "target" (a render target with a 3D interior), "score" (a frame that plays the lines drawn in it; its code is a brush).',
-  args: { space: T.space, rect: T.rect, shape: { enum: ['rect', 'ellipse'] }, role: { enum: ROLES.shape }, code: T.str, preset: { enum: [...Object.keys(PRESETS), ...Object.keys(BRUSHES)] } },
+  doc: 'Add a shape. role: "visual" (something to look at), "code" (a code container; give code, or a preset name), "target" (a render target with a 3D interior), "score" (a frame that plays the lines drawn in it; its code is a brush), "note" (text).',
+  args: { space: T.space, rect: T.rect, shape: { enum: ['rect', 'ellipse'] }, role: { enum: ROLES.shape }, code: T.str, text: T.str, style: T.style, preset: { enum: [...Object.keys(PRESETS), ...Object.keys(BRUSHES)] } },
   required: ['rect'],
   run(a) {
     const o = { id: newId(), kind: 'shape', role: a.role ?? 'visual', shape: a.shape ?? 'rect', space: a.space ?? null, rect: { ...a.rect } };
     if (o.role === 'code') { o.code = a.code ?? PRESETS[a.preset] ?? PRESETS.blank; o.params = {}; }
     if (o.role === 'score') { o.code = a.code ?? BRUSHES[a.preset] ?? BRUSHES.glissando; o.params = {}; }
+    if (o.role === 'note') o.text = a.text ?? '';
+    if (a.style) o.style = { ...a.style };
     state.objects.set(o.id, o);
     return o.id;
   },
@@ -92,7 +96,7 @@ define({
 
 define({
   name: 'object.role',
-  doc: 'Change what an object is. A line: "ink", "connector" (binds to the ports nearest its ends, within tol), "path". A shape: "visual", "target", "code", "score".',
+  doc: 'Change what an object is. A line: "ink", "connector" (binds to the ports nearest its ends, within tol), "path". A shape: "visual", "target", "code", "score", "note".',
   args: { id: T.id, role: { enum: [...ROLES.line, ...ROLES.shape] }, tol: T.num },
   required: ['id', 'role'],
   run(a) {
@@ -109,6 +113,7 @@ define({
     // Each role keeps its own code, so changing role and back loses nothing.
     if (o.code != null) (o.stash ??= {})[o.role] = o.code;
     o.role = a.role;
+    if (a.role === 'note') o.text ??= '';
     const fresh = { path: PRESETS.path, code: PRESETS.blank, score: BRUSHES.glissando }[a.role];
     if (fresh) { o.code = o.stash?.[a.role] ?? fresh; o.params ??= {}; } else delete o.code;
     prune(o);
@@ -149,6 +154,54 @@ define({
 define({
   name: 'object.resize', doc: 'Give a shape or group a new rectangle.', args: { id: T.id, rect: T.rect }, required: ['id', 'rect'],
   run(a) { const o = state.objects.get(a.id); if (o?.rect) o.rect = { cx: a.rect.cx, cy: a.rect.cy, w: Math.max(0.05, a.rect.w), h: Math.max(0.05, a.rect.h) }; },
+});
+
+define({
+  name: 'object.style', doc: 'Set how objects look. Only the given keys change; null puts a key back to its default.',
+  args: { ids: T.ids, style: T.style }, required: ['ids', 'style'],
+  run(a) {
+    for (const id of a.ids) {
+      const o = state.objects.get(id);
+      if (!o) continue;
+      const next = { ...o.style };
+      for (const [k, v] of Object.entries(a.style)) { if (v == null || v === '') delete next[k]; else next[k] = v; }
+      if (Object.keys(next).length) o.style = next; else delete o.style;
+    }
+  },
+});
+
+define({
+  name: 'object.name', doc: 'Name an object. An empty name removes it.', args: { id: T.id, name: T.str }, required: ['id', 'name'],
+  run(a) { const o = state.objects.get(a.id); if (!o) return; if (a.name) o.name = a.name; else delete o.name; },
+});
+
+define({
+  name: 'object.text', doc: 'Set the text of a note.', args: { id: T.id, text: T.str }, required: ['id', 'text'],
+  run(a) { const o = state.objects.get(a.id); if (o?.role === 'note') o.text = a.text; },
+});
+
+define({
+  name: 'object.flag', doc: 'Hide or lock objects. A hidden object is not drawn; a locked one cannot be picked on the canvas.',
+  args: { ids: T.ids, hidden: { type: 'boolean' }, locked: { type: 'boolean' } }, required: ['ids'],
+  run(a) {
+    for (const id of a.ids) {
+      const o = state.objects.get(id);
+      if (!o) continue;
+      for (const k of ['hidden', 'locked']) if (k in a) { if (a[k]) o[k] = true; else delete o[k]; }
+      if (o.hidden || o.locked) state.selection.delete(id);
+    }
+  },
+});
+
+define({
+  name: 'object.order', doc: 'Bring objects to the front or send them to the back of the drawing order.',
+  args: { ids: T.ids, to: { enum: ['front', 'back'] } }, required: ['ids', 'to'],
+  run(a) {
+    const moved = a.ids.filter((id) => state.objects.has(id)).map((id) => [id, state.objects.get(id)]);
+    const rest = [...state.objects].filter(([id]) => !a.ids.includes(id));
+    state.objects.clear();
+    for (const [id, o] of a.to === 'front' ? [...rest, ...moved] : [...moved, ...rest]) state.objects.set(id, o);
+  },
 });
 
 define({

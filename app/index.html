@@ -24,10 +24,13 @@
   <div id="faces"></div>
   <div id="dots"></div>
   <div id="marquee" hidden></div>
-  <nav id="tools" aria-label="Tools"></nav>
+  <nav id="edit" class="island" aria-label="File and history"></nav>
+  <nav id="tools" class="island" aria-label="Tools"></nav>
+  <nav id="tabs" class="island" aria-label="Panels"></nav>
+  <nav id="zoom" class="island" aria-label="Zoom"></nav>
   <button id="peek" title="Show panels (Tab)" aria-label="Show panels"></button>
 </section>
-<aside id="side" class="empty" aria-label="Code"></aside>
+<aside id="side" aria-label="Side panel"></aside>
 <div id="palette" role="dialog" aria-label="Command palette" hidden></div>
 <input id="file" type="file" accept="application/json,.json" hidden>
 <script type="module" src="src/main.js"></script>

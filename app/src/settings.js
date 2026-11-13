@@ -1,0 +1,25 @@
+// Settings: what belongs to this browser, not to the drawing. Kept in
+// localStorage; nothing here is part of the take.
+
+const KEY = 'underspace-settings';
+export const DEFAULTS = {
+  theme: 'auto',        // 'auto' | 'light' | 'dark'
+  grid: true, gridSize: 1, snap: false,
+  stroke: null, fill: null, width: 2.2, // the look new lines and shapes take; null is the default ink
+  panel: 'code', panelOpen: false,
+  assistBase: 'http://127.0.0.1:11434', assistModel: '',
+};
+
+let stored = {};
+try { stored = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { /* start from the defaults */ }
+export const settings = { ...DEFAULTS, ...stored };
+
+const listeners = new Set();
+export const onSettings = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
+export function setSetting(key, value) {
+  if (settings[key] === value) return;
+  settings[key] = value;
+  try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch { /* private mode: it still works for the session */ }
+  for (const fn of listeners) fn(key, value);
+}
+export function resetSettings() { for (const [k, v] of Object.entries(DEFAULTS)) setSetting(k, v); }

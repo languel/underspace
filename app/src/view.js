@@ -12,7 +12,7 @@ const VIEW_H = 10; // world units from top to bottom at zoom 1
 
 export async function createView({ canvas, stage, onFrame }) {
   const forceWebGL = new URLSearchParams(location.search).has('gl');
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: true, forceWebGL });
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: true, alpha: true, forceWebGL });
   await renderer.init();
   renderer.autoClear = false;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -27,24 +27,38 @@ export async function createView({ canvas, stage, onFrame }) {
   for (const name of ['ink', 'accent', 'hot', 'muted', 'line']) colors[name] = uniform(new THREE.Color());
   const bg = new THREE.Color();
   const materials = new Map();
-  function material(color, width) {
-    const key = color + width;
+  // A colour is a theme name ('ink', 'accent', ...) or any CSS colour.
+  const custom = new Map();
+  function colorNode(c) {
+    if (colors[c]) return colors[c];
+    let n = custom.get(c);
+    if (!n) { n = uniform(new THREE.Color(c)); custom.set(c, n); }
+    return n;
+  }
+  function material(color, width, opacity = 1) {
+    const key = `${color}|${width}|${opacity}`;
     let m = materials.get(key);
     if (!m) {
-      m = new THREE.Line2NodeMaterial();
-      m.linewidth = width;
-      m.colorNode = colors[color];
+      m = width ? new THREE.Line2NodeMaterial() : new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
+      if (width) m.linewidth = width;
+      m.colorNode = colorNode(color);
+      m.depthTest = false; // drawn in document order, not by depth
+      if (opacity < 1) { m.transparent = true; m.opacity = opacity; }
       materials.set(key, m);
     }
     return m;
   }
-  function makeLine(pts, color, width, z = 0) {
+  function makeFill(pts, color, opacity) {
+    const shape = new THREE.Shape(pts.map((p) => new THREE.Vector2(p[0], p[1])));
+    return new THREE.Mesh(new THREE.ShapeGeometry(shape), material(color, 0, opacity));
+  }
+  function makeLine(pts, color, width, z = 0, opacity = 1) {
     const pos = [];
     if (pts.length === 1) pos.push(pts[0][0] - 0.03, pts[0][1], pts[0][2] ?? z, pts[0][0] + 0.03, pts[0][1], pts[0][2] ?? z);
     else for (const p of pts) pos.push(p[0], p[1], p[2] ?? z);
     const geometry = new LineGeometry();
     geometry.setPositions(pos);
-    const line = new Line2(geometry, material(color, width));
+    const line = new Line2(geometry, material(color, width, opacity));
     line.frustumCulled = false;
     return line;
   }
@@ -67,7 +81,10 @@ export async function createView({ canvas, stage, onFrame }) {
 
   function setLines(list) {
     empty(inkLines);
-    for (const l of list) inkLines.add(makeLine(l.pts, l.color, l.width));
+    list.forEach((l, i) => {
+      if (l.fill && l.pts.length > 2) { const f = makeFill(l.pts, l.fill, l.opacity ?? 1); f.renderOrder = i * 2; inkLines.add(f); }
+      if (l.width > 0) { const line = makeLine(l.pts, l.color, l.width, 0, l.opacity ?? 1); line.renderOrder = i * 2 + 1; inkLines.add(line); }
+    });
   }
 
   // ---- render targets ------------------------------------------------------
@@ -146,7 +163,7 @@ export async function createView({ canvas, stage, onFrame }) {
     const css = getComputedStyle(document.documentElement);
     for (const name of Object.keys(colors)) colors[name].value.set(css.getPropertyValue('--' + name).trim());
     bg.set(css.getPropertyValue('--bg').trim());
-    renderer.setClearColor(bg, 1);
+    renderer.setClearColor(bg, 0); // the stage's own background (and grid) shows through
   }
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTheme);
 
@@ -182,7 +199,7 @@ export async function createView({ canvas, stage, onFrame }) {
   });
 
   return {
-    cam, size, unitsPerPx, toWorld, toScreen, setLines, setScenes, setPreview, sceneToLocal, sceneToScreen, planeBasis,
+    readTheme, cam, size, unitsPerPx, toWorld, toScreen, setLines, setScenes, setPreview, sceneToLocal, sceneToScreen, planeBasis,
     // Show a canvas rectangle { cx, cy, w, h } filling `fill` of the stage.
     frame(r, fill = 0.7) {
       cam.cx = r.cx; cam.cy = r.cy;
