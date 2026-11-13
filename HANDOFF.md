@@ -319,8 +319,9 @@ the deployed copy.
 
 Known gaps and shortcuts:
 
-- p5.js is loaded from cdnjs inside sketch frames. It should be vendored
-  like three.js; that needs the owner's say (a download into the repo).
+- p5.js 2.4.0 is vendored in `vendor/p5/` (the minified global build only;
+  `p5.webgpu` is not included). three.js r187 was the latest release when
+  checked on 13 Nov 2026.
 - Sketch frames are `allow-scripts allow-same-origin`, so they are not a
   sandbox. Without same-origin a local server cannot serve the vendored
   three.js to them.

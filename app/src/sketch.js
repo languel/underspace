@@ -4,8 +4,6 @@
 // inside the sketch, `inp` and `p` hold the current inputs and parameters,
 // and out({ y: 1 }) sets outputs.
 
-const P5 = 'https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js';
-
 // 'p5', 'three', or null for an ordinary function body.
 export function sketchKind(code) {
   if (/^\s*import\s[^\n]*['"]three(\/[^'"]*)?['"]/m.test(code) || /\bnew\s+THREE\./.test(code)) return 'three';
@@ -21,11 +19,12 @@ addEventListener('error', (e) => parent.postMessage({ underspace: ID, error: e.m
 `;
 const STYLE = '<style>html,body{margin:0;height:100%;overflow:hidden;background:transparent}canvas{display:block}</style>';
 
-// The document a sketch runs in. `vendor` is the absolute URL of vendor/three/.
+// The document a sketch runs in. `vendor` is the absolute URL of vendor/three/;
+// p5.js (2.4.0) is beside it in vendor/p5/.
 export function sketchDoc(code, kind, id, vendor) {
   const bridge = `<script>const ID = ${JSON.stringify(id)};${BRIDGE}</script>`;
   const safe = code.replace(/<\/script/gi, '<\\/script');
-  if (kind === 'p5') return `<!doctype html>${STYLE}${bridge}<script src="${P5}"></script><script>${safe}</script>`;
+  if (kind === 'p5') return `<!doctype html>${STYLE}${bridge}<script src="${new URL('../p5/p5.min.js', vendor).href}"></script><script>${safe}</script>`;
   const map = { imports: { three: vendor + 'build/three.webgpu.js', 'three/webgpu': vendor + 'build/three.webgpu.js', 'three/tsl': vendor + 'build/three.tsl.js', 'three/addons/': vendor + 'addons/' } };
   // A sketch written against the global THREE gets it; one with imports brings its own.
   const body = /^\s*import\s/m.test(code) ? safe : `import * as THREE from 'three';\n${safe}`;
