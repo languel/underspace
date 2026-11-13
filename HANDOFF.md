@@ -184,19 +184,106 @@ Known shortcuts to undo before any of this becomes kernel code:
 - `replay` resets reading, brush and bpm to defaults by hand; a real take
   needs a baseline document.
 
+## 5b. Spike B, "the object" (`spike-b/`)
+
+Same server, open `http://127.0.0.1:5310/spike-b/` (`?demo` builds a small
+patch, `?new` starts empty, `?gl` forces WebGL). It shares `vendor/three/`
+with spike A and nothing else. `spike-b/README.md` has the keys.
+
+One canvas. Everything on it is an object in the sense of section 3:
+
+- **A mark** is inert until code is attached (C); then its far face is still
+  the drawing, and its code can read its own geometry (`geom.at(u)`).
+- **A box** is code. Its blanket is read from header comments in the code
+  (`// in:`, `// out:`, `// param:`), so ports and parameter fields are
+  automatic: no face is designed per type.
+- **Three faces by size on screen**: far (a small block, or just the ink),
+  mid (ports and parameters), near (the code, editable in place). The same
+  code is in the sidebar when the object is selected.
+- **A drawn line whose ends land on an output and an input becomes a wire.**
+  The drawn points are kept; what is shown is the drawing carried by the
+  similarity that puts its ends on the two ports, so it follows its objects
+  and keeps its hand-drawn shape. A new wire into an input replaces the old
+  one, which stays as a plain mark.
+- **Collapse (G)** folds a selection into a group; each cut wire becomes a
+  port on the group. Zoom into the group and its contents are there, in
+  their own coordinates. **Expand (E)** puts them back.
+- **A scene** is an object whose interior is a 3D space, drawn into its
+  rectangle by a perspective camera. Strokes drawn inside it are 3D points
+  (on the plane facing the camera). Its inputs `spin` and `tilt` turn it.
+- Code objects run once a frame; a wire carries last frame's value.
+- Every change is a command in the take; undo replays the take without its
+  last change; the take is kept in localStorage between visits.
+
+| File | Role |
+| --- | --- |
+| `src/object.js` | The object record; blanket from code; rectangles, port positions, nesting transform |
+| `src/bind.js` | Wires: the fit, nearest port, binding a drawn line |
+| `src/collapse.js` | Collapse and expand |
+| `src/space.js` | State, commands, take, undo |
+| `src/run.js` | Runs code objects, resolves wires through group ports |
+| `src/presets.js` | Starting code |
+| `src/view.js` | three.js: ink on an orthographic canvas, a perspective view per scene object |
+| `src/faces.js`, `src/side.js`, `src/controls.js` | DOM faces on the canvas, the sidebar, the fields both share |
+| `src/main.js`, `src/icons.js` | Layout by zoom, tools, glyph toolbar, keys |
+| `test/object.test.js` | 8 tests: blanket, fit, binding, collapse and expand, values through a group, undo |
+
+Checked: the 8 unit tests; in a real browser on the **WebGPU** backend, by
+pointer: placing a box, drawing a wire between ports (and the replaced wire
+becoming a mark), a stroke inside the scene, marquee select, collapse,
+zooming into the group, moving a box with its wire following, undo, hiding
+all panels. Not checked: WebGL, expand by key, pen and touch, light theme,
+Safari and Firefox, many objects.
+
+What it says about the design:
+
+- Ink and 3D in three.js with boxes and text as DOM laid over it works and
+  was cheap. The cost: DOM is always above the ink, and each visible box is
+  an element repositioned every frame.
+- A blanket declared in the code's header makes faces automatic.
+- Nested local coordinates work as plain scale-and-offset per group.
+
+Shortcuts taken (do not carry into the kernel as they are):
+
+- One frame of delay per wire instead of ordering the graph.
+- All ink is rebuilt on any change; all points are transformed every frame.
+- Undo truncates the take, so the undone steps are not in the record.
+- No redo, no resize, no rename, no copy; boxes cannot go inside a scene and
+  nothing inside a scene can be selected; a group's ports are fixed when it
+  is collapsed.
+- The code area is a plain textarea (the kernel should reuse the AMS or
+  underscores editor). Code runs in the page, unsandboxed; an endless loop
+  hangs the tab.
+
+### Questions for the owner about spike B
+
+1. Do the three faces switch at the right moments, and is zoom the right
+   way to open an object, or do you also want to open one in place without
+   zooming?
+2. Does a drawn wire feel right (drawn anywhere near two ports, keeps its
+   shape, follows)? Should ports be wanted before they exist, i.e. drawing
+   to a box creates the port?
+3. Is a group you zoom into what you meant by nesting, or should the
+   interior open somewhere else (a panel, a tab)?
+4. Is the scene-as-an-object right, or do you miss a large docked 3D view?
+5. Is the header-comment blanket (`// in:`, `// out:`, `// param:`) an
+   acceptable way to declare ports, compared with AMS's `@param`?
+
 ## 6. Next steps
 
 In this order, unless the owner says otherwise.
 
-1. Create the GitHub repo, push, and add a GitHub Pages workflow (the local
-   repository and first commit exist). Deploy early so static hosting is
-   never an afterthought.
+1. ~~Create the GitHub repo, push, and add a GitHub Pages workflow.~~ Done
+   13 Nov 2026: public repo `github.com/languel/underspace`, live at
+   <https://languel.github.io/underspace/>. `.github/workflows/pages.yml`
+   runs `npm test`, then publishes only `index.html`, `src/` and `vendor/`
+   on every push to `main`. A new top-level folder or page must be added to
+   the `cp` line there or it will not be deployed (`spike-b/` is).
 2. **Get the owner's answers on spike A** (below). They decide what the
    kernel looks like.
-3. **Spike B, "the object"** (throwaway, separate folder or page): three zoom
-   levels for one object type (mark, blanket as ports and parameters,
-   interior), drawn lines that bind to objects and stay bound, collapse and
-   expand. This is the newest idea and the biggest risk.
+3. ~~Spike B, "the object".~~ Built 13 Nov 2026 in `spike-b/` (throwaway,
+   see section 5b). **Next: the owner tries it and answers the questions in
+   5b.** Those and the spike A answers decide the kernel.
 4. Kernel, from what the two spikes prove: space, object, clock, commands,
    takes (AMS format), with a handful of brush, view and object types. Write
    the kernel contracts in TypeScript (proposed, not yet agreed).
@@ -218,6 +305,38 @@ In this order, unless the owner says otherwise.
 4. Is the take granular enough to teach from and to train from?
 5. Is one shared brush with parameters from geometry enough, or do marks need
    their own parameters too?
+
+### The owner's answers (13 Nov 2026)
+
+1. **3D placement.** Plane drawing feels natural. Wanted: AMS's ease of 2D
+   drawing as the baseline, extended to 3D with optional snapping to
+   surfaces and objects (threegrease had this, but messy and unconnected to
+   the rest, mesh generation included). So: one drawing tool, placement as a
+   swappable rule, each rule in its own file; 3D strokes are ordinary marks
+   that a mesh brush can read. Kernel requirement, not spike B.
+2. **Canvas and scene.** In spike A the two panes are not easily told apart.
+   Proposed in reply (not explicitly confirmed, used as the working
+   assumption for spike B): the canvas is the workspace, a node editor you
+   can draw into; a scene is an object on the canvas whose interior is a 3D
+   space, not a second pane. A reading would likewise be a frame object.
+3. **Loop.** It must not restart on change. Layering and overdubbing a
+   performance are wanted. Restart can be an option. Minor for now.
+4. **Take granularity.** Deferred with all teaching decisions: build a
+   functional system first.
+5. **Brushes.** Wanted: AMS's rich brushes and sculpt tools. In AMS a mark
+   carries `realize: { brush, params }` and brushes and sculpt tools are code
+   against a kit; adopt that (shared brush, per-mark parameters).
+
+Also asked for:
+
+- **UI.** Spike A's look is right. No narrative UI or on-screen
+  explanations: glyphs with hover tips, as in AMS (`src/workbench/icons.js`,
+  `glyphSelect.js`).
+- **Code anywhere.** As in underscores: write code anywhere on the canvas,
+  with the same code reachable in a sidebar. The AMS and underscores code
+  editors already work well; reuse one in the kernel.
+- **Clean canvas.** Every panel can be minimized, leaving only the drawing
+  canvas.
 
 ### Still open in the design
 
