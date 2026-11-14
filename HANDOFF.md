@@ -564,6 +564,11 @@ Added in an eleventh pass (14 Nov 2026), branching and events that act:
   event tool, or with "Attach an event here", still look like events.
 - Tests: round robin at a T, a split, an event reflecting a traveler, a
   shape keeping its look. 58 in all.
+- Fixed: reflect stuck at an event line. A rider passes a little beyond
+  the line within a frame, so when sent back it crossed it again at once.
+  Now a rider that is reflected, stopped or split is put back where it
+  crossed, and a line it crossed waits until the rider is clear of that
+  spot (`firedAt` in `play.js`). A copy made by split starts out latched.
 
 The owner asked to match Poliplan's functionality "for starters" without
 copying it. Not matched yet: writing your own brushes and sculpt tools in

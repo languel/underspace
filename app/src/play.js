@@ -11,7 +11,7 @@
 // at each junction it reaches, the junction's code chooses its way on.
 
 import { along, smooth, rectOf } from './object.js';
-import { measure, atS, tangentS, jointsOn, waysAt } from './joints.js';
+import { measure, atS, tangentS, jointsOn, waysAt, nearestOn } from './joints.js';
 
 // An event's code runs when a traveler enters it:
 //   ev    { x, y (where on the path's bounds, 0..1, y up), u (how far along), speed, traveler, rider, count }
@@ -54,15 +54,15 @@ function enclosed(path, x, y) {
   }
   return c;
 }
-// Does the step p -> q cross the flat curve?
+// Where the step p -> q crosses the flat curve, or null.
 function crosses(path, p, q) {
   for (let i = 1; i < path.length; i++) {
     const a = path[i - 1], b = path[i], r = [q[0] - p[0], q[1] - p[1]], s = [b[0] - a[0], b[1] - a[1]], den = r[0] * s[1] - r[1] * s[0];
     if (Math.abs(den) < 1e-12) continue;
     const t = ((a[0] - p[0]) * s[1] - (a[1] - p[1]) * s[0]) / den, w = ((a[0] - p[0]) * r[1] - (a[1] - p[1]) * r[0]) / den;
-    if (t > 1e-6 && t <= 1 + 1e-6 && w >= 0 && w <= 1) return true; // a step that starts on the curve has not crossed it
+    if (t > 1e-6 && t <= 1 + 1e-6 && w >= 0 && w <= 1) return [p[0] + r[0] * t, p[1] + r[1] * t]; // a step that starts on the curve has not crossed it
   }
-  return false;
+  return null;
 }
 const isClosed = (o, path) => o.closed || (path.length > 3 && Math.hypot(path[0][0] - path[path.length - 1][0], path[0][1] - path[path.length - 1][1]) < 1e-6);
 
@@ -108,7 +108,7 @@ function decide(r, ways) {
 const MAX_RIDERS = 64; // a traveler that splits is at most this many
 let paramsHook = () => ({});
 export function createPlay() {
-  const latched = new Set(), counts = new Map(), mems = new Map(), handlers = new Map(), net = new Map();
+  const latched = new Set(), firedAt = new Map(), counts = new Map(), mems = new Map(), handlers = new Map(), net = new Map();
   const hitAt = new Map(); // event or junction id -> when it last fired (ms), for the view to flash
   const compile = (key, args, code) => {
     let f = handlers.get(key);
@@ -167,7 +167,7 @@ export function createPlay() {
 
   return {
     hitAt,
-    reset() { latched.clear(); counts.clear(); net.clear(); },
+    reset() { latched.clear(); firedAt.clear(); counts.clear(); net.clear(); },
     // hooks: pointsOf(line) -> its points as shown, paramsOf(o) -> resolved parameters, note(midi, vel, dur)
     // -> { moved: id -> [x, y], ghosts: [{ of, pos }] (the riders a traveler split into), out, errors }
     step(objects, t, playing, hooks) {
@@ -212,7 +212,13 @@ export function createPlay() {
             if (e.kind === 'line') {
               const path = pathOf(e);
               if (isClosed(e, path)) { for (let k = 1; k < trail.length && !entered; k++) if (enclosed(path, trail[k][0], trail[k][1])) entered = trail[k]; now = enclosed(path, pos[0], pos[1]); }
-              else { for (let k = 1; k < trail.length && !entered; k++) if (crosses(path, trail[k - 1], trail[k])) entered = trail[k]; latched.delete(key); }
+              else {
+                // a line crossed: where, exactly. After it has fired, it waits until the rider is clear of
+                // that spot, so a rider sent back from it does not cross it again at once.
+                const at = firedAt.get(key);
+                if (at && Math.hypot(pos[0] - at[0], pos[1] - at[1]) > Math.max(1e-3, rider.speed * 0.05)) firedAt.delete(key);
+                if (!firedAt.has(key)) for (let k = 1; k < trail.length && !entered; k++) entered = crosses(path, trail[k - 1], trail[k]);
+              }
             } else {
               const r = rectOf(e);
               for (let k = 1; k < trail.length && !entered; k++) if (inside(e, r, trail[k][0], trail[k][1])) entered = trail[k];
@@ -224,14 +230,23 @@ export function createPlay() {
               const f = handler(e.code ?? EVENT);
               if (f.error) errors.set(e.id, f.error);
               else {
-                // what the event can do to the rider that reached it
+                if (e.kind === 'line' && !isClosed(e, pathOf(e))) firedAt.set(key, entered);
+                // What the event can do to the rider that reached it. Turned back, stopped or split,
+                // the rider is put back where it reached the event, not left a step beyond it.
+                const back = () => { const mm = measureOf(rider.line); if (mm) rider.s = nearestOn(mm, entered) * mm.total; };
                 const ev = {
                   type: 'enter', x: x1 > x0 ? (entered[0] - x0) / (x1 - x0) : 0.5, y: y1 > y0 ? (entered[1] - y0) / (y1 - y0) : 0.5, u, speed: rider.speed, traveler: o.id, rider: rider.n, count: counts.get(e.id),
-                  reflect() { rider.dir = -rider.dir; rider.skip = null; },
-                  stop() { rider.stopped = true; },
+                  reflect() { back(); rider.dir = -rider.dir; rider.skip = null; },
+                  stop() { back(); rider.stopped = true; },
                   go() { rider.stopped = false; },
                   speed(k) { if (Number.isFinite(k) && k > 0) rider.speed *= k; },
-                  split() { if (all.length < MAX_RIDERS) all.push({ ...rider, n: ++o_n.n, dir: -rider.dir, spawned: true, skip: null }); },
+                  split() {
+                    if (all.length >= MAX_RIDERS) return;
+                    back();
+                    const copy = { ...rider, n: ++o_n.n, dir: -rider.dir, spawned: true, skip: null };
+                    all.push(copy);
+                    firedAt.set(o.id + '#' + copy.n + '|' + e.id, entered); // the copy starts on the event: it has already been there
+                  },
                 };
                 try { f.run(ev, hooks.paramsOf(e), hooks.note, memOf(e.id)); } catch (err) { errors.set(e.id, err.message); }
               }

@@ -136,3 +136,20 @@ test('an event can send a traveler back, and a shape made an event keeps its loo
   assert.equal(state.objects.get(v).keeps, true);
   assert.equal(state.objects.get(v).style.stroke, '#123456');
 });
+
+test('reflect on a smooth line, in uneven steps, does not stick at the event', async () => {
+  const { createPlay, EVENTS } = await import('../src/play.js');
+  call('space.clear');
+  const line = call('line.add', { points: [[0, 0], [3, 0.2], [7, -0.1], [10, 0]] });
+  const tr = call('traveler.add', { on: line, dur: 10, loop: 0 });
+  const wall = call('line.add', { points: [[6.03, -1], [6.11, 1]] });
+  call('object.role', { id: wall, role: 'event' });
+  call('object.code', { id: wall, code: EVENTS.reflect });
+  const { smooth } = await import('../src/object.js');
+  const hooks = { ...T_HOOKS, pointsOf: (l) => smooth(l.points), paramsOf: (o) => ({ dur: 10, loop: 0, start: 0, ...o.params }) };
+  const play = createPlay();
+  let r;
+  for (let t = 0, k = 0; t <= 9; t += 0.037 + (k++ % 3) * 0.031) r = play.step(state.objects, t, true, hooks);
+  const x = r.moved.get(tr)[0];
+  assert.ok(x < 4.5, `went back past the start of its return: ${x}`);
+});
