@@ -35,6 +35,7 @@ import { snapPoints, snapBox, toSVG, toP5 } from './selection.js';
 import { showPie, recognize } from './pie.js';
 import { createTransport } from './transport.js';
 import { createDebug } from './debug.js';
+import { EXAMPLES } from './examples.js';
 import { GRID, GRID_PRESETS, gridAt, pathBeats, snapPoint, fitScale, isGrid } from './grid.js';
 import { POINT_KINDS, MIDINOUS_KINDS, GLYPH_TITLE, glyphLines } from './glyphs.js';
 import { createTimeline } from './timeline.js';
@@ -1317,6 +1318,15 @@ function goUp() {
   const parent = get(s.id).space;
   if (parent === null) fit(); else frameIds([parent], 0.82);
 }
+// An example dragged from the panel lands where it is dropped (on the canvas).
+stage.addEventListener('dragover', (e) => { if (e.dataTransfer?.types.includes('text/underspace-example')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+stage.addEventListener('drop', (e) => {
+  const i = e.dataTransfer?.getData('text/underspace-example');
+  if (i === '' || i == null || !EXAMPLES[+i]) return;
+  e.preventDefault();
+  const p = local(e), q = back(ROOT, view.toWorld(p[0], p[1]));
+  app.addExample(EXAMPLES[+i], q.map(round));
+});
 pad.addEventListener('dblclick', (e) => {
   if (poly) { finishPoly(true); return; }
   const p = local(e), v = vis.get(pick(p[0], p[1]));
@@ -1727,19 +1737,35 @@ const app = {
   state, call, batch, get, tools, PRESETS, BRUSHES, INK, SCULPTS, brushesFor, actions: ACTIONS, onParam, onCode, frameIds, runAction,
   run: () => run, setRole, keysShown: (a) => showKey(a), tool: () => tool, settingsVersion: () => settingsVersion,
   presetsFor: (o) => (o.role === 'score' ? BRUSHES : o.role === 'junction' ? JUNCTIONS : o.role === 'event' ? EVENTS : o.role === 'grid' ? GRID_PRESETS : PRESETS),
-  addExample(ex) {
-    const s = spaces[0], before = new Set(state.objects.keys());
+  // Add an example: built, then moved as a whole to `drop` (a canvas point: dragged from the panel),
+  // or just below what is on the canvas, clear of it; it comes in selected, so it can be moved at once.
+  addExample(ex, drop = null) {
+    const before = new Set(state.objects.keys());
+    const box = (list) => {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const o of list) { if (o.bind || o.kind === 'joint') continue; const r = rectOf(o); x0 = Math.min(x0, r.cx - r.w / 2); x1 = Math.max(x1, r.cx + r.w / 2); y0 = Math.min(y0, r.cy - r.h / 2); y1 = Math.max(y1, r.cy + r.h / 2); }
+      return x0 === Infinity ? null : { x0, y0, x1, y1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
+    };
+    const old = box([...state.objects.values()].filter((o) => o.space === null));
+    let fresh = [];
     batch(() => {
       const c = (name, args) => call(name, args, 'example');
-      const made = ex.build(c, below(s).map(round));
+      const made = ex.build(c, [0, 0]);
       for (const [from, out, to, inn] of made?.connect ?? []) {
         const p = portPos(get(from), 'outs', out), q = portPos(get(to), 'ins', inn);
         c('line.add', { points: Array.from({ length: 12 }, (_, i) => { const u = i / 11; return [round(p[0] + (q[0] - p[0]) * u), round(p[1] + (q[1] - p[1]) * u + Math.sin(u * Math.PI) * 0.4)]; }), tol: 0.05 });
       }
-      c('select.set', { ids: [] });
+      fresh = [...state.objects.keys()].filter((id) => !before.has(id) && get(id)?.space === null && !get(id).bind);
+      const b = box(fresh.map(get));
+      if (b) {
+        const mid = back(ROOT, view.toWorld(...centre()));
+        const to = drop ?? (old ? [old.cx, old.y0 - 1.5 - (b.y1 - b.y0) / 2] : mid);
+        const dx = round(to[0] - b.cx), dy = round(to[1] - b.cy);
+        if (dx || dy) c('object.move', { ids: fresh, dx, dy });
+      }
+      c('select.set', { ids: fresh.filter((id) => get(id)?.kind !== 'joint' && get(id)?.role !== 'traveler') });
     });
-    const made = [...state.objects.keys()].filter((id) => !before.has(id) && get(id).space === null);
-    requestAnimationFrame(() => frameIds(made, 0.6));
+    if (!drop) requestAnimationFrame(() => frameIds(fresh, 0.6));
   },
 };
 const panels = createPanels($('tabs'), $('side'), app, PANELS);

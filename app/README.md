@@ -15,6 +15,12 @@ Open <http://127.0.0.1:5310/app/?demo>. Without `?demo` it restores your
 last session; `?new` starts empty; `?gl` forces WebGL. `npm test` runs the
 unit tests.
 
+## Examples
+
+The Examples panel holds a collection in nested categories. Click one to
+add it below what is on the canvas, or drag it onto the canvas to put it
+where you drop it; either way it comes in selected, ready to move.
+
 ## Objects
 
 | Kind | Roles |

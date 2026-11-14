@@ -1,5 +1,6 @@
 // Examples: a collection in nested categories (an example's `path`, 'Music/Grids').
-// Click one to add it to the canvas; type to find one.
+// Click one to add it below what is there, or drag it onto the canvas; it comes in selected.
+// Type to find one.
 
 import { h } from '../controls.js';
 import { icon } from '../icons.js';
@@ -38,6 +39,9 @@ export function examplesPanel(el, app) {
         row.type = 'button'; glyph.innerHTML = icon(ex.icon);
         row.append(glyph, h('span', 'label', ex.title));
         row.addEventListener('click', () => app.addExample(ex));
+        // or dragged onto the canvas, to land where it is dropped
+        row.draggable = true;
+        row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/underspace-example', String(EXAMPLES.indexOf(ex))); e.dataTransfer.effectAllowed = 'copy'; });
         into.append(row);
       }
     };

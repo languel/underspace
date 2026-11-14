@@ -804,6 +804,15 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
     junction preset) stops any traveler.
   - Examples: Music › Nodes (a switch takes turns, a gate reads a light,
     nodes on a drawn line) and Drawing › Points.
+- **Fixes** (14 Nov 2026):
+  - The timeline's play button lost its clicks: its glyph was rewritten
+    every frame, between the press and the release. It is now written only
+    when it changes.
+  - Examples overlapped, because `below()` put an example's centre a fixed
+    distance under the drawing. Now an example is built, measured and
+    moved as a whole: just below everything on the canvas when clicked, or
+    centred where it is dropped when dragged from the panel. It comes in
+    selected.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a

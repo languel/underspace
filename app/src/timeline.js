@@ -141,7 +141,10 @@ export function createTimeline(el, host) {
     document.body.style.setProperty('--tl-h', el.offsetHeight + 'px');
     const tr = host.transport;
     pos.textContent = seconds ? `${Math.floor(tr.t / 60)}:${(tr.t % 60).toFixed(2).padStart(5, '0')}` : bbt(tr.t, m());
-    play.innerHTML = icon(tr.playing ? 'pause' : 'play');
+    // the glyph is written only when it changes: rewriting it every frame takes the button's insides
+    // away between a press and its release, and the click is lost
+    const glyph = tr.playing ? 'pause' : 'play';
+    if (play.dataset.glyph !== glyph) { play.dataset.glyph = glyph; play.innerHTML = icon(glyph); }
     rec.classList.toggle('on', tr.recording); loop.classList.toggle('on', tr.loop.on); metro.classList.toggle('on', !!host.metronome);
     for (const f of fields) f.sync();
     // follow the playhead while playing
