@@ -845,6 +845,22 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   now carries z) and are drawn as small stars in the target. Nodes on 3D
   lines play, as on the canvas. Brushes are dropped from lines taken in,
   because brushes paint only the flat canvas.
+- **Smooth however near** (14 Nov 2026): `smooth()` works in 2D and 3D and
+  takes a number of pieces per stretch, a number or a function. The
+  renderer asks for as many as a stretch is long on screen
+  (`stepsOnScreen`: a piece every 3 px, 2 to 160), and redraws when the
+  zoom (or a target's camera distance) changes by about a fifth. No points
+  are added to the drawing. Curves in render targets are now smoothed too.
+  `curveOf` keeps a fixed six pieces a stretch, so travel, joints and
+  events do not change with zoom.
+- **A render target has code** (`TARGET_PRESETS` in `object.js`): it runs
+  each frame like any code object and returns how its scene is seen,
+  `{ spin, tilt, zoom, center }`, on top of the camera that navigation
+  sets. Its header declares its ports and parameters, so new controls are
+  an `// in:` or `// param:` line away. Presets: spin and tilt (the
+  default: inputs spin and tilt, parameters orbit and zoom), orbit,
+  breathe, look (where it looks, from inputs). Its code is in the Code
+  panel; its face shows only the scene.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a

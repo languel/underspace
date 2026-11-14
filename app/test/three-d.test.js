@@ -46,3 +46,20 @@ test('smoothing: 3D curves too, and as many pieces as asked for each stretch', a
   assert.equal(coarse.length, 2 * 2 + 1);
   assert.deepEqual(fine[0], [0, 0, 0]); assert.deepEqual(fine[fine.length - 1], [3, 1, 3]);
 });
+
+test('a render target has code: its ports from its header, its camera from what it returns', async () => {
+  const { blanketOf, TARGET_PRESETS } = await import('../src/object.js');
+  const { createRunner } = await import('../src/run.js');
+  call('space.clear');
+  const t = call('shape.add', { role: 'target', rect: { cx: 0, cy: 0, w: 8, h: 6 } });
+  assert.deepEqual(blanketOf(state.objects.get(t)).ins, ['spin', 'tilt']);
+  call('object.set', { id: t, name: 'orbit', value: 3 });
+  const step = createRunner();
+  let r = step(state.objects, 10);
+  assert.equal(r.output(t, 'spin'), 1, '3 turns a minute, 10 s on: one half turn');
+  assert.equal(r.output(t, 'zoom'), 1);
+  call('object.code', { id: t, code: TARGET_PRESETS.look });
+  assert.deepEqual(blanketOf(state.objects.get(t)).ins, ['x', 'y', 'z', 'spin', 'tilt']);
+  r = step(state.objects, 0);
+  assert.deepEqual(r.output(t, 'center'), [0, 0, 0]);
+});

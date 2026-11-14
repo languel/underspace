@@ -3,7 +3,7 @@
 
 import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, history, travel, stats, argTypes as T } from './space.js';
 import './patch.js';
-import { stepsOnScreen } from './object.js';
+import { stepsOnScreen, TARGET_PRESETS } from './object.js';
 import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplifyIndex, along, setDrag, setLive, setMoved, penOf, isLine, isTarget, hasCode, isWire } from './object.js';
 import { selectionProps, toolProps } from './panels/properties.js';
 import { wirePoints } from './bind.js';
@@ -203,10 +203,14 @@ function walk(space, xf) {
       // its 3D cursor, when the drawing plane hangs from it
       if ((o.anchor ?? 'origin') === 'cursor') { const c = o.cursor ?? [0, 0, 0], d = 0.35; for (let k = 0; k < 3; k++) { const a = c.slice(), b = c.slice(); a[k] -= d; b[k] += d; marks.push({ pts: [a, b], color: 'hot' }); } }
       const cam = camOf(o);
+      // what its code returns this frame: { spin, tilt, zoom, center } (a target without code: its spin and tilt inputs)
+      const num = (v, d = 0) => (Number.isFinite(+v) ? +v : d), ctl = (k) => (o.code != null ? run.output(o.id, k) : run.input(o.id, k));
+      const zoom = Math.max(0.05, num(ctl('zoom'), 1)), off = ctl('center');
       sceneList.push({
-        id: o.id, px, marks, dist: cam.dist, center: cam.center,
-        az: cam.az + (Number(run.input(o.id, 'spin')) || 0) * Math.PI,
-        el: cam.el + (Number(run.input(o.id, 'tilt')) || 0),
+        id: o.id, px, marks, dist: cam.dist / zoom,
+        center: Array.isArray(off) ? cam.center.map((c, i) => c + num(off[i])) : cam.center,
+        az: cam.az + num(ctl('spin')) * Math.PI,
+        el: cam.el + num(ctl('tilt')),
       });
     }
   }
@@ -1818,7 +1822,7 @@ onSettings(() => settingsVersion++);
 const app = {
   state, call, batch, get, tools, PRESETS, BRUSHES, INK, SCULPTS, brushesFor, actions: ACTIONS, onParam, onCode, frameIds, runAction,
   run: () => run, setRole, keysShown: (a) => showKey(a), tool: () => tool, settingsVersion: () => settingsVersion,
-  presetsFor: (o) => (o.role === 'score' ? BRUSHES : o.role === 'junction' ? JUNCTIONS : o.role === 'event' ? EVENTS : o.role === 'grid' ? GRID_PRESETS : PRESETS),
+  presetsFor: (o) => (o.role === 'target' ? TARGET_PRESETS : o.role === 'score' ? BRUSHES : o.role === 'junction' ? JUNCTIONS : o.role === 'event' ? EVENTS : o.role === 'grid' ? GRID_PRESETS : PRESETS),
   // Add an example: built, then moved as a whole to `drop` (a canvas point: dragged from the panel),
   // or just below what is on the canvas, clear of it; it comes in selected, so it can be moved at once.
   addExample(ex, drop = null) {

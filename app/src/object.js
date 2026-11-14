@@ -35,7 +35,7 @@
 export const ROLES = { point: ['ink', 'event'], joint: ['junction'], line: ['ink', 'connector', 'path', 'event', 'traveler'], shape: ['visual', 'target', 'code', 'score', 'grid', 'note', 'event', 'traveler'] };
 export const isLine = (o) => o.kind === 'line';
 export const isTarget = (o) => o.kind === 'shape' && o.role === 'target';
-export const hasCode = (o) => o.role === 'code' || o.role === 'path' || o.role === 'score' || o.role === 'event' || o.role === 'junction' || o.role === 'grid';
+export const hasCode = (o) => o.role === 'code' || o.role === 'path' || o.role === 'score' || o.role === 'event' || o.role === 'junction' || o.role === 'grid' || o.role === 'target';
 // A traveler has no code of its own; this declares its ports and parameters.
 // loop: 0 once, 1 loop, 2 there and back. start: where on the line it begins (0..1).
 // dur: beats for the whole line (at the music context's tempo); at: the beat it sets off on;
@@ -74,10 +74,40 @@ export function parseBlanket(code) {
 }
 
 export const TARGET_INS = ['spin', 'tilt'];
+// A render target's code runs each frame and returns how its scene is seen: { spin (half turns),
+// tilt (radians), zoom (nearer above 1), center: [x, y, z] (added to where the camera looks) }.
+// Its header declares its ports and parameters, as any code object's does: add your own.
+export const TARGET_PRESETS = {
+  'spin and tilt': `// target
+// in: spin tilt
+// param: orbit 0
+// param: zoom 1
+// the camera, each frame: turned by spin (half turns) and tilt, round by orbit (turns a minute),
+// nearer by zoom. Return more to control more: center [x, y, z] moves where it looks.
+return { spin: inp.spin + (t * p.orbit) / 30, tilt: inp.tilt, zoom: p.zoom };`,
+  orbit: `// orbit
+// in: speed
+// param: turns 2
+// param: height 0.3
+// round and round: turns a minute, plus what comes in on speed
+return { spin: (t * (p.turns + inp.speed)) / 30, tilt: p.height };`,
+  breathe: `// breathe
+// in: depth
+// param: rate 0.2
+// param: amount 0.25
+// the camera comes nearer and goes back, rate times a second
+return { zoom: 1 + (p.amount + inp.depth) * Math.sin(t * p.rate * Math.PI * 2) };`,
+  look: `// look
+// in: x y z spin tilt
+// param: zoom 1
+// where it looks, from inputs: for a scene that follows something
+return { spin: inp.spin, tilt: inp.tilt, zoom: p.zoom, center: [inp.x, inp.y, inp.z] };`,
+};
+export const TARGET_CODE = TARGET_PRESETS['spin and tilt'];
 
 // null when the object has no blanket (ink, a visual, an unbound connector).
 export function blanketOf(o) {
-  if (isTarget(o)) return { name: 'target', ins: TARGET_INS, outs: [], params: [] };
+  if (isTarget(o)) return o.code != null ? parseBlanket(o.code) : { name: 'target', ins: TARGET_INS, outs: [], params: [] };
   if (o.kind === 'group') return { name: o.name || 'group', ins: o.ports.ins.map((p) => p.name), outs: o.ports.outs.map((p) => p.name), params: [] };
   if (o.role === 'traveler') return parseBlanket(TRAVELER);
   if (hasCode(o) && o.code != null) return parseBlanket(o.code);

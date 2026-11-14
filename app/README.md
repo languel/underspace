@@ -231,7 +231,10 @@ curve to whole bars. The Examples panel has a Music › Grids collection.
 A render target is a 3D scene in a frame. Drawn over marks (or made from a
 shape over them), it takes them in: they go onto its front plane, with
 their joints and travelers, and can be orbited (Alt-drag) and drawn into in
-3D. Travelers and nodes play there as on the canvas. Right-click › Take out
+3D. Travelers and nodes play there as on the canvas. A target has code, in the Code panel: each frame it
+returns how its scene is seen (`spin`, `tilt`, `zoom`, `center`), and its
+header declares its inputs and parameters, so you can add controls of your
+own. Presets: spin and tilt, orbit, breathe, look. Right-click › Take out
 of the 3D scene puts lines back, flat.
 
 ## Scores

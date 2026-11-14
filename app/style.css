@@ -145,6 +145,7 @@ div.menu-item { cursor: default; }
 .face.kind-line { border: 1px dashed var(--line); }
 .face.kind-line.sel { border-color: var(--accent); }
 .face.role-target { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.face.role-target .body { display: none; } /* its interior is the scene; its code is in the Code panel */
 /* A traveler and an event are drawn as ink; the face only carries ports and parameters. */
 .face.role-traveler, .face.role-event { background: none; border-color: transparent; }
 .face.role-traveler.far, .face.role-event.far { display: none; }

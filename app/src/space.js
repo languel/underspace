@@ -5,7 +5,7 @@
 // changes the document is recorded as a clip; undo is the take replayed
 // without its last step.
 
-import { ROLES, parseBlanket, blanketOf, ptsOf, isTarget, along, smooth } from './object.js';
+import { ROLES, parseBlanket, blanketOf, ptsOf, isTarget, along, smooth, TARGET_CODE } from './object.js';
 import { EVENT } from './play.js';
 import { bindFor, wirePoints } from './bind.js';
 import { collapse, expand } from './collapse.js';
@@ -104,6 +104,7 @@ define({
     if (o.role === 'note') o.text = a.text ?? '';
     if (o.role === 'event') { o.code = a.code ?? EVENT; o.params = {}; }
     if (o.role === 'grid') { o.code = a.code ?? GRID; o.params = {}; }
+    if (o.role === 'target') { o.code = a.code ?? TARGET_CODE; o.params = {}; }
     if (o.role === 'traveler') return null; // a traveler needs a line: traveler.add
     if (a.style) o.style = { ...a.style };
     if (a.brush?.id && INK[a.brush.id]) o.brush = { id: a.brush.id, params: { ...a.brush.params } };
@@ -290,7 +291,7 @@ define({
     if (a.role === 'visual') delete o.keeps;
     o.role = a.role;
     if (a.role === 'note') o.text ??= '';
-    const fresh = { path: PRESETS.path, code: PRESETS.blank, score: BRUSHES.glissando, event: EVENT, junction: JUNCTION, grid: GRID }[a.role];
+    const fresh = { path: PRESETS.path, code: PRESETS.blank, score: BRUSHES.glissando, event: EVENT, junction: JUNCTION, grid: GRID, target: TARGET_CODE }[a.role];
     if (fresh) { o.code = o.stash?.[a.role] ?? fresh; o.params ??= {}; } else delete o.code;
     prune(o);
     return true;
@@ -302,7 +303,7 @@ define({
   args: { id: T.id, code: T.str }, required: ['id', 'code'],
   run(a) {
     const o = state.objects.get(a.id);
-    if (!o || !['code', 'path', 'score', 'event', 'junction', 'grid'].includes(o.role)) return false;
+    if (!o || !['code', 'path', 'score', 'event', 'junction', 'grid', 'target'].includes(o.role)) return false;
     o.code = a.code; o.params ??= {};
     parseBlanket(o.code);
     prune(o);
