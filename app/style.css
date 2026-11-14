@@ -140,6 +140,12 @@ div.menu-item { cursor: default; }
 .face.kind-line { border: 1px dashed var(--line); }
 .face.kind-line.sel { border-color: var(--accent); }
 .face.role-target { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+/* A traveler and an event are drawn as ink; the face only carries ports and parameters. */
+.face.role-traveler, .face.role-event { background: none; border-color: transparent; }
+.face.role-traveler.far, .face.role-event.far { display: none; }
+.face.role-traveler.sel, .face.role-event.sel { border: 1px dashed var(--accent); box-shadow: none; }
+.face.role-traveler .params, .face.role-event .params, .face.role-event .code { display: none; }
+.face.role-traveler .head { top: -16px; left: 0; } .face.role-traveler .ports b { top: -5px; }
 /* A note is text on the canvas. */
 .face.role-note { border-color: transparent; background: color-mix(in srgb, var(--accent) 12%, var(--bg)); border-radius: 3px; }
 .face.role-note.sel { border-color: var(--accent); }

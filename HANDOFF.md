@@ -363,6 +363,39 @@ Added in a fifth pass (AMS brushes and sculpt, on a 2D ink layer):
 - A press now lays out first if the frame loop is behind, so commands and
   gestures in quick succession (an agent, a hidden tab) see current state.
 
+Added in a sixth pass (14 Nov 2026):
+
+- **Wheel and pinch.** On the canvas a pinch (or ⌘ wheel) zooms about the
+  pointer, a mouse wheel zooms, a trackpad's two fingers pan. A mouse
+  wheel is told from a trackpad by `wheelDeltaY` in steps of 120; that is
+  a heuristic, so Settings → Mouse can force zoom or pan.
+- **Render targets navigate as in threeditor's Blender mode**
+  (`editor/js/EditorControls.js` there): middle-drag orbits, Shift pans,
+  Ctrl zooms; Alt+left-drag stands in for the middle button (its
+  "emulate 3-button mouse"). Over a target that is selected or open, two
+  fingers orbit, Shift+two fingers pan, pinch or wheel zooms. 1, 3, 7 are
+  front, side and top views; Home resets. The camera is stored on the
+  target (`az`, `el`, `dist`, `center`) as one command per gesture.
+- **3D pencil placement after threegrease** (`src/tools/projection.ts`
+  there): the drawing plane (view, front, top, side) passes through the
+  origin, the 3D cursor (Shift+right-click in a target sets it), or the
+  nearest stroke point where the stroke begins, held for the stroke, so
+  new strokes take their depth from existing ones. Not brought over:
+  surface raycast (there are no meshes yet), the magnet and snapping of
+  the cursor, eased and locked depth, guides, primitives, the eraser.
+- **Travelers and events** (`src/play.js`, after AMS's
+  `docs/notes/paths-travelers-triggers.md`, itself after IanniX). Any line
+  is a path. A traveler (`traveler.add`, A on a selected line, or the
+  context menu) is a shape on a line that moves while playing, with
+  outputs x, y, u and parameters dur, loop, start. An event (shape role,
+  tool Y) fires once when a traveler enters it, latched until it leaves;
+  the test is swept along the stretch travelled, so a fast traveler does
+  not skip a thin event. Its code gets `ev`, `p`, `mem` and
+  `note(midi, velocity, seconds)`; outputs gate and count. Space starts
+  travelers and scores together. Not yet: travelers inside render
+  targets, playing a line at the speed it was drawn, MIDI out, crossing
+  events on lines, exit events, one shared clock with scores.
+
 The owner asked to match Poliplan's functionality "for starters" without
 copying it. Not matched yet: writing your own brushes and sculpt tools in
 the app, rotate and scale of lines, the point and lasso-plane tools,

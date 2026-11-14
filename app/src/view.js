@@ -102,7 +102,7 @@ export async function createView({ canvas, stage, onFrame }) {
     }
     return s;
   }
-  // list: [{ id, px: { l, t, w, h }, marks: [{ pts, color }], az, el }]
+  // list: [{ id, px: { l, t, w, h }, marks: [{ pts, color }], az, el, dist, center: [x, y, z] }]
   function setScenes(list, rebuild) {
     const live = new Set(list.map((d) => d.id));
     for (const [id, s] of scenes) if (!live.has(id)) { empty(s.lines); empty(s.preview); scenes.delete(id); }
@@ -110,9 +110,9 @@ export async function createView({ canvas, stage, onFrame }) {
       const fresh = !scenes.has(d.id), s = sceneFor(d.id);
       s.px = d.px;
       if (rebuild || fresh) { empty(s.lines); for (const m of d.marks) s.lines.add(makeLine(m.pts, m.color, 2.2)); }
-      const el = Math.max(-1.5, Math.min(1.5, d.el)), dist = 13;
-      s.cam.position.set(Math.sin(d.az) * Math.cos(el) * dist, Math.sin(el) * dist, Math.cos(d.az) * Math.cos(el) * dist);
-      s.cam.lookAt(0, 0, 0);
+      const el = Math.max(-1.55, Math.min(1.55, d.el)), dist = d.dist ?? 13, c = d.center ?? [0, 0, 0];
+      s.cam.position.set(c[0] + Math.sin(d.az) * Math.cos(el) * dist, c[1] + Math.sin(el) * dist, c[2] + Math.cos(d.az) * Math.cos(el) * dist);
+      s.cam.lookAt(c[0], c[1], c[2]);
     }
   }
 
@@ -130,13 +130,14 @@ export async function createView({ canvas, stage, onFrame }) {
     return { u: [m[0], m[1], m[2]], v: [m[4], m[5], m[6]] };
   }
   // Where a pointer lands on that plane, as [x, y, z] in the target's space.
-  function sceneToLocal(id, px, py, name = 'view') {
+  // `origin` is the point the plane passes through (the target's centre, its 3D cursor, a stroke).
+  function sceneToLocal(id, px, py, name = 'view', origin = [0, 0, 0]) {
     const s = scenes.get(id), basis = planeBasis(id, name);
     if (!basis) return null;
     ready(s);
     const { u, v } = basis;
     tmp.set(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]);
-    plane.setFromNormalAndCoplanarPoint(tmp, hit.set(0, 0, 0));
+    plane.setFromNormalAndCoplanarPoint(tmp, hit.set(origin[0], origin[1], origin[2]));
     ndc.set(((px - s.px.l) / s.px.w) * 2 - 1, -((py - s.px.t) / s.px.h) * 2 + 1);
     raycaster.setFromCamera(ndc, s.cam);
     return raycaster.ray.intersectPlane(plane, hit) ? [hit.x, hit.y, hit.z] : null;

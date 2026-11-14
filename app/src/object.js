@@ -13,6 +13,8 @@
 //             'code'       a code container
 //             'score'      a frame that reads the lines in it as sound; its code is a brush
 //             'note'       text on the canvas (`text`)
+//             'event'      a region that fires when a traveler enters; its code says what happens
+//             'traveler'   moves along the line `on` (see play.js)
 //   kind 'group'   rect, inner (its interior frame), ports (the cut wires)
 //
 // Any object may carry `name`, `style` { stroke, fill, width, opacity, path }
@@ -24,10 +26,13 @@
 // in the code's header. Coordinates are local to the object's space (y up);
 // `space` is the id of the group or target it lives in, or null for the canvas.
 
-export const ROLES = { line: ['ink', 'connector', 'path'], shape: ['visual', 'target', 'code', 'score', 'note'] };
+export const ROLES = { line: ['ink', 'connector', 'path'], shape: ['visual', 'target', 'code', 'score', 'note', 'event', 'traveler'] };
 export const isLine = (o) => o.kind === 'line';
 export const isTarget = (o) => o.kind === 'shape' && o.role === 'target';
-export const hasCode = (o) => o.role === 'code' || o.role === 'path' || o.role === 'score';
+export const hasCode = (o) => o.role === 'code' || o.role === 'path' || o.role === 'score' || o.role === 'event';
+// A traveler has no code of its own; this declares its ports and parameters.
+// loop: 0 once, 1 loop, 2 there and back. start: where on the line it begins (0..1).
+export const TRAVELER = '// traveler\n// out: x y u\n// param: dur 4\n// param: loop 1\n// param: start 0';
 export const isWire = (o) => o.role === 'connector' && !!o.bind;
 
 const parsed = new Map();
@@ -63,6 +68,7 @@ export const TARGET_INS = ['spin', 'tilt'];
 export function blanketOf(o) {
   if (isTarget(o)) return { name: 'target', ins: TARGET_INS, outs: [], params: [] };
   if (o.kind === 'group') return { name: o.name || 'group', ins: o.ports.ins.map((p) => p.name), outs: o.ports.outs.map((p) => p.name), params: [] };
+  if (o.role === 'traveler') return parseBlanket(TRAVELER);
   if (hasCode(o) && o.code != null) return parseBlanket(o.code);
   return null;
 }
@@ -86,8 +92,13 @@ export function ptsOf(o) {
 }
 
 const LINE_PAD = 0.25;
+// Where playing has carried a traveler: id -> [x, y].
+let moved = null;
+export function setMoved(map) { moved = map; }
+
 export function rectOf(o) {
-  const d = dragOf(o);
+  const d = dragOf(o), at = moved?.get(o.id);
+  if (at && !d) return { cx: at[0], cy: at[1], w: o.rect.w, h: o.rect.h };
   if (o.rect) {
     if (d?.rect) return d.rect;
     return { cx: o.rect.cx + (d?.dx ?? 0), cy: o.rect.cy + (d?.dy ?? 0), w: o.rect.w, h: o.rect.h };

@@ -5,7 +5,8 @@
 // changes the document is recorded as a clip; undo is the take replayed
 // without its last step.
 
-import { ROLES, parseBlanket, blanketOf, ptsOf, isTarget } from './object.js';
+import { ROLES, parseBlanket, blanketOf, ptsOf, isTarget, along, smooth } from './object.js';
+import { EVENT } from './play.js';
 import { bindFor, wirePoints } from './bind.js';
 import { collapse, expand } from './collapse.js';
 import { PRESETS } from './presets.js';
@@ -92,8 +93,25 @@ define({
     if (o.role === 'code') { o.code = a.code ?? PRESETS[a.preset] ?? PRESETS.blank; o.params = {}; }
     if (o.role === 'score') { o.code = a.code ?? BRUSHES[a.preset] ?? BRUSHES.glissando; o.params = {}; }
     if (o.role === 'note') o.text = a.text ?? '';
+    if (o.role === 'event') { o.code = a.code ?? EVENT; o.params = {}; }
+    if (o.role === 'traveler') return null; // a traveler needs a line: traveler.add
     if (a.style) o.style = { ...a.style };
     if (a.brush?.id && INK[a.brush.id]) o.brush = { id: a.brush.id, params: { ...a.brush.params } };
+    state.objects.set(o.id, o);
+    return o.id;
+  },
+});
+
+define({
+  name: 'traveler.add', doc: 'Put a traveler on a line: a shape that moves along it while playing. u is where it starts (0..1). Its parameters: dur (seconds for the whole line), loop (0 once, 1 loop, 2 there and back).',
+  args: { on: { type: 'string', description: 'id of the line to travel' }, u: T.num, size: T.num, dur: T.num, loop: T.num }, required: ['on'],
+  run(a) {
+    const line = state.objects.get(a.on);
+    if (!line || line.kind !== 'line' || line.bind) return null;
+    const u = Math.max(0, Math.min(1, a.u ?? 0)), pts = ptsOf(line), at = along(line.style?.path === 'straight' ? pts : smooth(pts), u), size = a.size > 0 ? a.size : 0.5;
+    const o = { id: newId(), kind: 'shape', role: 'traveler', shape: 'ellipse', space: line.space, on: line.id, rect: { cx: round(at[0]), cy: round(at[1]), w: size, h: size }, params: { start: round(u) } };
+    if (a.dur > 0) o.params.dur = a.dur;
+    if (Number.isFinite(a.loop)) o.params.loop = a.loop;
     state.objects.set(o.id, o);
     return o.id;
   },
@@ -106,7 +124,7 @@ define({
   required: ['id', 'role'],
   run(a) {
     const o = state.objects.get(a.id);
-    if (!o || !ROLES[o.kind]?.includes(a.role)) return false;
+    if (!o || !ROLES[o.kind]?.includes(a.role) || (a.role === 'traveler' && !o.on)) return false;
     if (a.role === 'connector') {
       if (o.bind) return true;
       const b = bindFor(inSpace(o.space).filter((x) => x !== o), ptsOf(o), a.tol ?? 0.8);
@@ -119,7 +137,7 @@ define({
     if (o.code != null) (o.stash ??= {})[o.role] = o.code;
     o.role = a.role;
     if (a.role === 'note') o.text ??= '';
-    const fresh = { path: PRESETS.path, code: PRESETS.blank, score: BRUSHES.glissando }[a.role];
+    const fresh = { path: PRESETS.path, code: PRESETS.blank, score: BRUSHES.glissando, event: EVENT }[a.role];
     if (fresh) { o.code = o.stash?.[a.role] ?? fresh; o.params ??= {}; } else delete o.code;
     prune(o);
     return true;
@@ -131,7 +149,7 @@ define({
   args: { id: T.id, code: T.str }, required: ['id', 'code'],
   run(a) {
     const o = state.objects.get(a.id);
-    if (!o || !['code', 'path', 'score'].includes(o.role)) return false;
+    if (!o || !['code', 'path', 'score', 'event'].includes(o.role)) return false;
     o.code = a.code; o.params ??= {};
     parseBlanket(o.code);
     prune(o);
@@ -253,6 +271,7 @@ define({
       else if (c.rect) { c.rect.cx += a.dx ?? 0; c.rect.cy += a.dy ?? 0; top.push(c.id); }
       else { if (!c.bind) top.push(c.id); c.off = [(c.off?.[0] ?? 0) + (a.dx ?? 0), (c.off?.[1] ?? 0) + (a.dy ?? 0)]; }
       if (c.bind) { c.bind.from.id = map.get(c.bind.from.id); c.bind.to.id = map.get(c.bind.to.id); }
+      if (c.on && map.has(c.on)) c.on = map.get(c.on);
       for (const side of ['ins', 'outs']) for (const p of c.ports?.[side] ?? []) p.inner.id = map.get(p.inner.id) ?? p.inner.id;
       state.objects.set(c.id, c);
     }
@@ -267,6 +286,7 @@ define({
     const gone = new Set();
     const take = (id) => { if (gone.has(id) || !state.objects.has(id)) return; gone.add(id); for (const o of state.objects.values()) if (o.space === id) take(o.id); };
     a.ids.forEach(take);
+    for (const o of state.objects.values()) if (o.role === 'traveler' && gone.has(o.on)) gone.add(o.id); // a traveler goes with its line
     for (const w of state.objects.values()) {
       if (w.bind && !gone.has(w.id) && (gone.has(w.bind.from.id) || gone.has(w.bind.to.id))) unbind(w);
     }
@@ -295,14 +315,17 @@ define({
 });
 
 define({
-  name: 'target.set', doc: 'Set how a render target is drawn into and seen. plane: the drawing plane ("view" faces the camera; "front", "top", "side"). az, el: the resting camera angle in radians.',
-  args: { id: T.id, plane: { enum: ['view', 'front', 'top', 'side'] }, az: T.num, el: T.num }, required: ['id'],
+  name: 'target.set', doc: 'Set how a render target is drawn into and seen. plane: the drawing plane ("view" faces the camera; "front", "top", "side"). anchor: what the plane passes through ("origin", the 3D "cursor", or the nearest "stroke"). cursor: the 3D cursor [x, y, z]. az, el, dist, center: the resting camera (angles in radians, distance, the point it looks at).',
+  args: { id: T.id, plane: { enum: ['view', 'front', 'top', 'side'] }, anchor: { enum: ['origin', 'cursor', 'stroke'] }, cursor: { type: 'array' }, az: T.num, el: T.num, dist: T.num, center: { type: 'array' } }, required: ['id'],
   run(a) {
     const o = state.objects.get(a.id);
     if (!o || !isTarget(o)) return;
     if (a.plane) o.plane = a.plane;
     if (Number.isFinite(a.az)) o.az = a.az;
     if (Number.isFinite(a.el)) o.el = a.el;
+    if (a.anchor) o.anchor = a.anchor;
+    if (a.dist > 0) o.dist = a.dist;
+    for (const k of ['cursor', 'center']) if (Array.isArray(a[k]) && a[k].length === 3 && a[k].every(Number.isFinite)) o[k] = a[k].slice();
   },
 });
 

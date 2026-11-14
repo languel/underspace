@@ -25,6 +25,19 @@ export function compileBrush(source) {
   return f;
 }
 
+// One plucked note, now. What an event plays.
+export function note(midi, velocity = 100, seconds = 0.3) {
+  const ac = ensureAudio();
+  if (ac.state === 'suspended') ac.resume();
+  const osc = ac.createOscillator(), amp = ac.createGain(), t = ac.currentTime + 0.005, level = 0.3 * Math.max(0, Math.min(127, velocity)) / 127;
+  osc.type = 'triangle'; osc.frequency.value = 440 * Math.pow(2, (midi - 69) / 12);
+  osc.connect(amp).connect(master);
+  amp.gain.setValueAtTime(0, t);
+  amp.gain.linearRampToValueAtTime(level, t + 0.005);
+  amp.gain.exponentialRampToValueAtTime(0.0005, t + Math.max(0.05, seconds));
+  osc.start(t); osc.stop(t + Math.max(0.05, seconds) + 0.05);
+}
+
 const sessions = new Map(); // id -> { bus, timer, passes: [{ t0, duration }], next }
 
 // provide() -> { voices, duration, bpm, source } for the coming pass, or null to stop.

@@ -67,6 +67,11 @@ or with a shape selected, makes it a render target.
 | ⌘' ⇧⌘' | grid, snap |
 | right-click | context menu |
 | Alt+right-click | properties at the pointer: the selection's, or the tool's |
+| pinch, mouse wheel | zoom; two fingers on a trackpad pan |
+| in a target: middle-drag | orbit; ⇧ pan, ⌃ zoom; Alt+left-drag does the same |
+| in a target: 1 3 7, Home | front, side, top view; reset |
+| in a target: ⇧+right-click | set the 3D cursor |
+| Y, A | event tool; attach a traveler to the selected line |
 | ⇧S | selected lines: smooth or straight strokes |
 | right-click a tool | the other tools of its kind, or its settings |
 
@@ -77,6 +82,12 @@ pencil, bristles, oil, marker, ink with pressure, hatch, stipple, wash and
 more. Choose one in Properties, in the draw tool's settings (right-click
 the tool), or from the palette ("Brush: charcoal"). Brushed marks are
 painted on a 2D layer, so they do not appear inside render targets.
+
+## Travelers and events
+
+Select a line and press A: a traveler sits on it. Draw events (Y) where it
+passes. Tap Space and travelers move; each event they enter fires its code,
+by default a note whose pitch is how high on the line the traveler was.
 
 ## Scores
 

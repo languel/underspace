@@ -159,3 +159,34 @@ test('a line carries a brush and the hand that drew it; sculpting replaces its p
   undo(); undo();
   assert.equal(state.objects.get(id).points.length, 10);
 });
+
+test('a traveler follows its line, and an event fires once when it enters', async () => {
+  const { createPlay, progress, nearestU, EVENT } = await import('../src/play.js');
+  assert.equal(progress(2, { dur: 4, loop: 1, start: 0 }), 0.5);
+  assert.equal(progress(5, { dur: 4, loop: 1, start: 0 }), 0.25, 'a loop wraps');
+  assert.equal(progress(5, { dur: 4, loop: 0, start: 0 }), 1, 'once stops at the end');
+  assert.equal(progress(5, { dur: 4, loop: 2, start: 0 }), 0.75, 'there and back');
+  assert.equal(nearestU([[0, 0], [10, 0]], 2.5, 3), 0.25);
+
+  fresh();
+  const line = call('line.add', { points: [[0, 0], [10, 0]] });
+  const tr = call('traveler.add', { on: line, u: 0, dur: 10, loop: 0 });
+  const ev = call('shape.add', { role: 'event', shape: 'rect', rect: { cx: 5, cy: 0, w: 0.2, h: 1 } });
+  assert.equal(state.objects.get(ev).code, EVENT);
+  assert.equal(call('object.role', { id: ev, role: 'traveler' }), false, 'a shape cannot become a traveler without a line');
+
+  const play = createPlay(), notes = [];
+  const hooks = { pointsOf: (l) => l.points, paramsOf: (o) => ({ dur: 10, loop: 0, start: 0, low: 48, high: 84, ...o.params }), note: (m) => notes.push(m) };
+  let r = play.step(state.objects, 0, true, hooks);
+  assert.deepEqual(r.moved.get(tr), [0, 0]);
+  r = play.step(state.objects, 8, true, hooks); // from 0 to 8: it jumped the thin event, the sweep still finds it
+  assert.equal(notes.length, 1);
+  assert.equal(r.out.get(ev).count, 1);
+  assert.equal(r.out.get(ev).gate, 0, 'it has already left');
+  r = play.step(state.objects, 9, true, hooks);
+  assert.equal(notes.length, 1, 'no second firing');
+  assert.deepEqual(r.out.get(tr), { x: 9, y: 0, u: 0.9 });
+
+  call('object.remove', { ids: [line] });
+  assert.equal(state.objects.has(tr), false, 'a traveler goes with its line');
+});

@@ -5,6 +5,7 @@ const KEY = 'underspace-settings';
 export const DEFAULTS = {
   theme: 'auto',        // 'auto' | 'light' | 'dark'
   grid: true, gridSize: 1, snap: false,
+  wheel: 'auto',        // what the mouse wheel does: 'auto' (a wheel zooms, a trackpad pans), 'zoom', 'pan'
   stroke: null, fill: null, width: 2.2, // the look new lines and shapes take; null is the default ink
   brush: '', planeBrush: '',            // the ink brush new lines and new shapes take ('' is a plain line)
   brushParams: {},                      // brush id -> the parameters last set for it

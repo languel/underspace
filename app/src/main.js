@@ -3,7 +3,7 @@
 
 import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, argTypes as T } from './space.js';
 import './patch.js';
-import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplifyIndex, setDrag, setLive, penOf, isLine, isTarget, hasCode, isWire } from './object.js';
+import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplifyIndex, setDrag, setLive, setMoved, penOf, isLine, isTarget, hasCode, isWire } from './object.js';
 import { selectionProps, toolProps } from './panels/properties.js';
 import { wirePoints } from './bind.js';
 import { createRunner } from './run.js';
@@ -27,6 +27,7 @@ import { PRESETS } from './presets.js';
 import { BRUSHES } from './brushes.js';
 import { read as readScore } from './score.js';
 import * as sound from './sound.js';
+import { createPlay, nearestU } from './play.js';
 import { icon } from './icons.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
@@ -43,6 +44,8 @@ const onCode = (id, code) => { step.restart(id); call('object.code', { id, code 
 const faces = createFaces($('faces'), { onParam, onCode });
 const step = createRunner();
 const ink = createInk($('ink'));
+const playEngine = createPlay();
+let playT0 = null; // when the travelers set off (seconds), or null while they rest
 const view = await createView({ canvas: $('gl'), stage, onFrame: frame });
 addEventListener('message', (e) => { if (e.data?.underspace) step.report(e.data.underspace, e.data); });
 
@@ -61,6 +64,9 @@ let sceneList = [], dots = []; // dots: [x, y] a path's cursor, [x, y, h] a scor
 let inkItems = [];    // brushed marks, for the 2D ink layer
 let inkColor = '#1d1c1a', lastCam = '';
 let lastSig = '', dragSig = '', run = null, orbit = null;
+
+// A target's resting camera: what is stored, or what a navigation in progress has made of it.
+const camOf = (o) => (orbit?.id === o.id ? orbit : { az: o.az ?? 0.5, el: o.el ?? 0.3, dist: o.dist ?? 13, center: o.center ?? [0, 0, 0] });
 
 // Where a brushed object goes on the ink layer: brush units to stage pixels.
 function inkItem(o, e, xf, st) {
@@ -87,6 +93,8 @@ function walk(space, xf) {
     }
     const r = rectOf(o), [l, t] = view.toScreen(at(xf, [r.cx - r.w / 2, r.cy + r.h / 2]));
     const px = { l, t, w: r.w * xf.k / upp, h: r.h * xf.k / upp };
+    if (o.role === 'traveler') lines.push({ id: o.id, pts: outline(r, 'ellipse').map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'hot', width: 1.6, fill: st.fill ?? st.stroke ?? 'hot', opacity: st.opacity ?? 0.85 });
+    if (o.role === 'event') { const lit = performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160; lines.push({ id: o.id, pts: outline(r, o.shape).map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'hot', width: lit ? 3 : 1.4, fill: lit ? st.stroke ?? 'hot' : st.fill, opacity: lit ? 0.5 : st.opacity }); }
     if (o.kind === 'shape' && o.role === 'visual') {
       const edge = outline(r, o.shape);
       if (o.brush) inkItems.push(inkItem(o, element(edge.slice(0, -1), null, { closed: true, role: 'plane', color: st.fill ?? st.stroke ?? inkColor }), xf, { ...st, path: o.shape === 'rect' ? 'straight' : null }));
@@ -106,7 +114,7 @@ function walk(space, xf) {
       walk(o.id, inner);
     }
     if (isTarget(o) && face !== 'far') {
-      spaces.push({ id: o.id, kind: 'scene', px, plane: o.plane ?? 'view' });
+      spaces.push({ id: o.id, kind: 'scene', px, plane: o.plane ?? 'view', origin: (o.anchor ?? 'origin') === 'origin' ? [0, 0, 0] : o.cursor ?? [0, 0, 0], focused: face === 'near' || sel });
       const marks = [];
       for (const m of state.objects.values()) {
         if (m.space !== o.id || !m.points || m.hidden) continue;
@@ -116,11 +124,13 @@ function walk(space, xf) {
         ink3d.push({ id: m.id, scene: o.id, pts });
         vis.set(m.id, { o: m, face: 'line', scene: o.id });
       }
-      const turn = orbit?.id === o.id ? orbit : null;
+      // its 3D cursor, when the drawing plane hangs from it
+      if ((o.anchor ?? 'origin') === 'cursor') { const c = o.cursor ?? [0, 0, 0], d = 0.35; for (let k = 0; k < 3; k++) { const a = c.slice(), b = c.slice(); a[k] -= d; b[k] += d; marks.push({ pts: [a, b], color: 'hot' }); } }
+      const cam = camOf(o);
       sceneList.push({
-        id: o.id, px, marks,
-        az: (o.az ?? 0.5) + (turn?.daz ?? 0) + (Number(run.input(o.id, 'spin')) || 0) * Math.PI,
-        el: (o.el ?? 0.3) + (turn?.del ?? 0) + (Number(run.input(o.id, 'tilt')) || 0),
+        id: o.id, px, marks, dist: cam.dist, center: cam.center,
+        az: cam.az + (Number(run.input(o.id, 'spin')) || 0) * Math.PI,
+        el: cam.el + (Number(run.input(o.id, 'tilt')) || 0),
       });
     }
   }
@@ -140,23 +150,34 @@ function scoreOf(id) {
 const scores = () => [...state.objects.values()].filter((o) => o.role === 'score');
 const play = (id) => sound.start(id, () => scoreOf(id), (error) => step.report(id, { error: error ?? '' }));
 // Space: stop what is playing; otherwise play the selected scores, or all of them.
+const travelers = () => [...state.objects.values()].filter((o) => o.role === 'traveler');
 function togglePlay(c = context()) {
-  if (sound.playing().length) return sound.stopAll();
+  if (sound.playing().length || playT0 != null) { sound.stopAll(); playT0 = null; playEngine.reset(); return; }
   const chosen = c.sel.filter((o) => o.role === 'score');
   for (const o of chosen.length ? chosen : scores()) play(o.id);
+  if (travelers().length) { playEngine.reset(); playT0 = performance.now() / 1000; }
 }
+// A line as it is shown: what a traveler follows.
+const shownPath = (l) => { const raw = run?.shown.get(l.id) ?? ptsOf(l); return l.style?.path === 'straight' || l.closed ? raw : smooth(raw); };
+const paramsOf = (o) => { const p = {}; for (const q of blanketOf(o)?.params ?? []) p[q.name] = o.params?.[q.name] ?? q.value; return p; };
 
 let laidOut = -1; // the state version the last layout was made from
 function frame() {
   laidOut = state.version;
   for (const id of sound.playing()) { if (get(id)?.role === 'score') step.report(id, { out: { pos: sound.position(id) } }); else sound.stop(id); }
+  // Travelers move and events fire before the code objects run, so their outputs are this frame's.
+  const now = performance.now() / 1000, played = playEngine.step(state.objects, playT0 == null ? 0 : now - playT0, playT0 != null, { pointsOf: shownPath, paramsOf, note: sound.note });
+  setMoved(played.moved);
+  let playSig = 0;
+  for (const [id, out] of played.out) { step.report(id, { out, error: played.errors.get(id) ?? '' }); if (out.u != null) playSig += out.x * 3 + out.y * 7; }
+  for (const [id, when] of playEngine.hitAt) if (performance.now() - when < 160) playSig += when + id.length;
   run = step(state.objects, performance.now() / 1000);
   vis = new Map(); spaces = [{ id: null, kind: 'canvas', xf: ROOT }]; lines = []; ink3d = []; sceneList = []; dots = []; inkItems = [];
   walk(null, ROOT);
   // Lines that code makes can change every frame; a cheap fingerprint tells.
   let made = 0;
   for (const pts of run.shown.values()) { const m = pts[pts.length >> 1]; made += pts.length + m[0] * 7 + m[1] * 13; }
-  const sig = `${state.version}|${dragSig}|${spaces.map((s) => s.id).join()}|${made}`;
+  const sig = `${state.version}|${dragSig}|${spaces.map((s) => s.id).join()}|${made}|${playSig}`;
   const dirty = sig !== lastSig;
   lastSig = sig;
   if (dirty) view.setLines(lines);
@@ -198,7 +219,7 @@ function spaceAt(x, y, flatOnly = false) {
   }
   return spaces[0];
 }
-const toSpace = (s, x, y) => (s.kind === 'scene' ? view.sceneToLocal(s.id, x, y, s.plane) : back(s.xf, view.toWorld(x, y)));
+const toSpace = (s, x, y) => (s.kind === 'scene' ? view.sceneToLocal(s.id, x, y, s.plane, s.origin) : back(s.xf, view.toWorld(x, y)));
 const unitsPerPx = (s) => view.unitsPerPx() / (s.xf?.k ?? 1);
 
 function segDist(x, y, a, b) {
@@ -247,7 +268,7 @@ let gesture = null; // what the pointer is doing between down and up
 let spaceKey = false, spaceUsed = false, spaceAt0 = 0, pointer = null;
 const ring = $('ring'); // the sculpt brush's reach
 const touches = new Map();
-const MAKE = { rect: { role: 'visual', shape: 'rect' }, ellipse: { role: 'visual', shape: 'ellipse' }, code: { role: 'code', shape: 'rect' }, target: { role: 'target', shape: 'rect' }, score: { role: 'score', shape: 'rect' }, note: { role: 'note', shape: 'rect' } };
+const MAKE = { rect: { role: 'visual', shape: 'rect' }, ellipse: { role: 'visual', shape: 'ellipse' }, code: { role: 'code', shape: 'rect' }, target: { role: 'target', shape: 'rect' }, score: { role: 'score', shape: 'rect' }, note: { role: 'note', shape: 'rect' }, event: { role: 'event', shape: 'ellipse' } };
 // The look new lines and shapes take, from the toolbar swatches.
 const newStyle = (fillable) => { const st = {}; if (settings.stroke) st.stroke = settings.stroke; if (fillable && settings.fill) st.fill = settings.fill; if (settings.width !== 2.2) st.width = settings.width; if (!fillable && !settings.smooth) st.path = 'straight'; return Object.keys(st).length ? { style: st } : {}; };
 const snap = (v) => (settings.snap ? Math.round(v / settings.gridSize) * settings.gridSize : v);
@@ -268,7 +289,22 @@ function showMarquee(a, b) {
   marquee.hidden = false;
   marquee.style.cssText = `left:${Math.min(a[0], b[0])}px;top:${Math.min(a[1], b[1])}px;width:${Math.abs(a[0] - b[0])}px;height:${Math.abs(a[1] - b[1])}px`;
 }
+// In a target the drawing plane passes through the origin, the 3D cursor, or
+// (anchor 'stroke') the point of an existing stroke nearest the pointer, so a
+// new stroke takes its depth from one already there and forms grow in 3D. The
+// choice is made once, where the stroke begins, and holds to its end.
+function placed(s, p) {
+  if (s.kind !== 'scene' || (get(s.id).anchor ?? 'origin') !== 'stroke') return s;
+  let best = null, bestD = 48;
+  for (const l of ink3d) {
+    if (l.scene !== s.id) continue;
+    for (const pt of l.pts) { const q = view.sceneToScreen(l.scene, pt), d = q ? Math.hypot(q[0] - p[0], q[1] - p[1]) : Infinity; if (d < bestD) { bestD = d; best = pt; } }
+  }
+  return best ? { ...s, origin: [best[0], best[1], best[2] ?? 0] } : s;
+}
+
 function startDraw(s, p, wire = false) {
+  s = placed(s, p);
   const q = toSpace(s, p[0], p[1]);
   if (q) gesture = { kind: 'draw', s, pts: [q], last: p, wire, pen: [[0, 0.5]], t0: performance.now(), lastT: performance.now() };
 }
@@ -283,12 +319,19 @@ pad.addEventListener('pointerdown', (e) => {
     touches.set(e.pointerId, p);
     if (touches.size === 2) { cancelGesture(); gesture = { kind: 'pinch' }; return; }
   }
+  // In a render target the mouse works as in Blender: middle-drag orbits, with
+  // Shift it pans, with Ctrl it zooms. Alt+left-drag stands in for the middle button.
+  const in3d = spaceAt(p[0], p[1]);
+  if (in3d.kind === 'scene' && (e.button === 1 || (e.button === 0 && e.altKey)) && !spaceKey) {
+    const o = get(in3d.id), cam = camOf(o);
+    gesture = { kind: 'nav3d', mode: e.shiftKey ? 'pan' : e.ctrlKey || e.metaKey ? 'zoom' : 'orbit', id: o.id, start: p, cam: { ...cam, center: cam.center.slice() }, h: in3d.px.h };
+    e.preventDefault();
+    return;
+  }
   if (e.button === 1 || (e.button === 0 && (spaceKey || tool === 'pan'))) { gesture = { kind: 'pan', last: p }; spaceUsed = true; return; }
   if (e.button !== 0) return;
 
   const here = spaceAt(p[0], p[1]), port = portAt(p[0], p[1]);
-  // Alt-drag inside a target turns it.
-  if (e.altKey && here.kind === 'scene') { const o = get(here.id); gesture = { kind: 'orbit', id: o.id, start: p, az: o.az ?? 0.5, el: o.el ?? 0.3 }; return; }
   // A drag that starts on a port draws a connector, whatever the tool.
   if (port) { const s = spaces.find((x) => x.id === port.v.o.space) ?? spaces[0]; startDraw(s, p, true); return; }
   // The corner of the selected shape resizes it.
@@ -308,10 +351,10 @@ pad.addEventListener('pointerdown', (e) => {
     return;
   }
   if (tool === 'draw') startDraw(here, p);
-  else if (tool === 'line') { const q = toSpace(here, p[0], p[1]); if (q) gesture = { kind: 'line', s: here, a: q, b: q, start: p }; }
+  else if (tool === 'line') { const s = placed(here, p), q = toSpace(s, p[0], p[1]); if (q) gesture = { kind: 'line', s, a: q, b: q, start: p }; }
   else if (MAKE[tool]) {
-    const flat = tool !== 'rect' && tool !== 'ellipse';
-    gesture = { kind: 'rect', make: MAKE[tool], s: spaceAt(p[0], p[1], flat), start: p, end: p };
+    const flat = tool !== 'rect' && tool !== 'ellipse'; // only plain shapes can be drawn inside a target
+    gesture = { kind: 'rect', make: MAKE[tool], s: placed(spaceAt(p[0], p[1], flat), p), start: p, end: p };
   } else {
     const id = pick(p[0], p[1]);
     if (id) {
@@ -396,10 +439,27 @@ pad.addEventListener('pointermove', (e) => {
     g.next = { cx: round(r.cx - r.w / 2 + w / 2), cy: round(r.cy + r.h / 2 - h / 2), w: round(w), h: round(h) };
     setDrag({ ids: new Set([g.id]), rect: g.next });
     dragSig = w + ',' + h;
-  } else if (g.kind === 'orbit') {
-    orbit = { id: g.id, daz: -(p[0] - g.start[0]) * 0.01, del: (p[1] - g.start[1]) * 0.01 };
+  } else if (g.kind === 'nav3d') {
+    orbit = { id: g.id, ...navigate(g.cam, g.mode, p[0] - g.start[0], p[1] - g.start[1], g.h) };
   } else if (g.kind === 'rect' || g.kind === 'marquee') { g.end = p; showMarquee(g.start, g.end); }
 });
+
+// A target's camera after an orbit, pan or zoom of (dx, dy) pixels. h is the target's height on screen.
+const FOV = 40 * Math.PI / 180;
+function navigate(cam, mode, dx, dy, h) {
+  if (mode === 'orbit') return { ...cam, az: cam.az - dx * 0.01, el: Math.max(-1.55, Math.min(1.55, cam.el + dy * 0.01)) };
+  if (mode === 'zoom') return { ...cam, dist: Math.max(0.5, Math.min(400, cam.dist * Math.exp(dy * 0.01))) };
+  // pan: slide the point it looks at across the view plane, so what is under the pointer follows it
+  const ca = Math.cos(cam.az), sa = Math.sin(cam.az), ce = Math.cos(cam.el), se = Math.sin(cam.el);
+  const d = [sa * ce, se, ca * ce], r = [ca, 0, -sa], u = [d[1] * r[2] - d[2] * r[1], d[2] * r[0] - d[0] * r[2], d[0] * r[1] - d[1] * r[0]];
+  const k = 2 * cam.dist * Math.tan(FOV / 2) / h;
+  return { ...cam, center: cam.center.map((c, i) => c - r[i] * dx * k + u[i] * dy * k) };
+}
+// Store the camera a navigation arrived at, as one command.
+function commitCam() {
+  const o = orbit; orbit = null;
+  if (o) call('target.set', { id: o.id, az: round(o.az), el: round(o.el), dist: round(o.dist), center: o.center.map(round) });
+}
 
 function cancelGesture() {
   gesture = null; marquee.hidden = true; view.setPreview(null); setDrag(null); setLive(null); dragSig = ''; orbit = null;
@@ -446,9 +506,8 @@ function endGesture(e) {
   } else if (g.kind === 'resize') {
     setDrag(null); dragSig = '';
     if (g.next) call('object.resize', { id: g.id, rect: g.next });
-  } else if (g.kind === 'orbit') {
-    const o = orbit; orbit = null;
-    if (o) call('target.set', { id: g.id, az: round(g.az + o.daz), el: round(Math.max(-1.5, Math.min(1.5, g.el + o.del))) });
+  } else if (g.kind === 'nav3d') {
+    commitCam();
   } else if (g.kind === 'rect') {
     const tiny = Math.hypot(g.end[0] - g.start[0], g.end[1] - g.start[1]) < 8;
     if (g.s.kind === 'scene') { if (!tiny) batch(() => shapeIn3d(g)); }
@@ -479,7 +538,7 @@ pad.addEventListener('pointercancel', endGesture);
 // A shape in a flat space, from a drag or (end = null) at a default size.
 function addShape(s, make, start, end, extra = {}) {
   const a = toSpace(s, start[0], start[1]), u = unitsPerPx(s);
-  const size = make.role === 'target' ? [360, 260] : make.role === 'score' ? [460, 240] : make.role === 'code' ? [170, 110] : make.role === 'note' ? [180, 70] : [120, 120];
+  const size = make.role === 'target' ? [360, 260] : make.role === 'score' ? [460, 240] : make.role === 'code' ? [170, 110] : make.role === 'note' ? [180, 70] : make.role === 'event' ? [90, 90] : [120, 120];
   let rect = { cx: a[0], cy: a[1], w: size[0] * u, h: size[1] * u };
   if (end) { const b = toSpace(s, end[0], end[1]); rect = { cx: (a[0] + b[0]) / 2, cy: (a[1] + b[1]) / 2, w: Math.abs(a[0] - b[0]), h: Math.abs(a[1] - b[1]) }; }
   if (settings.snap && end) { const x0 = snap(rect.cx - rect.w / 2), x1 = snap(rect.cx + rect.w / 2), y0 = snap(rect.cy - rect.h / 2), y1 = snap(rect.cy + rect.h / 2); rect = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(settings.gridSize, x1 - x0), h: Math.max(settings.gridSize, y1 - y0) }; }
@@ -492,14 +551,30 @@ function addShape(s, make, start, end, extra = {}) {
   });
 }
 
-// Wheel pans; pinch or ctrl+wheel zooms about the pointer.
-pad.addEventListener('wheel', (e) => {
+// The wheel. On the canvas: a pinch (or Ctrl/Cmd+wheel) zooms about the pointer, a
+// trackpad's two fingers pan, a mouse wheel zooms. Over a render target that is
+// selected or open, the same gestures move its camera, as in Blender: two fingers
+// orbit, with Shift they pan, a pinch or the wheel zooms.
+const isMouseWheel = (e) => settings.wheel === 'zoom' || (settings.wheel === 'auto' && (e.deltaMode !== 0 || (e.deltaX === 0 && e.wheelDeltaY && Math.abs(e.wheelDeltaY) % 120 === 0)));
+let wheelTimer = 0;
+function onWheel(e) {
+  if (e.target.closest?.('textarea, .panel, .menu') && !(e.ctrlKey || e.metaKey)) return; // let text scroll
   e.preventDefault();
-  const p = local(e);
-  if (e.ctrlKey || e.metaKey) view.zoomAt(p[0], p[1], Math.exp(-e.deltaY * 0.01));
+  if (laidOut !== state.version) frame();
+  const p = local(e), pinch = e.ctrlKey || e.metaKey, s = spaceAt(p[0], p[1]);
+  if (s.kind === 'scene' && s.focused && !gesture) {
+    const o = get(s.id), cam = camOf(o);
+    orbit = { id: o.id, ...(pinch || isMouseWheel(e) ? navigate(cam, 'zoom', 0, e.deltaY * (pinch ? 1 : 0.25), s.px.h) : navigate(cam, e.shiftKey ? 'pan' : 'orbit', -e.deltaX, -e.deltaY, s.px.h)) };
+    clearTimeout(wheelTimer); wheelTimer = setTimeout(commitCam, 250); // one command when the wheel rests
+    return;
+  }
+  if (pinch) view.zoomAt(p[0], p[1], Math.exp(-e.deltaY * 0.01));
+  else if (isMouseWheel(e)) view.zoomAt(p[0], p[1], Math.exp(-Math.sign(e.deltaY) * Math.min(0.5, Math.abs(e.deltaY) * 0.002 + 0.08)));
   else { const u = view.unitsPerPx(); view.cam.cx += e.deltaX * u; view.cam.cy -= e.deltaY * u; }
-}, { passive: false });
+}
+stage.addEventListener('wheel', onWheel, { passive: false });
 addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+pad.addEventListener('auxclick', (e) => e.preventDefault()); // the middle button is ours
 
 // ---- navigation ------------------------------------------------------------
 
@@ -631,6 +706,10 @@ const ACTIONS = [
   { id: 'tool.target', title: 'Render target', icon: 'target', keys: 't', group: 'tool2', bar: 'tools', tool: 'target', stack: 'object' },
   { id: 'role.score', title: 'Make score', icon: 'score', keys: 's', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'score'), run: (c) => setRole(c.shapes, 'score') },
   { id: 'tool.score', title: 'Score', icon: 'score', keys: 's', group: 'tool2', bar: 'tools', tool: 'score', stack: 'object' },
+  { id: 'tool.event', title: 'Event', icon: 'event', keys: 'y', group: 'tool2', bar: 'tools', tool: 'event', stack: 'object' },
+  { id: 'role.event', title: 'Make event', icon: 'event', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'event') && !c.shapes.some((o) => o.role === 'traveler'), run: (c) => setRole(c.shapes, 'event') },
+  { id: 'attach.traveler', title: 'Attach a traveler here', icon: 'traveler', keys: 'a', group: 'role', menu: true, when: (c) => c.lines.length === 1 && !c.lines[0].bind && get(c.lines[0].space)?.role !== 'target', // not inside a 3D space, for now
+    run: (c) => { const l = c.lines[0], s = spaces.find((x) => x.id === l.space) ?? spaces[0], q = toSpace(s, c.p[0], c.p[1]); const id = call('traveler.add', { on: l.id, u: round(nearestU(shownPath(l), q[0], q[1])), size: round(22 * unitsPerPx(s)) }); if (id) call('select.set', { ids: [id] }); } },
   { id: 'role.code', title: 'Make code container', icon: 'code', keys: 'c', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'code'), run: (c) => setRole(c.shapes, 'code') },
   { id: 'role.path', title: 'Make path', icon: 'path', keys: 'c', group: 'role', menu: true, when: (c) => c.lines.length && can(c.lines, 'path'), run: (c) => setRole(c.lines, 'path') },
   { id: 'role.connector', title: 'Make connector', icon: 'connector', keys: 'w', group: 'role', menu: true, when: (c) => c.lines.some((o) => !o.bind), run: (c) => setRole(c.lines, 'connector') },
@@ -639,7 +718,7 @@ const ACTIONS = [
   { id: 'path.smooth', title: 'Smooth strokes', icon: 'draw', keys: 'shift+s', group: 'role', menu: true, when: (c) => c.lines.some((o) => o.style?.path === 'straight'), run: (c) => call('object.style', { ids: ids(c.lines), style: { path: null } }) },
   { id: 'role.visual', title: 'Make visual', icon: 'visual', keys: 'x', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'visual'), run: (c) => setRole(c.shapes, 'visual') },
   // sound: a tap of Space plays or stops (holding it and dragging pans)
-  { id: 'play', title: 'Play or stop', icon: 'play', keys: 'mod+enter', group: 'play', bar: 'edit', menu: true, when: (c) => scores().length, run: (c) => togglePlay(c) },
+  { id: 'play', title: 'Play or stop', icon: 'play', keys: 'mod+enter', group: 'play', bar: 'edit', menu: true, when: () => scores().length || travelers().length, run: (c) => togglePlay(c) },
   // ink brushes: on the selection, or with nothing selected, for the lines drawn next
   ...['', ...brushesFor('line')].map((id) => ({
     id: 'brush.' + (id || 'none'), title: id ? `Brush: ${INK[id].label}` : 'Brush: plain line', icon: 'brush', group: 'brush',
@@ -664,6 +743,15 @@ const ACTIONS = [
   ...['view', 'front', 'top', 'side'].map((plane) => ({
     id: 'plane.' + plane, title: `Draw on the ${plane} plane`, icon: 'plane', group: 'plane', menu: true,
     when: (c) => c.target && (c.target.plane ?? 'view') !== plane, run: (c) => call('target.set', { id: c.target.id, plane }),
+  })),
+  ...[['front', '1', 0, 0], ['side', '3', Math.PI / 2, 0], ['top', '7', 0, 1.55]].map(([name, key, az, el]) => ({
+    id: 'view3d.' + name, title: `View from the ${name}`, icon: 'target', keys: key, group: 'plane', menu: true,
+    when: (c) => c.here.kind === 'scene' || c.one?.role === 'target', run: (c) => call('target.set', { id: c.target.id, az, el }),
+  })),
+  { id: 'view3d.home', title: 'Reset the view', icon: 'target', keys: 'home', group: 'plane', menu: true, when: (c) => c.target, run: (c) => call('target.set', { id: c.target.id, az: 0.5, el: 0.3, dist: 13, center: [0, 0, 0] }) },
+  ...['origin', 'cursor', 'stroke'].map((anchor) => ({
+    id: 'anchor.' + anchor, title: `Draw from the ${anchor === 'stroke' ? 'nearest stroke' : anchor === 'cursor' ? '3D cursor' : 'origin'}`, icon: 'plane', group: 'plane', menu: true,
+    when: (c) => c.target && (c.target.anchor ?? 'origin') !== anchor, run: (c) => call('target.set', { id: c.target.id, anchor }),
   })),
   { id: 'plane.next', title: 'Next drawing plane', icon: 'plane', keys: 'p', group: 'plane', when: (c) => c.target, run: (c) => { const all = ['view', 'front', 'top', 'side']; call('target.set', { id: c.target.id, plane: all[(all.indexOf(c.target.plane ?? 'view') + 1) % 4] }); } },
   // adding, at the pointer
@@ -882,6 +970,12 @@ pad.addEventListener('contextmenu', (e) => {
   const p = local(e), id = pick(p[0], p[1]);
   pointer = p;
   if (id && !state.selection.has(id)) call('select.set', { ids: [id] });
+  const in3d = spaceAt(p[0], p[1]);
+  if (e.shiftKey && in3d.kind === 'scene') { // Shift+right-click in a target: put its 3D cursor here, and draw from it
+    const o = get(in3d.id), at3 = view.sceneToLocal(o.id, p[0], p[1], o.plane ?? 'view', o.cursor ?? [0, 0, 0]);
+    if (at3) call('target.set', { id: o.id, cursor: at3.map(round), anchor: 'cursor' });
+    return;
+  }
   if (e.altKey) { // Alt+right-click: properties here, of what is selected or else of the tool
     const sel = () => [...state.selection].map(get).filter(Boolean);
     pop = showPopover(() => (sel().length ? selectionProps(app, sel()) : toolProps(app, tool)), e.clientX, e.clientY);
@@ -910,7 +1004,7 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => {
   if (e.key !== ' ' || !spaceKey) return;
   spaceKey = false; delete pad.dataset.pan;
-  if (!spaceUsed && performance.now() - spaceAt0 < 400 && scores().length) togglePlay(); // a tap, not a hold
+  if (!spaceUsed && performance.now() - spaceAt0 < 400 && (scores().length || travelers().length)) togglePlay(); // a tap, not a hold
 });
 
 // Paste code onto the canvas: it becomes a code container at the pointer.
@@ -934,9 +1028,10 @@ addEventListener('paste', (e) => {
 define({ name: 'view.fit', doc: 'Show everything.', record: false, run: () => fit() });
 define({ name: 'view.frame', doc: 'Show these objects; a single object is opened to its near face.', args: { ids: T.ids }, required: ['ids'], record: false, run: (a) => frameIds(a.ids, a.ids.length === 1 ? 0.82 : 0.6) });
 define({ name: 'view.zoom', doc: 'Zoom by a factor about the middle of the view.', args: { factor: T.num }, required: ['factor'], record: false, run: (a) => view.zoomAt(...centre(), a.factor) });
-define({ name: 'tool.set', doc: 'Choose the pointer tool.', args: { name: { enum: ['select', 'pan', 'draw', 'line', 'rect', 'ellipse', 'sculpt', 'note', 'code', 'target', 'score'] } }, required: ['name'], record: false, run: (a) => setTool(a.name) });
+define({ name: 'tool.set', doc: 'Choose the pointer tool.', args: { name: { enum: ['select', 'pan', 'draw', 'line', 'rect', 'ellipse', 'sculpt', 'note', 'code', 'target', 'score', 'event'] } }, required: ['name'], record: false, run: (a) => setTool(a.name) });
 define({ name: 'space.read', doc: 'Read the document: every object with its role, space, rectangle, ports and code.', record: false, run: () => [...state.objects.values()].map((o) => ({ id: o.id, kind: o.kind, role: o.role, space: o.space, rect: o.rect, name: blanketOf(o)?.name, ins: blanketOf(o)?.ins, outs: blanketOf(o)?.outs, params: o.params, code: hasCode(o) ? o.code : undefined, bind: o.bind, points: o.points?.length })) });
 define({ name: 'score.play', doc: 'Start a score looping. What is drawn or changed while it plays is heard from the next pass.', args: { id: T.id }, required: ['id'], record: false, run: (a) => play(a.id) });
+define({ name: 'play.toggle', doc: 'Start or stop playing: scores loop and travelers set off along their lines.', record: false, run: () => togglePlay() });
 define({ name: 'score.stop', doc: 'Stop one score, or every score when no id is given.', args: { id: T.id }, record: false, run: (a) => (a.id ? sound.stop(a.id) : sound.stopAll()) });
 define({ name: 'assistant.ask', doc: 'Ask the built-in assistant to build something from a sentence.', args: { text: T.str }, required: ['text'], record: false, run: (a) => ask(a.text) });
 

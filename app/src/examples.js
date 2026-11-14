@@ -55,6 +55,13 @@ export const EXAMPLES = [
     const id = c('line.add', { points: [[at[0] - 4, at[1]], [at[0] + 4, at[1]]], role: 'path' });
     c('object.code', { id, code: PRESETS.wave });
   } },
+  { title: 'A traveler rings events', icon: 'traveler', build: (c, at) => {
+    const loop = Array.from({ length: 48 }, (_, i) => { const a = (i / 48) * Math.PI * 2; return [+(at[0] + Math.cos(a) * 4).toFixed(3), +(at[1] + Math.sin(a) * 2.2 + Math.sin(a * 3) * 0.5).toFixed(3)]; });
+    const line = c('line.add', { points: [...loop, loop[0]] });
+    c('traveler.add', { on: line, u: 0, dur: 6 });
+    c('traveler.add', { on: line, u: 0.5, dur: 9 });
+    for (const i of [3, 11, 20, 29, 40]) c('shape.add', { role: 'event', shape: 'ellipse', rect: { cx: loop[i][0], cy: loop[i][1], w: 0.9, h: 0.9 } });
+  } },
   { title: 'A p5.js sketch', icon: 'box', build: (c, at) => c('shape.add', { role: 'code', code: P5, rect: { cx: at[0], cy: at[1], w: 6, h: 4.5 } }) },
   { title: 'A three.js sketch', icon: 'box', build: (c, at) => c('shape.add', { role: 'code', code: THREE, rect: { cx: at[0], cy: at[1], w: 6, h: 4.5 } }) },
   { title: 'One reusable group', icon: 'collapse', build: (c, at) => c('patch.add', { at, nodes: [{ key: 'osc', preset: 'osc' }, { key: 'smooth', preset: 'smooth' }, { key: 'out', preset: 'scale' }], links: ['osc -> smooth', 'smooth -> out'], collapse: true, name: 'lfo' }) },

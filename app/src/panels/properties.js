@@ -6,8 +6,8 @@ import { h, row, section, glyphButton, numberField, textField, colorField, syncP
 import { ROLES, blanketOf, hasCode, isTarget } from '../object.js';
 import { settings, setSetting } from '../settings.js';
 
-const ROLE_ICON = { ink: 'ink', connector: 'connector', path: 'path', visual: 'visual', target: 'target', code: 'box', score: 'score', note: 'note' };
-const ROLE_TITLE = { ink: 'Ink', connector: 'Connector', path: 'Path', visual: 'Visual', target: 'Render target', code: 'Code container', score: 'Score', note: 'Note' };
+const ROLE_ICON = { event: 'event', traveler: 'traveler', ink: 'ink', connector: 'connector', path: 'path', visual: 'visual', target: 'target', code: 'box', score: 'score', note: 'note' };
+const ROLE_TITLE = { event: 'Event', traveler: 'Traveler', ink: 'Ink', connector: 'Connector', path: 'Path', visual: 'Visual', target: 'Render target', code: 'Code container', score: 'Score', note: 'Note' };
 // Choose an ink brush and set its parameters. `role` is 'line' or 'plane'.
 function brushSection(app, role, id, params, onBrush, onParam) {
   const rows = [row('brush', choice([['', 'plain'], ...app.brushesFor(role).map((b) => [b, app.INK[b].label])], id ?? '', (v) => onBrush(v || null)))];
@@ -65,7 +65,7 @@ export function selectionProps(app, sel, live = null) {
     const kind = shared(sel, (o) => o.kind);
     if (ROLES[kind]) {
       const role = shared(sel, (o) => o.role), bar = h('div', 'glyph-row');
-      bar.append(...ROLES[kind].map((r) => glyphButton(ROLE_ICON[r], ROLE_TITLE[r], () => app.setRole(sel, r), r === role)));
+      bar.append(...ROLES[kind].filter((r) => r !== 'traveler' || role === 'traveler').map((r) => glyphButton(ROLE_ICON[r], ROLE_TITLE[r], () => app.setRole(sel, r), r === role)));
       out.push(section('Role', bar));
     }
     if (sel.some((o) => !o.bind && o.kind !== 'group')) {
@@ -87,7 +87,7 @@ export function selectionProps(app, sel, live = null) {
       for (const [k, label] of [['cx', 'x'], ['cy', 'y'], ['w', 'w'], ['h', 'h']]) grid.append(row(label, numberField(+r[k].toFixed(3), set(k), { step: 0.1 })));
       out.push(section('Place', grid));
     }
-    if (one && hasCode(one)) { const box = live ?? h('div', 'params'); if (!live) syncParams(box, one, blanketOf(one), app.onParam); out.push(section('Parameters', box)); }
+    if (one && blanketOf(one)?.params.length) { const box = live ?? h('div', 'params'); if (!live) syncParams(box, one, blanketOf(one), app.onParam); out.push(section('Parameters', box)); }
     if (one?.role === 'note') {
       const text = h('textarea', 'note-text');
       text.value = one.text ?? ''; text.spellcheck = false;
@@ -98,6 +98,9 @@ export function selectionProps(app, sel, live = null) {
       const bar = h('div', 'glyph-row text');
       for (const p of ['view', 'front', 'top', 'side']) { const b = h('button', '', p); b.type = 'button'; b.title = `Draw on the ${p} plane`; b.setAttribute('aria-pressed', String((one.plane ?? 'view') === p)); b.onclick = () => app.call('target.set', { id: one.id, plane: p }); bar.append(b); }
       out.push(section('Drawing plane', bar));
+      const from = h('div', 'glyph-row text');
+      for (const [a, label, tip] of [['origin', 'origin', 'The plane passes through the middle'], ['cursor', 'cursor', 'Through the 3D cursor (Shift+right-click sets it)'], ['stroke', 'stroke', 'Through the nearest stroke where you start']]) { const b = h('button', '', label); b.type = 'button'; b.title = tip; b.setAttribute('aria-pressed', String((one.anchor ?? 'origin') === a)); b.onclick = () => app.call('target.set', { id: one.id, anchor: a }); from.append(b); }
+      out.push(section('Drawn from', from));
     }
     const bar = h('div', 'glyph-row');
     bar.append(
@@ -120,7 +123,7 @@ export function propertiesPanel(el, app) {
   return {
     update() {
       const sel = [...app.state.selection].map(app.get).filter(Boolean), one = sel.length === 1 ? sel[0] : null;
-      if (one && hasCode(one)) syncParams(live, one, blanketOf(one), app.onParam);
+      if (one && blanketOf(one)?.params.length) syncParams(live, one, blanketOf(one), app.onParam);
       const next = `${app.state.version}|${sel.map((o) => o.id).join()}|${app.tool()}|${app.settingsVersion()}`;
       const typing = body.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
       if (next === sig || typing) return;

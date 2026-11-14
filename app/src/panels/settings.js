@@ -10,6 +10,7 @@ export function settingsPanel(el, app) {
   function build() {
     body.replaceChildren(
       section('Look', row('theme', choice([['auto', 'auto'], ['light', 'light'], ['dark', 'dark']], settings.theme, (v) => setSetting('theme', v)))),
+      section('Mouse', row('wheel', choice([['auto', 'auto'], ['zoom', 'zooms'], ['pan', 'pans']], settings.wheel, (v) => setSetting('wheel', v)))),
       section('Grid',
         row('show', check('grid')),
         row('snap', check('snap')),
