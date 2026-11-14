@@ -649,6 +649,13 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   Brush headers default to following the timeline (bpm 0, low and high 0,
   scale -1 for its scale and root, read through `score.js`'s new `steps`
   and `root`). Scores keep their own values where set.
+- **Piano roll** (`src/roll.js`, a sixteenth pass): double-click a clip
+  (or use its menu) to edit its notes under the timeline on the same
+  ruler. Moving, resizing, box-picking, adding, deleting, transposing by
+  scale degree or octave, nudging and quantizing each commit one
+  `clip.set { notes }`. The keys work only while the pointer is over the
+  timeline. The pure helpers `transpose`, `quantize` and `shift` are
+  tested.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); audio recording; note-off at exit (IanniX's gate); scores on
   the shared transport (they still schedule their own passes); MIDI clock;
@@ -698,6 +705,13 @@ Known gaps and shortcuts:
   stay JS, and the registry's schemas are the contract for now.
 
 ## 6. Next steps
+
+**The owner's order (14 Nov 2026):** first a comprehensive score and
+timeline like AMS's, worked on autonomously with commits at natural
+stopping points. Then extend drawing into 3D and consolidate it with
+threegrease's grease pencil and mesh builder tools (Poly Build,
+PolyQuilt-style editing, placement and snapping: see `~/dev/threegrease`,
+`src/tools/polytool.ts`, `snapping.ts` and `projection.ts`).
 
 In this order, unless the owner says otherwise.
 

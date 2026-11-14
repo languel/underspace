@@ -157,7 +157,12 @@ replay.
 
 Recording: the notes travelers and events play while ● is on become a clip
 on the timeline. A clip plays back with the transport, can be dragged
-along it, and has a right-click menu: mute, export as MIDI, delete.
+along it, and has a right-click menu: edit the notes, mute, export as MIDI,
+delete. Double-click a clip to open its notes in a piano roll under the
+timeline, on the same ruler: drag notes (sixteenths; Alt freely), drag a
+note's right end to change its length, box-pick, double-click to add,
+Delete, ↑↓ a degree of the scale (Shift an octave), ←→ a sixteenth, Q
+quantize, Esc close. Rows of the timeline's scale are lit.
 "Export recorded clips as MIDI" writes a .mid file of every unmuted clip.
 "Send notes to MIDI" connects Web MIDI, after which notes also go to your
 instruments.

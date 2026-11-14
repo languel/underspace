@@ -512,8 +512,8 @@ define({
   },
 });
 define({
-  name: 'clip.set', doc: 'Move a clip (at, in beats), rename it, mute it, or remove it (remove: true).',
-  args: { id: T.id, at: T.num, name: T.str, muted: { type: 'boolean' }, remove: { type: 'boolean' } }, required: ['id'],
+  name: 'clip.set', doc: 'Move a clip (at, in beats), rename it, mute it, give it new notes (what the piano roll does), or remove it (remove: true).',
+  args: { id: T.id, at: T.num, name: T.str, muted: { type: 'boolean' }, notes: { type: 'array' }, remove: { type: 'boolean' } }, required: ['id'],
   run(a) {
     const c = state.clips.get(a.id);
     if (!c) return false;
@@ -521,6 +521,7 @@ define({
     if (Number.isFinite(a.at)) c.at = round(Math.max(0, a.at));
     if (a.name) c.name = a.name;
     if (a.muted === true) c.muted = true; else if (a.muted === false) delete c.muted;
+    if (Array.isArray(a.notes)) c.notes = a.notes.filter((n) => Number.isFinite(n.beat) && Number.isFinite(n.midi)).map((n) => ({ beat: round(Math.max(0, n.beat)), midi: round(n.midi), vel: Math.round(n.vel ?? 100), len: round(Math.max(1 / 64, n.len ?? 0.25)) }));
     return true;
   },
 });

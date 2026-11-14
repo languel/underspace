@@ -130,3 +130,19 @@ test('a score reads its lines on the timeline\'s scale and root when told to', a
   assert.deepEqual(s.voices[0].events.map((e) => e.midi), [66, 66]);
   assert.equal(s.duration, 2);
 });
+
+test('piano roll: transpose by degrees, quantize, shift; clip.set takes notes', async () => {
+  const { transpose, quantize, shift } = await import('../src/roll.js');
+  const m = { ...DEFAULT_MUSIC, scale: 'Ionian', root: 60 };
+  const notes = [{ beat: 0.13, midi: 60, vel: 100, len: 0.2 }, { beat: 1.01, midi: 64, vel: 90, len: 0.6 }];
+  assert.deepEqual(transpose(notes, new Set([1]), 1, m).map((n) => n.midi), [60, 65]); // E up a degree of C major: F
+  assert.deepEqual(transpose(notes, null, -1, m, true).map((n) => n.midi), [48, 52]);
+  assert.deepEqual(quantize(notes, null).map((n) => [n.beat, n.len]), [[0.25, 0.25], [1, 0.5]]);
+  assert.deepEqual(shift(notes, new Set([0]), 0.25, 2).map((n) => [n.beat, n.midi]), [[0.38, 62], [1.01, 64]]);
+  call('space.clear');
+  const id = call('clip.add', { notes });
+  call('clip.set', { id, notes: quantize(notes, null) });
+  assert.equal(state.clips.get(id).notes[0].beat, 0.25);
+  undo();
+  assert.equal(state.clips.get(id).notes[0].beat, 0.13);
+});

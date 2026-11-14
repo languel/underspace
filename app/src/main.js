@@ -1609,7 +1609,7 @@ timeline = createTimeline($('timeline'), {
   actions: { play: () => togglePlay(), stop: () => rewind(), record: () => runAction('transport.record'), loop: () => runAction('transport.loop') },
   clipMenu(id, x, y) {
     const c = state.clips.get(id);
-    showMenu([{ header: true, title: c.name }, { title: c.muted ? 'Unmute' : 'Mute', icon: 'hide', run: () => call('clip.set', { id, muted: !c.muted }) }, { title: 'Export as MIDI', icon: 'save', run: () => exportMidi([c]) }, null, { title: 'Delete', icon: 'remove', run: () => call('clip.set', { id, remove: true }) }], x, y);
+    showMenu([{ header: true, title: c.name }, { title: c.muted ? 'Unmute' : 'Mute', icon: 'hide', run: () => call('clip.set', { id, muted: !c.muted }) }, { title: timeline.editing === id ? 'Close the notes' : 'Edit the notes', icon: 'points', run: () => timeline.edit(timeline.editing === id ? null : id) }, { title: 'Export as MIDI', icon: 'save', run: () => exportMidi([c]) }, null, { title: 'Delete', icon: 'remove', run: () => call('clip.set', { id, remove: true }) }], x, y);
   },
 });
 // The recorded clips as a Standard MIDI File, downloaded.

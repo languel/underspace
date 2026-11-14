@@ -19,6 +19,7 @@
 import { h } from './controls.js';
 import { icon } from './icons.js';
 import { bbt, scaleNames, noteName } from './music.js';
+import { createRoll } from './roll.js';
 
 const GUTTER = 92, RULER = 20, LANE = 18;
 
@@ -26,7 +27,7 @@ const GUTTER = 92, RULER = 20, LANE = 18;
 export function createTimeline(el, host) {
   const head = h('div', 'tl-head'), canvas = h('canvas', 'tl-lanes'), ctx = canvas.getContext('2d');
   el.append(head, canvas);
-  let ppb = 24, scroll = 0, drag = null, lastSig = '';
+  let ppb = 24, scroll = 0, drag = null, lastSig = '', editing = null; // editing: the clip open in the piano roll
 
   const button = (name, title, run) => { const b = h('button'); b.title = title; b.setAttribute('aria-label', title); b.innerHTML = icon(name); b.onclick = run; return b; };
   const rewind = button('rewind', 'Back to the start (⌥,)', host.actions.stop), play = button('play', 'Play or pause (Space)', host.actions.play);
@@ -121,6 +122,7 @@ export function createTimeline(el, host) {
           for (const n of l.notes) ctx.fillRect(xOf(l.at + n.beat), y + LANE - 4 - ((n.midi - lo) / span) * (LANE - 8), Math.max(1.5, n.len * ppb), 1.5);
         }
       }
+      if (editing === l.id) { ctx.strokeStyle = c.accent; ctx.setLineDash([3, 2]); ctx.strokeRect(xOf(l.at) + 0.5, y + 1.5, l.len * ppb, LANE - 3); ctx.setLineDash([]); }
       if (host.selected === l.id) { ctx.strokeStyle = c.accent; ctx.strokeRect(xOf(l.at) + 0.5, y + 2.5, l.len * ppb, LANE - 5); }
       ctx.restore();
     });
@@ -139,8 +141,9 @@ export function createTimeline(el, host) {
     for (const f of fields) f.sync();
     // follow the playhead while playing
     if (tr.playing && !drag) { const b = tr.beat, vis = (el.clientWidth - GUTTER) / ppb; if (b > scroll + vis * 0.9 || b < scroll) scroll = Math.max(0, b - vis * 0.1); }
-    const sig = `${tr.t.toFixed(3)}|${scroll}|${ppb}|${host.state.version}|${host.history().done}|${host.replaying}|${tr.loop.on}${tr.loop.a}${tr.loop.b}|${tr.recording}|${host.selected}|${el.clientWidth}`;
+    const sig = `${tr.t.toFixed(3)}|${scroll}|${ppb}|${host.state.version}|${host.history().done}|${host.replaying}|${tr.loop.on}${tr.loop.a}${tr.loop.b}|${tr.recording}|${host.selected}|${el.clientWidth}|${editing}`;
     if (sig !== lastSig) { lastSig = sig; draw(); }
+    roll.update();
   }
 
   const laneAt = (y) => Math.floor((y - RULER) / LANE) - 1; // -1: the making
@@ -197,5 +200,17 @@ export function createTimeline(el, host) {
     lastSig = '';
   }, { passive: false });
 
-  return { update, get visible() { return !el.hidden; }, show(on = el.hidden) { el.hidden = !on; document.body.classList.toggle('with-timeline', on); lastSig = ''; } };
+  // The piano roll of the clip being edited, on the same ruler (roll.js).
+  const roll = createRoll(el, {
+    clip: () => (editing ? host.state.clips.get(editing) ?? null : null),
+    music: () => host.state.music, xOf, beatAt, gutter: GUTTER, colors,
+    commit: (notes) => host.call('clip.set', { id: editing, notes }),
+    close: () => { editing = null; lastSig = ''; },
+  });
+  canvas.addEventListener('dblclick', (e) => {
+    const r = canvas.getBoundingClientRect(), lane = host.lanes()[laneAt(e.clientY - r.top)];
+    if (lane?.kind === 'clip') { editing = editing === lane.id ? null : lane.id; lastSig = ''; }
+  });
+
+  return { edit(id) { editing = id; lastSig = ''; }, get editing() { return editing; }, update, get visible() { return !el.hidden; }, show(on = el.hidden) { el.hidden = !on; document.body.classList.toggle('with-timeline', on); lastSig = ''; } };
 }
