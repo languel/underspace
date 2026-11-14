@@ -887,6 +887,24 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   take the fill swatch. Not taken from threegrease: its own ribbon shader
   (round caps and joins, hardness, dots and squares), gradients, layers
   and blend modes, onion skins, modifiers.
+- **3D, fourth pass: Poly Build** (`src/mesh.js`, after threegrease's
+  Poly Build and PolyQuilt in `src/tools/polytool.ts`, reduced to its
+  core). A `mesh` kind in render targets: `verts` and `faces` (lists of
+  indices); `mesh.add`, `mesh.set`. G, R and S move, turn and scale it.
+  The Poly Build tool (Shift+B, in the line stack):
+  - click puts a corner (through the magnet, so corners land on strokes
+    and on other meshes' corners); clicking the run's first corner closes
+    a face; clicking a corner a face already has uses it (welded);
+  - Enter ends a run, Escape drops it, Backspace takes back its last
+    corner; dragging a corner moves it (on the plane through it, with the
+    magnet);
+  - dragging an edge grows a quad from it, wound to match the face beside
+    it (`extrude`).
+  Faces are filled (in their own plane, with the fill swatch or grey) and
+  edges drawn, the rim heavier; corners show while building or selected,
+  and loose ones always. Constrain › Weld corners that sit together
+  (`weld`). Not yet from PolyQuilt: knife and loop cuts, deleting and
+  dissolving parts, AutoQuad, a surface to draw on (raycast).
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a

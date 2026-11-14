@@ -17,6 +17,7 @@
 //             'event'      a region that fires when a traveler enters; its code says what happens
 //             'traveler'   moves along the line `on` (see play.js)
 //   kind 'group'   rect, inner (its interior frame), ports (the cut wires)
+//   kind 'mesh'    in a render target: verts [[x, y, z]], faces [[i, j, k, ...]] (mesh.js, Poly Build)
 //   kind 'point'   a mark at rect's centre, rect.w across; glyph: how it looks (glyphs.js); role 'ink' or 'event'
 //   kind 'joint'   where lines meet: at [{ id, u, slide? }, ...], pos, rect (see joints.js)
 //        role 'junction'   its code says which way a traveler goes on
@@ -32,7 +33,7 @@
 // in the code's header. Coordinates are local to the object's space (y up);
 // `space` is the id of the group or target it lives in, or null for the canvas.
 
-export const ROLES = { point: ['ink', 'event'], joint: ['junction'], line: ['ink', 'connector', 'path', 'event', 'traveler'], shape: ['visual', 'target', 'code', 'score', 'grid', 'note', 'event', 'traveler'] };
+export const ROLES = { mesh: ['visual'], point: ['ink', 'event'], joint: ['junction'], line: ['ink', 'connector', 'path', 'event', 'traveler'], shape: ['visual', 'target', 'code', 'score', 'grid', 'note', 'event', 'traveler'] };
 export const isLine = (o) => o.kind === 'line';
 export const isTarget = (o) => o.kind === 'shape' && o.role === 'target';
 export const hasCode = (o) => o.role === 'code' || o.role === 'path' || o.role === 'score' || o.role === 'event' || o.role === 'junction' || o.role === 'grid' || o.role === 'target';
@@ -127,6 +128,7 @@ export const penOf = (o) => live?.get(o.id)?.pen ?? o.pen;
 export function ptsOf(o) {
   const now = live?.get(o.id);
   if (now) return now.points;
+  if (!o.points) return o.verts ?? []; // a mesh's points are its vertices
   // A line that travels is shown where playing has carried it, keeping its own shape.
   const go = o.role === 'traveler' ? moved?.get(o.id) : null;
   if (go) {

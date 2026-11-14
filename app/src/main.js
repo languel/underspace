@@ -37,6 +37,7 @@ import { showPie, recognize } from './pie.js';
 import { createTransport } from './transport.js';
 import { createDebug } from './debug.js';
 import { magnet, MAGNETS, MAGNET_TITLE } from './magnet.js';
+import { edgesOf, weld, extrude } from './mesh.js';
 import { EXAMPLES } from './examples.js';
 import { GRID, GRID_PRESETS, gridAt, pathBeats, snapPoint, fitScale, isGrid } from './grid.js';
 import { POINT_KINDS, MIDINOUS_KINDS, GLYPH_TITLE, glyphLines } from './glyphs.js';
@@ -195,6 +196,19 @@ function walk(space, xf) {
         const c = jointAt(j), d = 0.12, sel = state.selection.has(j.id), color = sel ? 'accent' : j.fix ? 'hot' : 'ink';
         for (let k = 0; k < 3; k++) { const a = [c[0], c[1], c[2] ?? 0], b = a.slice(); a[k] -= d; b[k] += d; marks.push({ pts: [a, b], color }); ink3d.push({ id: j.id, scene: o.id, pts: [a, b] }); }
         vis.set(j.id, { o: j, face: 'joint', scene: o.id });
+      }
+      // meshes (Poly Build): faces filled, edges drawn; corners shown while building or selected
+      for (const me of state.objects.values()) {
+        if (me.kind !== 'mesh' || me.space !== o.id || me.hidden) continue;
+        const vs = ptsOf(me), mst = me.style ?? {}, msel = state.selection.has(me.id), used = new Set(me.faces.flat());
+        for (const f of me.faces) marks.push({ pts: [...f.map((i) => vs[i]), vs[f[0]]], color: 'ink', width: 0, fill: mst.fill ?? '#8f8a80', opacity: mst.opacity ?? 0.55 });
+        for (const e of edgesOf(me.faces)) { const pts = [vs[e.a], vs[e.b]]; marks.push({ pts, color: msel ? 'accent' : mst.stroke ?? 'ink', width: e.faces === 1 ? 1.8 : 1.1 }); ink3d.push({ id: me.id, scene: o.id, pts }); }
+        vs.forEach((v, i) => {
+          if (!(tool === 'poly' || msel || !used.has(i))) return;
+          const d = 0.07, color = msel ? 'accent' : 'hot';
+          for (let k = 0; k < 3; k++) { const a = v.slice(), b = v.slice(); a[k] -= d; b[k] += d; marks.push({ pts: [a, b], color, width: 2 }); if (!used.has(i)) ink3d.push({ id: me.id, scene: o.id, pts: [a, b] }); }
+        });
+        vis.set(me.id, { o: me, face: 'line', scene: o.id });
       }
       // travelers on its lines: a small star where each is
       for (const tr of state.objects.values()) {
@@ -638,6 +652,7 @@ function magnetIn(s, p, { exclude = null, from = null, off = false } = {}) {
   if (s.kind !== 'scene' || off) return onPlane ? { point: onPlane, kind: 'free' } : null;
   const strokes = [];
   for (const o of state.objects.values()) {
+    if (o.kind === 'mesh' && o.space === s.id && !o.hidden) { const vs = ptsOf(o); strokes.push({ points: o.id === exclude ? [] : vs, curve: [] }); for (const e of edgesOf(o.faces)) strokes.push({ points: [], curve: [vs[e.a], vs[e.b]] }); continue; }
     if (o.space !== s.id || o.kind !== 'line' || o.id === exclude || o.hidden || !(o.points?.length > 0)) continue;
     const pts = ptsOf(o);
     strokes.push({ points: pts, curve: curveOf(o, pts) });
@@ -914,6 +929,87 @@ function polygonAt(g) {
   });
 }
 
+// ---- Poly Build: meshes in a render target (mesh.js) ------------------------------
+// Click to put corners (the magnet places them: on strokes, on other corners); click the first
+// corner again to close a face; click a corner a face already has to use it (welded); Enter ends
+// a run of corners, Escape drops it, Backspace takes the last back. Drag a corner to move it;
+// drag an edge to grow a quad from it.
+let build = null; // { s, id (the mesh), chain: [vertex indices] }
+function meshHit(s, p) {
+  let best = null, bd = 10;
+  for (const me of state.objects.values()) {
+    if (me.kind !== 'mesh' || me.space !== s.id || me.hidden) continue;
+    const vs = ptsOf(me);
+    vs.forEach((v, i) => { const q = view.sceneToScreen(s.id, v), d = q ? Math.hypot(q[0] - p[0], q[1] - p[1]) : Infinity; if (d < bd) { bd = d; best = { mesh: me, i }; } });
+  }
+  if (best) return best;
+  bd = 7;
+  for (const me of state.objects.values()) {
+    if (me.kind !== 'mesh' || me.space !== s.id || me.hidden) continue;
+    const vs = ptsOf(me);
+    for (const ed of edgesOf(me.faces)) {
+      const a = view.sceneToScreen(s.id, vs[ed.a]), b = view.sceneToScreen(s.id, vs[ed.b]);
+      if (!a || !b) continue;
+      const d = segDist(p[0], p[1], a, b);
+      if (d < bd) { bd = d; best = { mesh: me, a: ed.a, b: ed.b, rim: ed.faces === 1 }; }
+    }
+  }
+  return best;
+}
+function buildPreview(p) {
+  if (!build) return view.setPreview(null);
+  const me = get(build.id), vs = me ? ptsOf(me) : [], pts = build.chain.map((i) => vs[i]).filter(Boolean);
+  const end = p && magnetIn(build.s, p)?.point;
+  view.setPreview(end ? [...pts, end] : pts, build.s.id, 'hot');
+}
+function polyPress(s, p, e) {
+  if (s.kind !== 'scene') return;
+  const hit = meshHit(s, p);
+  if (hit && hit.i == null && !build) { gesture = { kind: 'pedge', s, hit, start: p, moved: false }; return; }
+  if (hit && hit.i != null) { gesture = { kind: 'pvert', s, hit, start: p, moved: false }; return; }
+  // empty space: a new corner, of the mesh being built (or a new mesh)
+  const q = magnetIn(s, p, { off: e.ctrlKey || e.metaKey })?.point;
+  if (!q) return;
+  batch(() => {
+    if (build && get(build.id)) { const me = get(build.id); call('mesh.set', { id: me.id, verts: [...me.verts, q.map(round)] }); build.chain.push(me.verts.length - 1); }
+    else { const id = call('mesh.add', { space: s.id, verts: [q.map(round)], ...(settings.fill ? { style: { fill: settings.fill } } : {}) }); build = { s, id, chain: [0] }; call('select.set', { ids: [id] }); }
+  });
+  buildPreview(p);
+}
+function polyDrag(g, p, e) {
+  const me = g.hit.mesh, vs = me.verts;
+  if (g.kind === 'pvert') {
+    const v = vs[g.hit.i], through = { ...g.s, origin: v }, q = magnetIn(through, p, { exclude: me.id, off: e.ctrlKey || e.metaKey })?.point;
+    if (q) { const next = vs.map((w, i) => (i === g.hit.i ? q : w)); setLive(new Map([[me.id, { points: next }]])); g.next = next; dragSig = 'pvert' + p.join(); }
+  } else {
+    // an edge pulled: its copy follows the pointer on the plane through the edge's middle
+    const a = vs[g.hit.a], b = vs[g.hit.b], mid = a.map((x, k) => (x + b[k]) / 2), through = { ...g.s, origin: mid };
+    const q0 = toSpace(through, g.start[0], g.start[1]), q1 = toSpace(through, p[0], p[1]);
+    if (!q0 || !q1) return;
+    g.d = q1.map((x, k) => x - q0[k]);
+    const r = extrude(vs, me.faces, g.hit.a, g.hit.b, g.d);
+    setLive(new Map([[me.id, { points: r.verts }]])); g.next = r; dragSig = 'pedge' + p.join();
+  }
+}
+function polyRelease(g) {
+  setLive(null); dragSig = '';
+  const me = g.hit.mesh;
+  if (g.kind === 'pedge') { if (g.moved && g.next) call('mesh.set', { id: me.id, verts: g.next.verts.map((v) => v.map(round)), faces: g.next.faces }); return; }
+  if (g.moved && g.next) { call('mesh.set', { id: me.id, verts: g.next.map((v) => v.map(round)) }); return; }
+  // a click on a corner: close the face (the first of the run), go on from it, or start a run from it
+  const i = g.hit.i;
+  if (build && build.id === me.id) {
+    if (i === build.chain[0] && build.chain.length >= 3) { call('mesh.set', { id: me.id, faces: [...me.faces, build.chain.slice()] }); build = null; view.setPreview(null); return; }
+    if (!build.chain.includes(i)) build.chain.push(i);
+  } else build = { s: g.s, id: me.id, chain: [i] };
+  call('select.set', { ids: [me.id] });
+  buildPreview(g.start);
+}
+function buildKey(k) {
+  if (k === 'Backspace' && build?.chain.length) { build.chain.pop(); if (!build.chain.length) build = null; buildPreview(null); return; }
+  build = null; view.setPreview(null);
+}
+
 // ---- the hold menu: hold still while drawing to turn the stroke into something --
 
 // What the ring offers, clockwise from the top; each is an action, so it also has a key, a menu entry and a palette entry.
@@ -981,6 +1077,7 @@ const snapHere = (space, p) => { const g = gridHere(space, p); return g.frame ? 
 
 const stacks = new Map(); // stack -> { b, members, current }: tools of one kind share a button
 function setTool(name) {
+  if (name !== 'poly' && build) { build = null; view.setPreview(null); }
   if (name !== 'polyline' && poly) finishPoly(true);
   tool = name;
   for (const b of document.querySelectorAll('[data-tool]')) b.setAttribute('aria-pressed', String(b.dataset.tool === name));
@@ -1093,6 +1190,7 @@ pad.addEventListener('pointerdown', (e) => {
   }
   if (tool === 'point') { placePoint(here, p); return; }
   if (tool === 'polyline') { addPolyPoint(here, p); return; }
+  if (tool === 'poly') { polyPress(spaceAt(p[0], p[1]), p, e); return; }
   if (tool === 'draw') startDraw(here, p, false, e);
   else if (tool === 'line') { const s = placed(here, p), q = s.kind === 'scene' ? magnetIn(s, p, { off: e.ctrlKey || e.metaKey })?.point : toSpace(s, p[0], p[1]); if (q) gesture = { kind: 'line', s, a: q, b: q, start: p }; }
   else if (MAKE[tool]) {
@@ -1140,6 +1238,7 @@ pad.addEventListener('pointermove', (e) => {
   ring.hidden = tool !== 'sculpt';
   if (tool === 'sculpt') ring.style.cssText = `left:${p[0]}px;top:${p[1]}px;width:${settings.sculptRadius * 2}px;height:${settings.sculptRadius * 2}px`;
   if (!gesture && poly) previewPoly(p);
+  if (!gesture && build && tool === 'poly') buildPreview(p);
   if (!gesture) { pad.dataset.over = portAt(p[0], p[1]) ? 'port' : ''; if (tool === 'points') handles.hover(handles.at(p[0], p[1])); return; }
   const g = gesture;
   if (g.kind === 'sculpt') {
@@ -1186,6 +1285,10 @@ pad.addEventListener('pointermove', (e) => {
     g.b = b; g.end = q;
     showTouch(e.ctrlKey || e.metaKey ? null : touching(g.s, q));
     if (g.s.kind === 'scene') view.setPreview([g.a, g.b], g.s.id); else view.setPreview([g.a, g.b].map((pt) => at(g.s.xf, pt)));
+  } else if (g.kind === 'pvert' || g.kind === 'pedge') {
+    if (!g.moved && Math.hypot(p[0] - g.start[0], p[1] - g.start[1]) < 4) return;
+    g.moved = true;
+    polyDrag(g, p, e);
   } else if (g.kind === 'slide') {
     if (!g.moved && Math.hypot(p[0] - g.start[0], p[1] - g.start[1]) < 3) return;
     g.moved = true;
@@ -1308,6 +1411,8 @@ function endGesture(e) {
       const id = call('line.add', { space: g.s.id, points: pts, tol: flat ? round(14 * unitsPerPx(g.s)) : 0, ...newStyle(false) });
       if (id && isCurve(get(id)) && !(e.ctrlKey || e.metaKey)) { joinEnd(g.s, id, 0, g.start); joinEnd(g.s, id, 1, g.end ?? g.start); }
     });
+  } else if (g.kind === 'pvert' || g.kind === 'pedge') {
+    polyRelease(g);
   } else if (g.kind === 'slide') {
     const s = sliding; sliding = null; dragSig = '';
     if (g.moved && s) { const o = get(g.id); if (o?.kind === 'joint') call('joint.slide', { id: g.id, u: round(s.u) }); else call('object.set', { id: g.id, name: 'start', value: round(s.u) }); }
@@ -1546,6 +1651,8 @@ const ACTIONS = [
   { id: 'tool.line', title: 'Straight line', icon: 'line', keys: 'l', group: 'tool', bar: 'tools', tool: 'line', stack: 'line' },
   { id: 'tool.polyline', title: 'Polyline: click corners, double-click to end', icon: 'polyline', group: 'tool', bar: 'tools', tool: 'polyline', stack: 'line' },
   { id: 'tool.point', title: 'Point: on a line, a node', icon: 'point', keys: 'i', group: 'tool', bar: 'tools', tool: 'point', stack: 'line' },
+  { id: 'tool.poly', title: 'Poly Build (in a 3D scene): click corners, the first again closes a face; drag an edge to extrude', icon: 'mesh', keys: 'shift+b', group: 'tool', bar: 'tools', tool: 'poly', stack: 'line' },
+  { id: 'mesh.weld', title: 'Weld corners that sit together', icon: 'joint', group: 'attach', menu: 'Constrain', when: (c) => c.sel.some((o) => o.kind === 'mesh'), run: (c) => batch(() => { for (const o of c.sel.filter((x) => x.kind === 'mesh')) { const w = weld(o.verts, o.faces, 0.02); call('mesh.set', { id: o.id, verts: w.verts, faces: w.faces }); } }) },
   { id: 'tool.rect', title: 'Rectangle', icon: 'rect', keys: 'r', group: 'tool', bar: 'tools', tool: 'rect', stack: 'shape' },
   { id: 'tool.ellipse', title: 'Ellipse', icon: 'ellipse', keys: 'o', group: 'tool', bar: 'tools', tool: 'ellipse', stack: 'shape' },
   { id: 'tool.polygon', title: 'Polygon (sides and star in its settings)', icon: 'polygon', group: 'tool', bar: 'tools', tool: 'polygon', stack: 'shape' },
@@ -2113,6 +2220,7 @@ const baseKey = (e) => (e.altKey && /^(Key|Digit)./.test(e.code ?? '') ? e.code.
 const keyOf = (e) => [(e.metaKey || e.ctrlKey) && 'mod', e.shiftKey && 'shift', e.altKey && 'alt', baseKey(e)].filter(Boolean).join('+');
 addEventListener('keydown', (e) => {
   if (poly && (e.key === 'Enter' || e.key === 'Escape')) { finishPoly(e.key === 'Enter'); e.preventDefault(); return; }
+  if (build && (e.key === 'Enter' || e.key === 'Escape' || e.key === 'Backspace')) { buildKey(e.key); e.preventDefault(); return; }
   if (e.target.closest?.('input, textarea, select, .menu')) return;
   if (e.key === ' ') { if (!spaceKey) { spaceUsed = false; spaceAt0 = performance.now(); } spaceKey = true; pad.dataset.pan = '1'; e.preventDefault(); return; }
   const k = keyOf(e), c = context();

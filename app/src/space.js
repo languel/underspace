@@ -212,6 +212,28 @@ define({
   run(a) { const j = state.objects.get(a.id); if (j?.kind !== 'joint' || j.at.length !== 1) return false; j.at[0].u = Math.max(0, Math.min(1, round(a.u))); return true; },
 });
 
+const verts = { type: 'array', description: '[[x, y, z], ...]' }, faces = { type: 'array', description: '[[i, j, k, ...], ...]: indices of verts, three or more' };
+const cleanMesh = (o, a) => {
+  if (Array.isArray(a.verts)) o.verts = a.verts.map((p) => [round(p[0]), round(p[1]), round(p[2] ?? 0)]);
+  if (Array.isArray(a.faces)) o.faces = a.faces.map((f) => f.filter((i) => Number.isInteger(i) && i >= 0 && i < o.verts.length)).filter((f) => new Set(f).size >= 3);
+};
+define({
+  name: 'mesh.add', doc: 'Make a mesh in a render target (what Poly Build makes): verts, and faces as lists of their indices.',
+  args: { space: T.space, verts, faces, style: T.style }, required: ['space', 'verts'],
+  run(a) {
+    const o = { id: newId(), kind: 'mesh', role: 'visual', space: a.space ?? null, verts: [], faces: [] };
+    cleanMesh(o, { verts: a.verts, faces: a.faces ?? [] });
+    if (a.style) o.style = { ...a.style };
+    state.objects.set(o.id, o);
+    return o.id;
+  },
+});
+define({
+  name: 'mesh.set', doc: 'Give a mesh new verts, or new faces, or both (a Poly Build step).',
+  args: { id: T.id, verts, faces }, required: ['id'],
+  run(a) { const o = state.objects.get(a.id); if (o?.kind !== 'mesh') return false; cleanMesh(o, { verts: a.verts ?? o.verts, faces: a.faces ?? o.faces }); return true; },
+});
+
 define({
   name: 'joint.free', doc: 'Let lines go: remove the joints and pins that hold them, and their own rules (keep).',
   args: { ids: T.ids }, required: ['ids'], hold: (a) => a.ids,
@@ -344,6 +366,7 @@ define({
       if (!o || o.bind || o.role === 'traveler') continue;
       if (o.rect) { const r = applyRect(t, o.rect); for (const k in r) r[k] = Math.round(r[k] * 1e4) / 1e4; o.rect = r; }
       else if (o.points) { o.points = ptsOf(o).map((p) => apply(t, p).map((v) => Math.round(v * 1e4) / 1e4)); o.off = [0, 0]; }
+      else if (o.verts) o.verts = o.verts.map((p) => apply(t, p).map((v) => Math.round(v * 1e4) / 1e4));
     }
   },
 });

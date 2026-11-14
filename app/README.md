@@ -238,7 +238,10 @@ own. Presets: spin and tilt, orbit, breathe, look. Right-click › Take out
 of the 3D scene puts lines back, flat. In a target the magnet places what you draw:
 on a stroke's points, along a stroke, at the middle of a stretch,
 perpendicular to a stroke, or on the drawing plane's grid (right-click ›
-Magnet; Shift+M on and off; Ctrl while drawing leaves it out).
+Magnet; Shift+M on and off; Ctrl while drawing leaves it out). Poly Build (Shift+B)
+makes meshes in a target: click corners, click the first again to close a
+face, click an existing corner to share it, drag a corner to move it, drag
+an edge to grow a quad from it; Enter ends a run, Escape drops it.
 
 ## Scores
 
