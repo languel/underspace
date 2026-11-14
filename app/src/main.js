@@ -36,6 +36,7 @@ import { snapPoints, snapBox, toSVG, toP5 } from './selection.js';
 import { showPie, recognize } from './pie.js';
 import { createTransport } from './transport.js';
 import { createDebug } from './debug.js';
+import { magnet, MAGNETS, MAGNET_TITLE } from './magnet.js';
 import { EXAMPLES } from './examples.js';
 import { GRID, GRID_PRESETS, gridAt, pathBeats, snapPoint, fitScale, isGrid } from './grid.js';
 import { POINT_KINDS, MIDINOUS_KINDS, GLYPH_TITLE, glyphLines } from './glyphs.js';
@@ -620,6 +621,32 @@ function showTouch(t) {
 }
 const lineHasJoints = (o) => [...state.objects.values()].some((j) => j.kind === 'joint' && j.at.some((q) => q.id === o.id));
 
+// ---- the magnet: where a point placed in a target lands (magnet.js) ---------------
+
+// The pointer in a target, through the magnet: on a stroke near it, on the drawing plane's lattice,
+// or on the plane. exclude: a line not to snap to (the one being moved); from: where a move began.
+function magnetIn(s, p, { exclude = null, from = null, off = false } = {}) {
+  const onPlane = toSpace(s, p[0], p[1]);
+  if (s.kind !== 'scene' || off) return onPlane ? { point: onPlane, kind: 'free' } : null;
+  const strokes = [];
+  for (const o of state.objects.values()) {
+    if (o.space !== s.id || o.kind !== 'line' || o.id === exclude || o.hidden || !(o.points?.length > 0)) continue;
+    const pts = ptsOf(o);
+    strokes.push({ points: pts, curve: curveOf(o, pts) });
+  }
+  const basis = view.planeBasis(s.id, s.plane);
+  return magnet({ mode: settings.magnet, pointer: p, onPlane, strokes, toScreen: (q) => view.sceneToScreen(s.id, q), plane: basis && { origin: s.origin ?? [0, 0, 0], u: basis.u, v: basis.v }, cell: settings.magnetCell, from });
+}
+// The snap marker at what the magnet caught (nothing when it caught nothing).
+function showMagnet(s, m) {
+  if (!m || m.kind === 'free') { showTouch(null); return; }
+  const q = view.sceneToScreen(s.id, m.point);
+  if (!q) { showTouch(null); return; }
+  snapMark.hidden = false;
+  snapMark.style.transform = `translate(${q[0].toFixed(1)}px, ${q[1].toFixed(1)}px)`;
+  snapMark.dataset.kind = m.kind;
+}
+
 // ---- the points tool --------------------------------------------------------
 
 const handles = createPoints($('handles'));
@@ -647,7 +674,7 @@ function movedPoints(g, dx, dy) {
       if (!m.scene) { pts[i] = snapHere(get(id)?.space ?? null, [p[0] + dx * u, p[1] - dy * u]).map(round).concat(p.slice(2)); continue; }
       // In a target a point slides on the drawing plane through where it was.
       const q = view.sceneToScreen(m.scene, p), s = spaces.find((x) => x.id === m.scene);
-      const r = q && s && view.sceneToLocal(m.scene, q[0] + dx, q[1] + dy, s.plane, [p[0], p[1], p[2] ?? 0]);
+      const through = { ...s, origin: [p[0], p[1], p[2] ?? 0] }, mg = q && s && magnetIn(through, [q[0] + dx, q[1] + dy], { exclude: id, from: p }), r = mg?.point;
       if (r) pts[i] = r.map(round);
     }
     out.set(id, { points: pts, pen: m.pen });
@@ -841,7 +868,7 @@ function placePoint(s, p) {
 // click on the first corner closes it (filled with the fill swatch).
 let poly = null; // { s, pts, px }
 function addPolyPoint(s, p) {
-  const sp = poly?.s ?? s, q0 = toSpace(sp, p[0], p[1]);
+  const sp = poly?.s ?? s, q0 = sp.kind === 'scene' ? magnetIn(sp, p, { from: poly?.pts.at(-1) })?.point : toSpace(sp, p[0], p[1]);
   if (!q0) return;
   const q = sp.kind === 'scene' ? q0 : snapHere(sp.id, q0);
   if (poly && Math.hypot(p[0] - poly.px.at(-1)[0], p[1] - poly.px.at(-1)[1]) < 3) return; // the second press of a double-click
@@ -976,9 +1003,9 @@ function placed(s, p) {
   return best ? { ...s, origin: [best[0], best[1], best[2] ?? 0] } : s;
 }
 
-function startDraw(s, p, wire = false) {
+function startDraw(s, p, wire = false, e = null) {
   s = placed(s, p);
-  const q = toSpace(s, p[0], p[1]);
+  const q = s.kind === 'scene' && !wire ? magnetIn(s, p, { off: e?.ctrlKey || e?.metaKey })?.point : toSpace(s, p[0], p[1]);
   if (q) gesture = { kind: 'draw', s, pts: [q], first: p, last: p, wire, pen: [[0, 0.5]], t0: performance.now(), lastT: performance.now() };
 }
 
@@ -1058,8 +1085,8 @@ pad.addEventListener('pointerdown', (e) => {
   }
   if (tool === 'point') { placePoint(here, p); return; }
   if (tool === 'polyline') { addPolyPoint(here, p); return; }
-  if (tool === 'draw') startDraw(here, p);
-  else if (tool === 'line') { const s = placed(here, p), q = toSpace(s, p[0], p[1]); if (q) gesture = { kind: 'line', s, a: q, b: q, start: p }; }
+  if (tool === 'draw') startDraw(here, p, false, e);
+  else if (tool === 'line') { const s = placed(here, p), q = s.kind === 'scene' ? magnetIn(s, p, { off: e.ctrlKey || e.metaKey })?.point : toSpace(s, p[0], p[1]); if (q) gesture = { kind: 'line', s, a: q, b: q, start: p }; }
   else if (MAKE[tool]) {
     const flat = tool !== 'rect' && tool !== 'ellipse' && tool !== 'polygon'; // only plain shapes can be drawn inside a target
     gesture = { kind: 'rect', make: MAKE[tool], s: placed(spaceAt(p[0], p[1], flat), p), start: p, end: p };
@@ -1137,14 +1164,16 @@ pad.addEventListener('pointermove', (e) => {
     const press = e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : was * 0.7 + Math.max(0.15, Math.min(0.9, 0.9 - speed * 0.35)) * 0.3;
     g.pen.push([Math.round(now - g.t0), +press.toFixed(3)]); g.lastT = now;
     g.pts.push(q); g.last = p;
-    if (!g.wire) showTouch(e.ctrlKey || e.metaKey ? null : touching(g.s, p));
+    if (!g.wire && g.s.kind !== 'scene') showTouch(e.ctrlKey || e.metaKey ? null : touching(g.s, p));
+    if (g.s.kind === 'scene' && !g.wire) showMagnet(g.s, e.ctrlKey || e.metaKey ? null : magnetIn(g.s, p));
     if (g.s.kind === 'scene') view.setPreview(g.pts, g.s.id);
     else view.setPreview((settings.smooth ? smooth(g.pts, stepsOnScreen(1 / unitsPerPx(g.s))) : g.pts).map((pt) => at(g.s.xf, pt)), null, g.wire ? 'hot' : 'accent');
   } else if (g.kind === 'line') {
     // Shift holds a straight line to steps of 15 degrees.
     let q = p;
     if (e.shiftKey) { const dx = p[0] - g.start[0], dy = p[1] - g.start[1], a = Math.round(Math.atan2(dy, dx) / (Math.PI / 12)) * (Math.PI / 12), d = Math.hypot(dx, dy); q = [g.start[0] + Math.cos(a) * d, g.start[1] + Math.sin(a) * d]; }
-    const b = toSpace(g.s, q[0], q[1]);
+    const mg = g.s.kind === 'scene' ? magnetIn(g.s, q, { from: g.a, off: e.ctrlKey || e.metaKey }) : null, b = mg ? mg.point : toSpace(g.s, q[0], q[1]);
+    if (mg) showMagnet(g.s, mg);
     if (!b) return;
     g.b = b; g.end = q;
     showTouch(e.ctrlKey || e.metaKey ? null : touching(g.s, q));
@@ -1253,6 +1282,8 @@ function endGesture(e) {
     const brush = !g.wire && settings.brush && g.s.kind !== 'scene' ? { brush: { id: settings.brush, params: settings.brushParams[settings.brush] ?? {} } } : {};
     // the stroke's ends land on the grid's points when its grid snaps (its middle stays as drawn)
     const pts = keep.map((i) => g.pts[i]);
+    // in a target, its end lands where the magnet says (its start did when it began)
+    if (g.s.kind === 'scene' && !g.wire && pts.length > 1 && !(e.ctrlKey || e.metaKey)) { const m = magnetIn(g.s, g.last); if (m && m.kind !== 'free') pts[pts.length - 1] = m.point; }
     if (g.s.kind !== 'scene' && !g.wire && pts.length > 1) { pts[0] = snapHere(g.s.id, pts[0]); pts[pts.length - 1] = snapHere(g.s.id, pts[pts.length - 1]); }
     const add = () => call('line.add', { space: g.s.id, points: pts.map((q) => q.map(round)), tol: round(tol), ...(g.wire ? {} : { pen: keep.map((i) => g.pen[i]), ...newStyle(false), ...brush }) });
     // Held, and let go on a glyph of the ring: the stroke becomes that, in one step.
@@ -1514,6 +1545,8 @@ const ACTIONS = [
   ...POINT_KINDS.map((k) => ({ id: 'glyph.' + k, title: GLYPH_TITLE[k], short: k, icon: 'g.' + k, group: 'role', menu: 'Point', when: (c) => c.sel.some((o) => o.kind === 'point' || o.kind === 'joint'), on: () => [...state.selection].map(get).some((o) => o?.glyph === k), run: (c) => setGlyph(c.sel.filter((o) => o.kind === 'point' || o.kind === 'joint'), k) })),
   { id: 'quant.toggle', title: 'Quantize sliding to the beat', icon: 'grid', keys: 'q', group: 'play', menu: 'Quantize', on: () => settings.quantOn, run: () => setSetting('quantOn', !settings.quantOn) },
   ...[[1 / 16, '1/16 beat', 16], [1 / 8, '1/8 beat', 8], [1 / 4, '1/4 beat', 4], [1 / 3, '1/3 beat (triplets)', 3], [1 / 2, '1/2 beat', 2], [1, 'a beat', 1], [4, 'a bar of 4', 'bar']].map(([q, title, key]) => ({ id: 'quant.' + key, title: `Quantize to ${title}`, short: title, icon: 'grid', group: 'play', menu: 'Quantize', on: () => settings.quantOn && Math.abs(settings.quant - q) < 1e-9, run: () => { setSetting('quant', q); setSetting('quantOn', true); } })),
+  { id: 'magnet.toggle', title: 'Magnet in 3D', icon: 'magnet', keys: 'shift+m', group: 'plane', menu: 'Magnet', on: () => settings.magnet !== 'off', run: () => { if (settings.magnet !== 'off') { setSetting('magnetLast', settings.magnet); setSetting('magnet', 'off'); } else setSetting('magnet', settings.magnetLast || 'auto'); } },
+  ...MAGNETS.filter((m) => m !== 'off').map((m) => ({ id: 'magnet.' + m, title: `Magnet: ${MAGNET_TITLE[m]}`, short: MAGNET_TITLE[m], icon: 'magnet', group: 'plane', menu: 'Magnet', on: () => settings.magnet === m, run: () => setSetting('magnet', m) })),
   { id: 'view.crossings', title: 'Show where lines cross', icon: 'crossing', group: 'show', menu: true, when: (c) => !c.hit, on: () => settings.showCrossings, run: () => setSetting('showCrossings', !settings.showCrossings) },
   { id: 'tool.sculpt', title: 'Sculpt', icon: 'sculpt', keys: 'u', group: 'tool', bar: 'tools', tool: 'sculpt' },
   { id: 'sculpt.smaller', title: 'Sculpt: smaller', keys: '[', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptRadius', Math.max(6, Math.round(settings.sculptRadius / 1.2))) },
@@ -2053,7 +2086,7 @@ pad.addEventListener('contextmenu', (e) => {
   if (id && !state.selection.has(id)) call('select.set', { ids: [id] });
   const in3d = spaceAt(p[0], p[1]);
   if (e.shiftKey && in3d.kind === 'scene') { // Shift+right-click in a target: put its 3D cursor here, and draw from it
-    const o = get(in3d.id), at3 = view.sceneToLocal(o.id, p[0], p[1], o.plane ?? 'view', o.cursor ?? [0, 0, 0]);
+    const o = get(in3d.id), at3 = magnetIn({ ...in3d, plane: o.plane ?? 'view', origin: o.cursor ?? [0, 0, 0] }, p)?.point;
     if (at3) call('target.set', { id: o.id, cursor: at3.map(round), anchor: 'cursor' });
     return;
   }

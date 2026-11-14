@@ -14,6 +14,7 @@ export const DEFAULTS = {
   polySides: 6, polyStar: false,      // the polygon tool
   showCrossings: false, // a small mark where lines cross without a joint
   quant: 0.25, quantOn: false, // sliding along a line: snapped to this many beats of the time along it, while on (Q)
+  magnet: 'auto', magnetCell: 0.5, // in render targets: what a point placed snaps to (magnet.js), and the plane's lattice
   metronome: false,    // a click on each beat while playing
   codeOverlay: true, codeOpacity: 0.85, // the code shown on an object zoomed into: on or off (;), how solid its ground is
   smooth: true, simplify: 1.5,          // new lines: drawn smooth; points within this many pixels of the line are dropped

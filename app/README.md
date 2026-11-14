@@ -235,7 +235,10 @@ their joints and travelers, and can be orbited (Alt-drag) and drawn into in
 returns how its scene is seen (`spin`, `tilt`, `zoom`, `center`), and its
 header declares its inputs and parameters, so you can add controls of your
 own. Presets: spin and tilt, orbit, breathe, look. Right-click › Take out
-of the 3D scene puts lines back, flat.
+of the 3D scene puts lines back, flat. In a target the magnet places what you draw:
+on a stroke's points, along a stroke, at the middle of a stretch,
+perpendicular to a stroke, or on the drawing plane's grid (right-click ›
+Magnet; Shift+M on and off; Ctrl while drawing leaves it out).
 
 ## Scores
 

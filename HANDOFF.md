@@ -861,6 +861,20 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   default: inputs spin and tilt, parameters orbit and zoom), orbit,
   breathe, look (where it looks, from inputs). Its code is in the Code
   panel; its face shows only the scene.
+- **3D, second pass: the magnet** (`src/magnet.js`, after threegrease's
+  `snapWorldPoint` in `src/tools/snapping.ts`). Where a point placed in a
+  render target lands: on a stroke point, anywhere along a stroke (its
+  curve as drawn), the middle of a stretch, the foot of the perpendicular
+  from where a move began, or the drawing plane's lattice (in the plane's
+  own basis: a tilted plane gets a tilted lattice). Picked on screen within
+  14 px, falling back to the plane. Modes are in right-click › Magnet;
+  Shift+M turns it off and back on; the default is auto (points, then
+  strokes). It is used for a stroke's start and end, the line tool's ends,
+  polyline corners, the 3D cursor (Shift+right-click) and control points
+  dragged with the points tool. Ctrl while drawing leaves it out. The snap
+  marker shows what it caught (filled: a point; square: along a stroke;
+  diamond: a middle; dashed: the grid). Strokes that meet this way join,
+  as on the canvas.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a
@@ -914,7 +928,7 @@ Known gaps and shortcuts:
 
 **The 3D phase, in passes** (begun 14 Nov 2026, after the score and
 timeline): (1) done: targets take marks in, travelers and nodes in 3D;
-(2) placement and the magnet from threegrease `src/tools/snapping.ts` and
+(2) done: placement and the magnet from threegrease `src/tools/snapping.ts` and
 `projection.ts`: snapping drawing, points and the 3D cursor to stroke
 points and segments in 3D, guides; (3) grease pencil strokes: pressure as
 radius in a screen-space ribbon, fills of closed strokes (earcut), from
