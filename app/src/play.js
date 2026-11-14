@@ -29,6 +29,7 @@ import { pathBeats, cellOf } from './grid.js';
 //   ev.col, ev.row: the cell of its grid it was reached in; in a grid with rows, pitch() is the row's note.
 // A traveler with dur 0 takes its time from the grid its line lies in (grid.js), line by line.
 //   The parameter lockout (seconds) keeps an event from firing again so soon.
+//   light(beats | true | false): light this event (for a while, or on, or out); lit(name): is that node or event lit?
 export const EVENT = `// event
 // out: gate count
 // param: dur 0.3
@@ -121,9 +122,10 @@ note(step(p.from, (mem.k * p.by) % 15), 100, 0.3);`,
 };
 
 // What a junction's code returned, as what the rider does:
-// { go: [way, ...] } (more than one: it splits), { back: true } or { stop: true }.
+// { go: [way, ...] } (more than one: it splits), { back: true } or { stop: true } ('end': even a driver).
 function decide(r, ways) {
   const one = (x) => (Number.isInteger(x) ? ways[x] : x && ways.includes(x) ? x : x?.line ? ways.find((w) => w.line === x.line && (x.dir == null || w.dir === x.dir)) : null);
+  if (r === 'end') return { stop: true, end: true };
   if (r === 'stop' || r === false) return { stop: true };
   if (r === 'back' || r === 'reflect') return { back: true };
   if (Array.isArray(r)) { const go = r.map(one).filter(Boolean); return go.length ? { go } : { stop: true }; }
@@ -170,8 +172,19 @@ export function createPlay() {
     if (!f) { try { f = { run: new Function(...args, code) }; } catch (e) { f = { error: e.message }; } if (handlers.size > 200) handlers.clear(); handlers.set(key, f); }
     return f;
   };
-  const handler = (code) => compile(code, ['ev', 'p', 'note', 'mem', 'pitch', 'step', 'snap', 'rng', 'cc'], code);
-  const chooser = (code) => compile('junction\n' + code, ['ways', 'ev', 'p', 'mem', 'note', 'pitch', 'step', 'snap', 'rng', 'cc'], code);
+  const handler = (code) => compile(code, ['ev', 'p', 'note', 'mem', 'pitch', 'step', 'snap', 'rng', 'cc', 'light', 'lit'], code);
+  const chooser = (code) => compile('junction\n' + code, ['ways', 'ev', 'p', 'mem', 'note', 'pitch', 'step', 'snap', 'rng', 'cc', 'light', 'lit'], code);
+  // Lights (after Midinous and AMS's nodes): a node is lit for a while, or on until it is put out.
+  // light(beats | true | false) sets the light of the node or event whose code runs; lit(name) reads
+  // any node's (by name or id). Gates read them.
+  const lights = new Map(); // id -> transport time it goes out (Infinity: on)
+  let nowT = 0, objectsNow = new Map();
+  const lightFor = (id) => (v = true) => { if (v === false || v === 0) lights.delete(id); else lights.set(id, v === true ? Infinity : nowT + Math.max(0, +v || 0) * (hooksNow.spb ?? 0.5)); };
+  const lit = (ref) => {
+    const o = objectsNow.get(ref) ?? [...objectsNow.values()].find((x) => x.name === ref);
+    const until = o && lights.get(o.id);
+    return until != null && until > nowT;
+  };
   const memOf = (id) => { if (!mems.has(id)) mems.set(id, {}); return mems.get(id); };
 
   // One rider of a traveler moves on by `left` (a distance) along its lines.
@@ -200,16 +213,19 @@ export function createPlay() {
         else try {
           // the note a node plays is remembered by the rider: ev.last (Midinous's relative notes)
           const h = hooksNow, note = (m, v, d, ch) => { if (Number.isFinite(m)) rider.last = m; return h.note(m, v, d, ch); };
-          r = f.run(ways, { traveler: o.id, rider: rider.n, from: rider.line, count: counts.get(j.id), last: rider.last ?? 60, spb: h.spb ?? 0.5 }, paramsHook(j), memOf(j.id), note, h.pitch, h.step, h.snap, rng, h.cc);
+          r = f.run(ways, { traveler: o.id, rider: rider.n, from: rider.line, count: counts.get(j.id), last: rider.last ?? 60, spb: h.spb ?? 0.5, self: j.id, t: nowT }, paramsHook(j), memOf(j.id), note, h.pitch, h.step, h.snap, rng, h.cc, lightFor(j.id), lit);
         } catch (err) { errors.set(j.id, err.message); }
         const d = decide(r, ways);
         rider.skip = j.id;
-        if (d.stop) { rider.stopped = true; break; }
+        // a driver (a traveler placed by hand) is not stopped by node logic, only by 'end' (a terminator):
+        // it carries on the straightest way; a signal or a copy stops (and a copy goes, so splitting goes on)
+        if (d.stop && rider.driver && !d.end && ways.length) d.go = [ways[0]];
+        else if (d.stop) { rider.stopped = true; if (rider.spawned) rider.gone = true; break; }
         if (d.back) { rider.dir = -rider.dir; continue; }
         trail.push(null, atS(measureOf(d.go[0].line), d.go[0].u * measureOf(d.go[0].line).total));
         // a rider timed by the grid takes each line in that line's own time
         const sp = (id) => (rider.byGrid ? speedOf(id) ?? rider.speed : rider.speed);
-        d.go.slice(1).forEach((w) => { if (all.length < MAX_RIDERS) all.push({ ...rider, n: ++o_n.n, line: w.line, dir: w.dir, s: w.u * measureOf(w.line).total, speed: sp(w.line), spawned: true, pending: left }); });
+        d.go.slice(1).forEach((w) => { if (all.length < MAX_RIDERS) all.push({ ...rider, n: ++o_n.n, line: w.line, dir: w.dir, s: w.u * measureOf(w.line).total, speed: sp(w.line), spawned: true, driver: false, pending: left }); });
         const w = d.go[0];
         rider.line = w.line; rider.dir = w.dir; m = measureOf(w.line); rider.s = w.u * m.total; rider.speed = sp(w.line);
         continue;
@@ -233,13 +249,14 @@ export function createPlay() {
     riders() { let n = 0; for (const st of net.values()) n += st.riders.length; return n; },
     // let go of every held note (a pause), the travelers staying where they are
     quiet() { for (const k of [...gates.keys()]) release(k); latched.clear(); },
-    reset() { for (const k of [...gates.keys()]) release(k); latched.clear(); firedAt.clear(); lastFire.clear(); counts.clear(); net.clear(); mems.clear(); rng = seeded(1); },
+    reset() { lights.clear(); for (const k of [...gates.keys()]) release(k); latched.clear(); firedAt.clear(); lastFire.clear(); counts.clear(); net.clear(); mems.clear(); rng = seeded(1); },
     // hooks: pointsOf(line) -> its points as shown, paramsOf(o) -> resolved parameters, note(midi, vel, dur)
     // -> { moved: id -> [x, y], ghosts: [{ of, pos }] (the riders a traveler split into), out, errors }
     // hooks also: spb (seconds a beat), grid (canvas units a grid cell), pitch, step, snap
     step(objects, t, playing, hooks) {
       paramsHook = hooks.paramsOf;
       hooksNow = { ...plain, ...hooks };
+      nowT = t; objectsNow = objects;
       const spb = hooks.spb ?? 0.5, grid = hooks.grid ?? 1;
       const moved = new Map(), out = new Map(), errors = new Map(), gate = new Map(), ghosts = [];
       const events = [...objects.values()].filter((o) => o.role === 'event' && !o.hidden);
@@ -263,7 +280,7 @@ export function createPlay() {
           // dur 0: the time comes from the grid the line lies in (else 8 beats)
           const byGrid = !(p.speed > 0) && (p.dur ?? 8) <= 0, gs = byGrid ? gridSpeed(line.id) : null;
           const speed = p.speed > 0 ? (p.speed * grid) / spb : gs ?? start.total / Math.max(0.05, (p.dur > 0 ? p.dur : 8) * spb);
-          st = { on: line.id, t, riders: [{ n: ++o_n.n, line: line.id, s: Math.max(0, Math.min(1, p.start ?? 0)) * start.total, dir: 1, speed, base: speed, byGrid, skip: null, stopped: false }] };
+          st = { on: line.id, t, riders: [{ n: ++o_n.n, line: line.id, s: Math.max(0, Math.min(1, p.start ?? 0)) * start.total, dir: 1, speed, base: speed, byGrid, driver: p.drives !== 0, skip: null, stopped: false }] };
           net.set(o.id, st);
         }
         // it moves only from its own beat on (IanniX: each object's time is the transport's, from its start)
@@ -340,7 +357,7 @@ export function createPlay() {
                   split() {
                     if (all.length >= MAX_RIDERS) return;
                     back();
-                    const copy = { ...rider, n: ++o_n.n, dir: -rider.dir, spawned: true, skip: null };
+                    const copy = { ...rider, n: ++o_n.n, dir: -rider.dir, spawned: true, driver: false, skip: null };
                     all.push(copy);
                     firedAt.set(o.id + '#' + copy.n + '|' + e.id, fireAt); // the copy starts on the event: it has already been there
                   },
@@ -357,7 +374,7 @@ export function createPlay() {
               const g = hooks.gridAt?.(e.space, fireAt);
               let pitch = hooksNow.pitch;
               if (g) { [ev.col, ev.row] = cellOf(fireAt, g); if (g.rows > 0) pitch = () => hooksNow.step(hooksNow.pitch(0), ev.row * g.rows); }
-              try { f.run(ev, ep, note, memOf(e.id), pitch, hooksNow.step, hooksNow.snap, rng, hooksNow.cc); } catch (err) { errors.set(e.id, err.message); }
+              try { f.run(ev, ep, note, memOf(e.id), pitch, hooksNow.step, hooksNow.snap, rng, hooksNow.cc, lightFor(e.id), lit); } catch (err) { errors.set(e.id, err.message); }
               }
             }
             // latched until it leaves: an event does not fire again while the traveler stays inside
@@ -368,7 +385,10 @@ export function createPlay() {
         if (firedAt.size > 4000) firedAt.clear(); // riders that are gone leave their marks: do not let them pile up
       }
       for (const e of events) out.set(e.id, { gate: gate.get(e.id) ?? 0, count: counts.get(e.id) ?? 0 });
-      return { moved, ghosts, out, errors };
+      // what is lit now, for the view
+      const litNow = new Set();
+      for (const [id, until] of lights) { if (until > t) litNow.add(id); else lights.delete(id); }
+      return { moved, ghosts, out, errors, lit: litNow };
     },
   };
 }

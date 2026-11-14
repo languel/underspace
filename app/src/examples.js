@@ -8,7 +8,8 @@ import { GRID_PRESETS } from './grid.js';
 import { JUNCTIONS } from './joints.js';
 import { EVENTS } from './play.js';
 import { iannixPlan, applyPlan } from './iannix.js';
-import { nousPlan, applyNous } from './nous.js';
+import { nousPlan, applyNous, nodeCodeFor } from './nous.js';
+import { POINT_KINDS } from './glyphs.js';
 
 const wave = (x, y, n, step, f) => Array.from({ length: n }, (_, i) => [+(x + i * step).toFixed(3), +(y + f(i)).toFixed(3)]);
 
@@ -207,5 +208,44 @@ export const EXAMPLES = [
     c('music.set', { scale: [0, 2.04, 3.86, 4.98, 7.02, 8.84, 10.88], root: 60, low: 55, high: 79 });
     c('shape.add', { role: 'score', rect: { cx: at[0], cy: at[1], w: 11, h: 4 } });
     for (let k = 0; k < 3; k++) c('line.add', { points: wave(at[0] - 5 + k * 0.6, at[1] - 1.2 + k * 0.9, 26, 0.38, (i) => Math.sin(i * 0.3 + k) * 0.6) });
+  } },
+
+  // ---- nodes: Midinous's kinds of point, and their logic ------------------------------
+
+  { path: 'Music/Nodes', title: 'A switch takes turns', icon: 'g.switch', build: (c, at) => {
+    // the start splits each lap: one way past a switch to a note, the other round and back;
+    // the switch is on and off in turn, so the note sounds every other lap
+    applyNous(nousPlan({ settings: { tempo: 100 }, points: [
+      { id: 1, x: 0, y: 0, type: 'anchor', isStart: true, playMode: 'split', to: [2, 4] },
+      { id: 2, x: 0, y: -288, type: 'switch', to: [3] },
+      { id: 3, x: 0, y: -576, type: 'note', note: 72, to: [] },
+      { id: 4, x: 576, y: 0, type: 'note', note: 60, duration: 0.5, to: [1] },
+    ] }, { cell: 1, at }), c);
+  } },
+  { path: 'Music/Nodes', title: 'A gate reads a light', icon: 'g.gate', build: (c, at) => {
+    // an LED lights as the traveler passes it; further on, a gate lets the traveler through only
+    // while that LED is still lit (its input, by name); two LEDs, one long and one short
+    applyNous(nousPlan({ settings: { tempo: 110 }, points: [
+      { id: 1, x: 0, y: 0, type: 'anchor', isStart: true, playMode: 'split', to: [2, 5] },
+      { id: 2, x: 288, y: 0, type: 'led', duration: 4, to: [3], SerializableLogicPathTo: [3] },
+      { id: 3, x: 864, y: 0, type: 'gate', to: [4] },
+      { id: 4, x: 1152, y: 0, type: 'note', note: 76, to: [] },
+      { id: 5, x: 288, y: 288, type: 'led', duration: 0.5, to: [6], SerializableLogicPathTo: [6] },
+      { id: 6, x: 864, y: 288, type: 'gate', to: [7] },
+      { id: 7, x: 1152, y: 288, type: 'note', note: 64, to: [] },
+    ] }, { cell: 1, at }), c);
+  } },
+  { path: 'Music/Nodes', title: 'Nodes on a drawn line', icon: 'g.note', build: (c, at) => {
+    // the point tool puts nodes on any line: here a curve with note nodes, a counter and a terminator
+    const pts = Array.from({ length: 36 }, (_, i) => [+(at[0] - 6 + i * 0.34).toFixed(3), +(at[1] + Math.sin(i * 0.3) * 1.5).toFixed(3)]);
+    const line = c('line.add', { points: pts });
+    [[0.12, 'note', 60], [0.28, 'note', 64], [0.44, 'counter'], [0.6, 'note', 67], [0.76, 'note', 71]].forEach(([u, kind, n]) => {
+      c('joint.add', { at: [{ id: line, u }], node: true, glyph: kind, code: nodeCodeFor(kind, n ?? 60) });
+    });
+    c('joint.add', { at: [{ id: line, u: 0.95 }], node: true, glyph: 'terminator', code: nodeCodeFor('terminator') });
+    c('traveler.add', { on: line, dur: 8, loop: 1, size: 0.35 });
+  } },
+  { path: 'Drawing/Points', title: 'Every kind of point', icon: 'point', build: (c, at) => {
+    POINT_KINDS.forEach((k, i) => c('point.add', { at: [at[0] - 5 + (i % 6) * 2, at[1] + (i < 6 ? 1 : -1)], glyph: k, size: 0.7 }));
   } },
 ];

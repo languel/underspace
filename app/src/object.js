@@ -41,7 +41,9 @@ export const hasCode = (o) => o.role === 'code' || o.role === 'path' || o.role =
 // dur: beats for the whole line (at the music context's tempo); at: the beat it sets off on;
 // speed: grid cells a beat (Midinous: distance is time), 0 to use dur instead;
 // drawn: above 0, it goes at the pace the hand drew the line (1 as drawn, 2 twice as fast).
-export const TRAVELER = '// traveler\n// out: x y u\n// param: dur 8\n// param: loop 1\n// param: start 0\n// param: at 0\n// param: speed 0\n// param: drawn 0';
+// drives: 1, a driver, which node logic does not stop (only a terminator); 0, a signal, which a closed
+// switch, a counter or a gate stops (after AMS's nodes: what Midinous's start nodes send out).
+export const TRAVELER = '// traveler\n// out: x y u\n// param: dur 8\n// param: loop 1\n// param: start 0\n// param: at 0\n// param: speed 0\n// param: drawn 0\n// param: drives 1';
 export const isWire = (o) => o.role === 'connector' && !!o.bind;
 
 const parsed = new Map();

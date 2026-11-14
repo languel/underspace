@@ -63,6 +63,7 @@ const ink = createInk($('ink'));
 const playEngine = createPlay();
 // One clock for everything that plays (transport.js); notes played while recording become a clip.
 const transport = createTransport(), midiOut = createMidiOut();
+let litNow = new Set(); // the nodes and events lit now (their lights: play.js)
 let recNotes = [], lastBeat = 0, lastWrap = 0, clipDrag = null, timeline = null;
 // Performance and errors (debug.js): created before the first frame, so it can catch that frame's errors.
 const dbg = createDebug($('debug'), () => ({ objects: state.objects.size, riders: playEngine.riders(), steps: take.clips.length, settle: stats.settleMs.toFixed(1) + 'ms' }));
@@ -102,7 +103,7 @@ function walk(space, xf) {
     const sel = state.selection.has(o.id), blanket = blanketOf(o), st = o.style ?? {};
     if (o.kind === 'joint') {
       // where lines meet: a small ring, or its glyph (a Midinous node); lit by a traveler or selected, it fills; a pin is hot
-      const c = at(xf, jointAt(o)), lit = performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160, q = view.toScreen(c);
+      const c = at(xf, jointAt(o)), lit = litNow.has(o.id) || performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160, q = view.toScreen(c);
       if (o.glyph) for (const g of glyphLines(o.glyph, c, (sel || lit ? 6.5 : 5.5) * upp)) lines.push({ id: o.id, pts: g.pts, color: sel ? 'accent' : lit ? 'hot' : st.stroke ?? 'ink', width: 1.4, fill: g.fill ? (sel ? 'accent' : lit ? 'hot' : st.fill ?? st.stroke ?? 'ink') : null });
       else { const r = (sel || lit ? 5 : 3.2) * upp; lines.push({ id: o.id, pts: outline({ cx: c[0], cy: c[1], w: r * 2, h: r * 2 }, 'ellipse'), color: sel ? 'accent' : o.fix || lit ? 'hot' : 'ink', width: 1.3, fill: sel ? 'accent' : lit ? 'hot' : o.fix ? null : st.fill ?? 'line' }); }
       vis.set(o.id, { o, face: 'joint', px: { l: q[0] - 7, t: q[1] - 7, w: 14, h: 14 }, xf, blanket });
@@ -110,7 +111,7 @@ function walk(space, xf) {
     }
     if (o.kind === 'point') {
       // a point: its glyph at its size (it scales with the view, as ink does)
-      const r = rectOf(o), c = at(xf, [r.cx, r.cy]), lit = o.role === 'event' && performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160, q = view.toScreen(c), half = Math.max(r.w * xf.k / 2, 2.5 * upp);
+      const r = rectOf(o), c = at(xf, [r.cx, r.cy]), lit = litNow.has(o.id) || (o.role === 'event' && performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160), q = view.toScreen(c), half = Math.max(r.w * xf.k / 2, 2.5 * upp);
       for (const g of glyphLines(o.glyph ?? 'dot', c, half)) lines.push({ id: o.id, pts: g.pts, color: sel ? 'accent' : lit ? 'hot' : st.stroke ?? 'ink', width: st.width ?? 1.6, fill: g.fill ? (sel ? 'accent' : lit ? 'hot' : st.fill ?? st.stroke ?? 'ink') : null, opacity: st.opacity });
       const pxr = Math.max(7, half / upp);
       vis.set(o.id, { o, face: 'joint', px: { l: q[0] - pxr, t: q[1] - pxr, w: pxr * 2, h: pxr * 2 }, xf, blanket });
@@ -371,9 +372,11 @@ function frameInner() {
   const played = dbg.time('play', () => playEngine.step(state.objects, t, transport.playing, musicHooks()));
   playClips();
   setMoved(played.moved);
+  litNow = played.lit ?? new Set();
   let playSig = 0;
   for (const [id, out] of played.out) { step.report(id, { out, error: played.errors.get(id) ?? '' }); if (out.u != null) playSig += out.x * 3 + out.y * 7; }
   for (const g of played.ghosts) playSig += g.pos[0] * 5 + g.pos[1] * 11;
+  for (const id of litNow) playSig += id.length * 31 + 1;
   for (const [id, when] of playEngine.hitAt) if (performance.now() - when < 160) playSig += when + id.length;
   run = dbg.time('code', () => step(state.objects, performance.now() / 1000));
   vis = new Map(); spaces = [{ id: null, kind: 'canvas', xf: ROOT }]; lines = []; ink3d = []; sceneList = []; dots = []; inkItems = []; pointSrc = [];

@@ -7,7 +7,8 @@
 //   path   a line from node to node, across first, up first or straight, as
 //          Midinous drew it, so its length is the cells between them (time)
 //   start  a node a traveler sets off from, one grid cell a beat
-// Not carried over (in warnings): logic gates and LEDs, groups, relative ranges,
+// Gates read the lights of their inputs (the nodes whose logic paths lead to them);
+// LEDs, switches and notes light up. Not carried over: groups, relative ranges,
 // repeat, slew. Parsing is Artist Model Studio's (src/score/import/nous.js).
 
 const MIDINOUS_ORDER = ['Hirajoshi', 'Insen', 'Iwato', 'Pentatonic Major', 'Pentatonic Minor', 'Two Semitone Tritone', 'Aeolian', 'Dorian', 'Harmonic Major', 'Harmonic Minor', 'Ionian', 'Locrian', 'Lydian', 'Mixolydian', 'Phrygian', 'Altered', 'Half Diminished', 'Locrian Major', 'Lydian Augmented', 'Melodic Minor', 'Ukrainian Dorian', 'Augmented', 'Blues', 'Flamenco', 'Hungarian', 'Persian', 'Prometheus', 'Chromatic', 'Octatonic Whole', 'Octatonic Half', 'Tritone', 'Whole Tone'];
@@ -85,9 +86,14 @@ function edgePoints(a, b, mode) {
   return mode === 1 ? [a, [a[0], b[1]], b] : [a, [b[0], a[1]], b];
 }
 
-// The code of a node: what it plays, then where it sends the traveler.
 // The code of a node of a kind, with Midinous's defaults (a point placed on a line).
-export const nodeCodeFor = (type, note = 60) => nodeCode({ type, note, velocity: 100, channel: type === 'cc' ? 1 : 1, duration: 1, chance: 100, mode: 0, ccNum: 1, ccValue: 64, countMax: 2 });
+export const nodeCodeFor = (type, note = 60) => nodeCode({ type, note, velocity: 100, channel: 1, duration: 1, chance: 100, mode: 0, ccNum: 1, ccValue: 64, countMax: 2 });
+
+const GATES = ['and', 'or', 'xor', 'nand', 'nor', 'xnor'];
+
+// The code of a node: what it plays or decides, then where it sends the traveler. Lights (light, lit)
+// are what gates read: a note is lit while it sounds, an LED for its beats (or on and off), a switch
+// while it is on, a counter or an anchor for a moment as a traveler goes on.
 
 export function nodeCode(n, ctx = {}) {
   const lines = [`// ${n.type}${n.label ? ' ' + n.label : ''}`, '// out: count'];
@@ -97,15 +103,31 @@ export function nodeCode(n, ctx = {}) {
     lines.push(`// param: note ${n.note}`, `// param: vel ${n.velocity}`, `// param: ch ${n.channel}`, `// param: beats ${n.duration}`, `// param: chance ${n.chance ?? 100}`);
     if (n.relative) { lines.push(`// param: by ${n.pass ? 0 : n.offset}`); body.push('// relative: a number of steps of the scale from the note this traveler played last', 'const m = step(ev.last, p.by);'); }
     else body.push(n.forceScale && (scaleOf(n.scale) || ctx.scale) ? 'const m = snap(p.note);' : 'const m = p.note;');
-    if (!n.mute) body.push('if (rng() * 100 < p.chance) note(m, p.vel, p.beats * ev.spb, p.ch);');
+    if (!n.mute) body.push('if (rng() * 100 < p.chance) { note(m, p.vel, p.beats * ev.spb, p.ch); light(p.beats); }');
   } else if (n.type === 'cc') {
     lines.push(`// param: cc ${n.ccNum ?? n.note}`, `// param: value ${n.ccValue ?? n.velocity}`, `// param: ch ${n.channel}`);
     if (!n.mute) body.push('cc(p.cc, p.value, p.ch);');
   } else if (n.type === 'counter') {
     lines.push(`// param: every ${Math.max(1, num(n.countMax, 1))}`);
-    body.push('// only every nth traveler goes on', "mem.k = (mem.k ?? 0) + 1;", "if (mem.k % p.every) return 'stop';");
+    body.push('// only every nth traveler goes on', "mem.k = (mem.k ?? 0) + 1;", "if (mem.k % p.every) return 'stop';", 'light(0.25);');
+  } else if (n.type === 'led') {
+    lines.push(`// param: beats ${n.duration ?? 1}`, `// param: toggle ${n.toggle ? 1 : 0}`);
+    body.push('// lights up as a traveler passes: for its beats, or (toggle 1) on and off in turn', 'if (p.toggle) light(!lit(ev.self)); else light(p.beats);');
+  } else if (n.type === 'switch') {
+    lines.push(`// param: block ${n.block === false ? 0 : 1}`);
+    body.push('// on and off in turn; while off (block 1), a traveler stops here', 'mem.on = !mem.on;', 'light(mem.on);', "if (p.block && !mem.on) return 'stop';");
+  } else if (n.type === 'gate') {
+    const type = GATES.indexOf(n.gateName ?? 'and');
+    lines.push(`// param: type ${Math.max(0, type)}`);
+    body.push(`// a logic gate: it reads the lights of its inputs (their names) and lets a traveler on`,
+      `// only when they say so. type: ${GATES.map((g, i) => `${i} ${g}`).join(', ')}`,
+      `const inputs = ${JSON.stringify(ctx.inputs ?? [])};`,
+      'const k = inputs.filter((name) => lit(name)).length, all = inputs.length > 0 && k === inputs.length, any = k > 0, odd = k % 2 === 1;',
+      "if (![all, any, odd, !all, !any, !odd][p.type]) return 'stop';", 'light(0.25);');
+  } else if (n.type === 'anchor') {
+    body.push('light(0.25);');
   } else if (n.type === 'terminator') {
-    return [...lines, "return 'stop';"].join('\n');
+    return [...lines, '// stops whatever reaches it, drivers too', "return 'end';"].join('\n');
   }
   // where it goes: the paths that leave this node
   // the paths that leave this node; a node in the middle of a line also lets the traveler go on along it
@@ -130,17 +152,17 @@ export function nousPlan(input, { cell = 1, at = [0, 0] } = {}) {
   const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
   const place = (n) => [r(at[0] + (n.x / GRID - cx) * cell, 4), r(at[1] - (n.y / GRID - cy) * cell, 4)]; // Midinous is y down
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const skipped = new Set();
   for (const n of nodes) {
-    if (['gate', 'led'].includes(n.type)) skipped.add(n.type);
-    plan.nodes.push({ key: n.id, at: place(n), code: nodeCode(n, ctx), start: n.start, color: n.color });
+    // a gate's inputs: the nodes whose logic paths lead to it (named n<id> when imported)
+    if (n.type === 'gate') { const t = typeof n.gateType === 'string' ? n.gateType.toLowerCase() : GATES[num(n.gateIndex, 0)] ?? 'and'; n.gateName = n.negated ? { and: 'nand', or: 'nor', xor: 'xnor', nand: 'and' }[t] ?? t : t; }
+    const inputs = nodes.filter((m) => m.logicTo.includes(n.id)).map((m) => 'n' + m.id);
+    plan.nodes.push({ key: n.id, at: place(n), code: nodeCode(n, { ...ctx, inputs }), start: n.start, color: n.color, type: n.type });
     for (const id of n.to) {
       const t = byId.get(id);
       if (!t || t === n) continue;
       plan.edges.push({ from: n.id, to: id, points: edgePoints(place(n), place(t), n.pathMode), color: n.color });
     }
   }
-  for (const k of skipped) warnings.push(`Midinous: ${k} nodes only pass travelers on`);
   if (!nodes.some((n) => n.start)) warnings.push('Midinous: no start node, so nothing sets off');
   plan.stats = { nodes: plan.nodes.length, paths: plan.edges.length };
   return plan;
@@ -155,11 +177,12 @@ export function applyNous(plan, call, space = null) {
   for (const n of plan.nodes) {
     const at = [...lines.filter((l) => l.e.from === n.key).map((l) => ({ id: l.id, u: 0 })), ...lines.filter((l) => l.e.to === n.key).map((l) => ({ id: l.id, u: 1 }))];
     if (!at.length) continue;
-    const j = call('joint.add', { at, code: n.code, ...(at.length < 2 ? { fix: true } : {}) });
+    const j = call('joint.add', { at, code: n.code, glyph: n.type ?? 'note', ...(at.length < 2 ? { node: true } : {}) });
     if (j) { made.push(j); if (n.key != null) call('object.name', { id: j, name: 'n' + n.key }); }
     if (n.start) for (const l of lines.filter((x) => x.e.from === n.key).slice(0, 1)) {
       const t = call('traveler.add', { on: l.id, loop: 0, size: 0.35 });
-      if (t) { call('object.set', { id: t, name: 'speed', value: 1 }); made.push(t); }
+      // a signal, a grid cell a beat: what a start node sends out (switches, counters and gates stop it)
+      if (t) { call('object.set', { id: t, name: 'speed', value: 1 }); call('object.set', { id: t, name: 'drives', value: 0 }); made.push(t); }
     }
   }
   return made.filter(Boolean);

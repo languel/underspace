@@ -784,6 +784,26 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
     its settings; also inside render targets).
   - Context menu: Point › with the eleven types. View: Show where lines
     cross marks unjoined crossings (computed once per change, bounded).
+- **Node logic** (a twenty-seventh pass, after AMS's `src/score/nodes.js`):
+  - The engine keeps a light per node or event. Their code gets
+    `light(beats | true | false)` and `lit(name)` (by name or id).
+  - A note is lit while it sounds; an LED for its beats (or, with
+    `toggle 1`, on and off in turn); a switch while it is on; a counter
+    or an anchor for a moment as a traveler goes on.
+  - A switch flips with each traveler and, with `block 1`, stops it while
+    off. A gate reads its inputs' lights (`type` 0 and, 1 or, 2 xor,
+    3 nand, 4 nor, 5 xnor; its inputs a list of names in its code) and
+    stops a traveler unless they agree.
+  - Lit nodes are drawn lit (`played.lit`). On import, a Midinous gate's
+    inputs are the nodes whose logic paths lead to it.
+  - **Drivers and signals,** as in AMS: a traveler placed by hand
+    (`drives 1`, the default) is not stopped by node logic: 'stop' sends
+    it the straightest way on. Signals (`drives 0`: what Midinous start
+    nodes send out) and split copies stop, and a copy that stops goes
+    away (so splitting goes on). 'end' (the terminator, and the stop
+    junction preset) stops any traveler.
+  - Examples: Music › Nodes (a switch takes turns, a gate reads a light,
+    nodes on a drawn line) and Drawing › Points.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a

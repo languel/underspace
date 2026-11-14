@@ -106,6 +106,13 @@ the first corner closes it), and the shape stack a polygon tool (sides and
 star in its settings). View › Show where lines cross marks crossings that
 are not joints.
 
+Nodes light up: a note while it sounds, an LED for its beats (or on and off
+in turn), a switch while on. A switch stops every other traveler; a gate
+lets one on only while its inputs (the nodes named in its code) are lit
+(and, or, xor, nand, nor, xnor). A traveler you place yourself drives on
+past switches, counters and gates (only a terminator stops it); what
+Midinous start nodes send out are signals, which they do stop.
+
 ## Joints
 
 Lines that touch connect. When the end of a stroke lands on another line,

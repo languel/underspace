@@ -32,7 +32,8 @@ import { smooth } from './object.js';
 //   ev    { traveler, rider, from, count, last (the last note this rider played), spb (seconds a beat) }
 //   p  its parameters   mem  what it keeps
 // and returns a way or its index; several (an array) to split the traveler;
-// 'back' to send it back the way it came; 'stop' to stop it; nothing: straight on.
+// 'back' to send it back the way it came; 'stop' to stop signals and copies (a traveler placed
+// by hand, a driver, carries on); 'end' to stop any traveler; nothing: straight on.
 export const JUNCTIONS = {
   'round robin': `// round robin
 // out: count
@@ -67,7 +68,8 @@ return ways.map((w, i) => i);`,
 return 'back';`,
   stop: `// stop
 // out: count
-return 'stop';`,
+// stops every traveler, drivers too ('stop' would stop only signals and copies)
+return 'end';`,
   every: `// every
 // out: count
 // param: n 2
