@@ -165,7 +165,9 @@ Delete, ↑↓ a degree of the scale (Shift an octave), ←→ a sixteenth, Q
 quantize, Esc close. Rows of the timeline's scale are lit.
 "Render to a clip" plays the drawing offline over the loop (or 8 bars)
 and makes a clip of what it plays. "Import a MIDI file" brings a .mid in as
-a clip. "Export recorded clips as MIDI" writes a .mid file of every unmuted clip.
+a clip. "Import an IanniX score" runs a .iannix file (it asks first, since it is
+code) and brings its curves, cursors and triggers in as lines, travelers
+and events that play its MIDI messages. "Export recorded clips as MIDI" writes a .mid file of every unmuted clip.
 The instrument glyph on the timeline's head sets what each channel plays
 (triangle, sine, square, saw, pluck, bell, pad; channel 10 is drums), and
 `note(m, v, seconds, channel)` picks the channel. "Send notes to MIDI" connects Web MIDI, after which notes also go to your

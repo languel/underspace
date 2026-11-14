@@ -679,6 +679,18 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   `midi.js`: format 0 or 1, every track and channel, running status) into
   a clip at the playhead's bar. Its tempo and meter go to the timeline
   when there are no clips yet.
+- **IanniX import** (`src/iannix.js`, a twentieth pass): AMS's importer
+  (itself from Underscores) runs a .iannix score's code, after a confirm,
+  because it is code; collects its `run()` commands; and builds curves,
+  cursors and triggers. `iannixPlan` fits them to the view; `applyPlan`
+  makes them with commands. Curves become lines (Béziers, ellipses, point
+  lists and equations sampled). Cursors become travelers (setSpeed auto N
+  is a lap of N seconds, setPattern sets the loop). Triggers become event
+  circles whose code is their messages (`note`, `notef` with pitch over
+  36..96, `cc`, `ccf`; trigger_value_x/y is `ev.x`/`ev.y`). A trigger is as
+  wide as the widest cursor's bar. Not carried over: OSC, cursor messages,
+  textures, 3D. There is no IanniX example folder on this machine, so it
+  was tested with hand-written scores.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); audio recording; note-off at exit (IanniX's gate); scores on
   the shared transport (they still schedule their own passes); MIDI clock;

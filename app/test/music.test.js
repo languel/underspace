@@ -199,3 +199,27 @@ test('MIDI files read back, every track and channel; a render is the live perfor
   assert.deepEqual(rendered.map((n) => n.midi), live);
   assert.deepEqual(live, [62, 67, 62, 67]); // two laps of 2 s
 });
+
+test('an IanniX score comes in as lines, travelers and events, and plays its messages', async () => {
+  const { iannixPlan, applyPlan, loopOf } = await import('../src/iannix.js');
+  const { createPlay } = await import('../src/play.js');
+  const source = `
+    function makeWithScript() {
+      title("small");
+      run("add curve 1"); run("setPointAt current 0 0 0"); run("setPointAt current 1 10 0");
+      run("add cursor 2"); run("setCurve current 1"); run("setSpeed current auto 4"); run("setPattern current 0 0 1");
+      run("add trigger 3"); run("setPos current 1 0");
+      for (var i = 0; i < 3; i++) { run("add trigger " + (10 + i)); run("setPos current " + (3 + i * 3) + " 0"); run("setMessage current 1, midi://midi_out/note 2 " + (60 + i) + " 100 0.2"); }
+    }`;
+  const plan = iannixPlan(source, { width: 10 });
+  assert.deepEqual(plan.stats, { curves: 1, cursors: 1, triggers: 4 });
+  assert.equal(plan.title, 'small');
+  assert.equal(plan.cursors[0].seconds, 4); assert.equal(plan.cursors[0].loop, 1);
+  assert.equal(loopOf('0 0 1 -1'), 'pingpong');
+  call('space.clear');
+  applyPlan(plan, call, 1);
+  const notes = [], play = createPlay(), hooks = { spb: 1, pointsOf: (l) => l.points, paramsOf: (o) => { const p = { dur: 8, loop: 1, start: 0, at: 0, speed: 0, drawn: 0 }; return { ...p, ...o.params }; }, note: (m, v, d, ch) => notes.push([m, ch]) };
+  for (let t = 0; t <= 3.9; t += 1 / 60) play.step(state.objects, t, true, hooks);
+  // the default notef trigger at x = 1 (on the curve's middle: pitch 36 + 0.5 * 60), then 60, 61, 62 on channel 2
+  assert.deepEqual(notes, [[66, 1], [60, 2], [61, 2], [62, 2]]);
+});

@@ -37,6 +37,7 @@ import { createTransport } from './transport.js';
 import { createTimeline } from './timeline.js';
 import { pitch as pitchOf, step as stepOf, snap as snapOf, secPerBeat, degrees } from './music.js';
 import { midiFile, readNotes, createMidiOut } from './midi.js';
+import { iannixPlan, applyPlan } from './iannix.js';
 import { INSTRUMENTS, DEFAULT_CHANNELS } from './instruments.js';
 import { solve, crossings, measure, atU, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
@@ -1303,6 +1304,7 @@ const ACTIONS = [
   { id: 'transport.record', title: 'Record what plays', icon: 'record', keys: 'alt+r', group: 'play', on: () => transport.recording, run: () => { const was = transport.recording; transport.record(); if (was) endRecording(); else if (!transport.playing) togglePlay(); } },
   { id: 'transport.loop', title: 'Loop', icon: 'loop', keys: 'alt+l', group: 'play', on: () => transport.loop.on, run: () => { transport.loop = { ...transport.loop, on: !transport.loop.on }; } },
   { id: 'render.clip', title: 'Render to a clip', icon: 'record', group: 'play', menu: true, when: (c) => !c.hit && (travelers().length || scores().length), run: () => renderToClip() },
+  { id: 'iannix.import', title: 'Import an IanniX score', icon: 'open', group: 'play', menu: true, when: (c) => !c.hit, run: () => iannixInput.click() },
   { id: 'midi.import', title: 'Import a MIDI file', icon: 'open', group: 'play', menu: true, when: (c) => !c.hit, run: () => midiInput.click() },
   { id: 'midi.export', title: 'Export recorded clips as MIDI', icon: 'save', group: 'play', menu: true, when: (c) => !c.hit && state.clips.size > 0, run: () => exportMidi() },
   { id: 'midi.connect', title: 'Send notes to MIDI', icon: 'connector', group: 'play', run: () => connectMidi() },
@@ -1657,6 +1659,26 @@ midiInput.addEventListener('change', async () => {
     batch(() => { if (!state.clips.size && bpm) call('music.set', { bpm, meter }); call('clip.add', { at, notes, name: f.name.replace(/\.midi?$/i, '') }); });
     timeline?.show(true);
   } catch (e) { readout.hidden = false; readout.textContent = e.message; setTimeout(() => { readout.hidden = true; }, 2500); }
+});
+
+// An IanniX score (.iannix): its code is run (it is your own file: asked first), and its
+// curves, cursors and triggers become lines, travelers and events in the middle of the view.
+const iannixInput = Object.assign(document.createElement('input'), { type: 'file', accept: '.iannix,.js,.txt', hidden: true });
+document.body.append(iannixInput);
+iannixInput.addEventListener('change', async () => {
+  const f = iannixInput.files?.[0];
+  iannixInput.value = '';
+  if (!f || !confirm(`Run ${f.name} as code?`)) return;
+  try {
+    const at = view.toWorld(...centre()), u = view.unitsPerPx();
+    const plan = iannixPlan(await f.text(), { width: Math.min(view.size.w, view.size.h * 1.4) * 0.8 * u, at });
+    if (!plan.curves.length) throw new Error(plan.warnings[0] ?? 'nothing in it');
+    const made = batch(() => { const m = applyPlan(plan, call, secPerBeat(state.music)); call('select.set', { ids: m }); return m; });
+    if (plan.warnings.length) console.info('IanniX import:', plan.warnings.join('; '));
+    readout.hidden = false; readout.textContent = `${plan.title} · ${plan.stats.curves} ⌇ ${plan.stats.cursors} ● ${plan.stats.triggers} ◦`;
+    setTimeout(() => { readout.hidden = true; }, 3000);
+    return made;
+  } catch (e) { readout.hidden = false; readout.textContent = e.message; setTimeout(() => { readout.hidden = true; }, 3000); }
 });
 
 // The recorded clips as a Standard MIDI File, downloaded.
