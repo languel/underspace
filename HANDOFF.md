@@ -671,6 +671,14 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   on the timeline's head. Defaults: 1 triangle, 2 pluck, 3 bell, 4 pad, 10
   drums. Notes keep their channel through recording, clips and MIDI export.
   Score brushes still make their own sound.
+- **Render and import** (a nineteenth pass): "Render to a clip" plays the
+  drawing offline (`renderNotes` in `play.js`: the same engine, seeded,
+  so it is the live performance without waiting) over the loop range, or
+  8 bars, and reads each score's passes; the notes become a clip.
+  "Import a MIDI file" reads any Standard MIDI File (`readNotes` in
+  `midi.js`: format 0 or 1, every track and channel, running status) into
+  a clip at the playhead's bar. Its tempo and meter go to the timeline
+  when there are no clips yet.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); audio recording; note-off at exit (IanniX's gate); scores on
   the shared transport (they still schedule their own passes); MIDI clock;

@@ -43,6 +43,39 @@ export function readMidiFile(bytes) {
   return out;
 }
 
+// Every note in any Standard MIDI File (format 0 or 1, running status, all tracks):
+// { notes: [{ beat, midi, vel, len, ch }], bpm (the first tempo, or 120), meter }.
+export function readNotes(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), str = (p) => String.fromCharCode(...bytes.slice(p, p + 4));
+  if (str(0) !== 'MThd') throw new Error('not a MIDI file');
+  const ntracks = dv.getUint16(10), division = dv.getUint16(12);
+  if (division & 0x8000) throw new Error('SMPTE time is not read');
+  const notes = [], open = new Map();
+  let bpm = null, meter = null, p = 8 + dv.getUint32(4);
+  for (let tr = 0; tr < ntracks && p < bytes.length; tr++) {
+    if (str(p) !== 'MTrk') break;
+    const end = p + 8 + dv.getUint32(p + 4);
+    p += 8;
+    let tick = 0, status = 0;
+    const vlqAt = () => { let v = 0, b; do { b = bytes[p++]; v = (v << 7) | (b & 0x7f); } while (b & 0x80 && p < end); return v; };
+    while (p < end) {
+      tick += vlqAt();
+      let b = bytes[p];
+      if (b === 0xff) { const type = bytes[p + 1]; p += 2; const len = vlqAt(); if (type === 0x51 && bpm == null) bpm = 60000000 / ((bytes[p] << 16) | (bytes[p + 1] << 8) | bytes[p + 2]); if (type === 0x58 && !meter) meter = [bytes[p], 2 ** bytes[p + 1]]; p += len; continue; }
+      if (b === 0xf0 || b === 0xf7) { p++; p += vlqAt(); continue; }
+      if (b & 0x80) { status = b; p++; }
+      const kind = status & 0xf0, ch = (status & 15) + 1, d1 = bytes[p], d2 = bytes[p + 1];
+      p += kind === 0xc0 || kind === 0xd0 ? 1 : 2;
+      const key = ch * 128 + d1;
+      if (kind === 0x90 && d2 > 0) { if (!open.has(key)) open.set(key, []); open.get(key).push({ tick, vel: d2 }); }
+      else if (kind === 0x80 || (kind === 0x90 && d2 === 0)) { const on = open.get(key)?.shift(); if (on) notes.push({ beat: on.tick / division, midi: d1, vel: on.vel, len: Math.max(1 / 64, (tick - on.tick) / division), ch }); }
+    }
+    p = end;
+  }
+  notes.sort((a, b) => a.beat - b.beat || a.midi - b.midi);
+  return { notes, bpm: Math.round(bpm ?? 120), meter: meter ?? [4, 4] };
+}
+
 // Web MIDI out. connect() asks the browser (call it from a click); notes go to
 // the chosen port, or every port ('all'), or none.
 export function createMidiOut() {

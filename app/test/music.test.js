@@ -179,3 +179,23 @@ test('channels pick instruments; recorded notes keep their channel', () => {
   const id = call('clip.add', { notes: [{ beat: 0, midi: 36, vel: 100, len: 0.25, ch: 10 }] });
   assert.equal(state.clips.get(id).notes[0].ch, 10);
 });
+
+test('MIDI files read back, every track and channel; a render is the live performance', async () => {
+  const { readNotes } = await import('../src/midi.js');
+  const bytes = midiFile([{ beat: 0, midi: 60, vel: 100, len: 1 }, { beat: 0.5, midi: 36, vel: 90, len: 0.25, ch: 10 }], { bpm: 96, meter: [3, 4] });
+  const r = readNotes(bytes);
+  assert.equal(r.bpm, 96); assert.deepEqual(r.meter, [3, 4]);
+  assert.deepEqual(r.notes, [{ beat: 0, midi: 60, vel: 100, len: 1, ch: 1 }, { beat: 0.5, midi: 36, vel: 90, len: 0.25, ch: 10 }]);
+
+  const { createPlay, renderNotes } = await import('../src/play.js');
+  call('space.clear');
+  const line = call('line.add', { points: [[0, 0], [10, 0]], style: { path: 'straight' } });
+  call('traveler.add', { on: line, dur: 4, loop: 1 });
+  for (const x of [2, 7]) { const e = call('line.add', { points: [[x, -1], [x, 1]] }); call('object.role', { id: e, role: 'event' }); call('object.code', { id: e, code: `note(${60 + x}, 100, 0.2, 1);` }); }
+  const hooks = { spb: 0.5, pointsOf: (l) => l.points, paramsOf: (o) => ({ dur: 4, loop: 1, start: 0, at: 0, speed: 0, drawn: 0, ...o.params }) };
+  const rendered = renderNotes(state.objects, 4, hooks);
+  const live = [], play = createPlay();
+  for (let t = 0; t <= 4 + 1e-9; t += 1 / 120) play.step(state.objects, t, true, { ...hooks, note: (m) => live.push(m) });
+  assert.deepEqual(rendered.map((n) => n.midi), live);
+  assert.deepEqual(live, [62, 67, 62, 67]); // two laps of 2 s
+});

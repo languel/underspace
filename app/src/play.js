@@ -345,4 +345,16 @@ export function createPlay() {
     },
   };
 }
+// Play the drawing offline, from the start to `to` seconds, and keep the notes it
+// makes ([{ sec, midi, vel, len (s), ch }]); the same performance as playing it
+// live, since everything that chooses is seeded. hooks as for step (note and hold are taken over).
+export function renderNotes(objects, to, hooks, dt = 1 / 120) {
+  const play = createPlay(), out = [];
+  let now = 0;
+  const h = { ...hooks, note: (midi, vel = 100, len = 0.3, ch = 1) => { if (Number.isFinite(midi)) out.push({ sec: now, midi, vel, len, ch }); },
+    hold: (midi, vel = 100, ch = 1) => { const at = now; return { stop() { if (Number.isFinite(midi)) out.push({ sec: at, midi, vel, len: Math.max(0.02, now - at), ch }); } }; } };
+  for (now = 0; now <= to + 1e-9; now += dt) play.step(objects, now, true, h);
+  play.reset(); // what is still held ends at the end
+  return out.sort((a, b) => a.sec - b.sec);
+}
 export { smooth };

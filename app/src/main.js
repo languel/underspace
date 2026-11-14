@@ -27,7 +27,7 @@ import { PRESETS } from './presets.js';
 import { BRUSHES } from './brushes.js';
 import { read as readScore } from './score.js';
 import * as sound from './sound.js';
-import { createPlay, nearestU, EVENTS } from './play.js';
+import { createPlay, nearestU, EVENTS, renderNotes } from './play.js';
 import { icon } from './icons.js';
 import { createPoints, without } from './points.js';
 import { createModal, apply, applyRect } from './transform.js';
@@ -36,7 +36,7 @@ import { showPie, recognize } from './pie.js';
 import { createTransport } from './transport.js';
 import { createTimeline } from './timeline.js';
 import { pitch as pitchOf, step as stepOf, snap as snapOf, secPerBeat, degrees } from './music.js';
-import { midiFile, createMidiOut } from './midi.js';
+import { midiFile, readNotes, createMidiOut } from './midi.js';
 import { INSTRUMENTS, DEFAULT_CHANNELS } from './instruments.js';
 import { solve, crossings, measure, atU, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
@@ -1302,6 +1302,8 @@ const ACTIONS = [
   { id: 'transport.rewind', title: 'Back to the start', icon: 'rewind', keys: 'alt+,', group: 'play', run: () => rewind() },
   { id: 'transport.record', title: 'Record what plays', icon: 'record', keys: 'alt+r', group: 'play', on: () => transport.recording, run: () => { const was = transport.recording; transport.record(); if (was) endRecording(); else if (!transport.playing) togglePlay(); } },
   { id: 'transport.loop', title: 'Loop', icon: 'loop', keys: 'alt+l', group: 'play', on: () => transport.loop.on, run: () => { transport.loop = { ...transport.loop, on: !transport.loop.on }; } },
+  { id: 'render.clip', title: 'Render to a clip', icon: 'record', group: 'play', menu: true, when: (c) => !c.hit && (travelers().length || scores().length), run: () => renderToClip() },
+  { id: 'midi.import', title: 'Import a MIDI file', icon: 'open', group: 'play', menu: true, when: (c) => !c.hit, run: () => midiInput.click() },
   { id: 'midi.export', title: 'Export recorded clips as MIDI', icon: 'save', group: 'play', menu: true, when: (c) => !c.hit && state.clips.size > 0, run: () => exportMidi() },
   { id: 'midi.connect', title: 'Send notes to MIDI', icon: 'connector', group: 'play', run: () => connectMidi() },
   // ink brushes: on the selection, or with nothing selected, for the lines drawn next
@@ -1620,6 +1622,43 @@ timeline = createTimeline($('timeline'), {
     showMenu([{ header: true, title: c.name }, { title: c.muted ? 'Unmute' : 'Mute', icon: 'hide', run: () => call('clip.set', { id, muted: !c.muted }) }, { title: timeline.editing === id ? 'Close the notes' : 'Edit the notes', icon: 'points', run: () => timeline.edit(timeline.editing === id ? null : id) }, { title: 'Export as MIDI', icon: 'save', run: () => exportMidi([c]) }, null, { title: 'Delete', icon: 'remove', run: () => call('clip.set', { id, remove: true }) }], x, y);
   },
 });
+// Render the drawing to a clip, offline: travelers, events and junctions are played from the
+// start, and each score's passes are read, over the loop range (or 8 bars); what they play
+// becomes a clip there. Same as playing it live, without waiting.
+function renderToClip() {
+  const m = state.music, spb = secPerBeat(m), per = m.meter[0];
+  const [a, b] = transport.loop.on && transport.loop.b > transport.loop.a ? [transport.loop.a, transport.loop.b] : [0, 8 * per];
+  const notes = renderNotes(state.objects, b * spb, musicHooks()).map((n) => ({ beat: n.sec / spb, midi: n.midi, vel: n.vel, len: n.len / spb, ch: n.ch }));
+  for (const o of scores()) {
+    if (o.hidden) continue;
+    const L = passLen(o) / spb; // beats a pass
+    for (let k = Math.floor(a / L); k * L < b; k++) {
+      const sc = scoreOf(o.id);
+      for (const v of sc?.voices ?? []) v.events.forEach((e, i) => { const nx = v.events[i + 1]; notes.push({ beat: k * L + e.time / spb, midi: Math.round(e.midi), vel: Math.round(100 * (e.gain ?? 0.7)), len: Math.max(1 / 16, nx ? (nx.time - e.time) / spb : 0.5), ch: 1 }); });
+    }
+  }
+  const inside = notes.filter((n) => n.beat >= a && n.beat < b).map((n) => ({ ...n, beat: n.beat - a }));
+  if (!inside.length) { readout.hidden = false; readout.textContent = '∅'; setTimeout(() => { readout.hidden = true; }, 1200); return; }
+  const id = call('clip.add', { at: a, notes: inside, name: 'render' });
+  timeline?.show(true);
+  return id;
+}
+// A MIDI file as clips: one clip, at the playhead's bar; its tempo is offered to the timeline.
+const midiInput = Object.assign(document.createElement('input'), { type: 'file', accept: '.mid,.midi,audio/midi', hidden: true });
+document.body.append(midiInput);
+midiInput.addEventListener('change', async () => {
+  const f = midiInput.files?.[0];
+  midiInput.value = '';
+  if (!f) return;
+  try {
+    const { notes, bpm, meter } = readNotes(new Uint8Array(await f.arrayBuffer()));
+    if (!notes.length) throw new Error('no notes');
+    const at = Math.floor(transport.beat / state.music.meter[0]) * state.music.meter[0];
+    batch(() => { if (!state.clips.size && bpm) call('music.set', { bpm, meter }); call('clip.add', { at, notes, name: f.name.replace(/\.midi?$/i, '') }); });
+    timeline?.show(true);
+  } catch (e) { readout.hidden = false; readout.textContent = e.message; setTimeout(() => { readout.hidden = true; }, 2500); }
+});
+
 // The recorded clips as a Standard MIDI File, downloaded.
 function exportMidi(list = [...state.clips.values()].filter((c) => !c.muted)) {
   const notes = list.flatMap((c) => c.notes.map((n) => ({ ...n, beat: c.at + n.beat })));
