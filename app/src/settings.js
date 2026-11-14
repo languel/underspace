@@ -13,6 +13,7 @@ export const DEFAULTS = {
   pointGlyph: 'dot', pointSize: 14,  // the point tool: the glyph it places, and its size in pixels when placed
   polySides: 6, polyStar: false,      // the polygon tool
   showCrossings: false, // a small mark where lines cross without a joint
+  quant: 0.25, quantOn: false, // sliding along a line: snapped to this many beats of the time along it, while on (Q)
   metronome: false,    // a click on each beat while playing
   codeOverlay: true, codeOpacity: 0.85, // the code shown on an object zoomed into: on or off (;), how solid its ground is
   smooth: true, simplify: 1.5,          // new lines: drawn smooth; points within this many pixels of the line are dropped

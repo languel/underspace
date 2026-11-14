@@ -44,7 +44,7 @@ import { midiFile, readNotes, createMidiOut } from './midi.js';
 import { iannixPlan, applyPlan } from './iannix.js';
 import { nousPlan, applyNous, nodeCodeFor } from './nous.js';
 import { INSTRUMENTS, DEFAULT_CHANNELS } from './instruments.js';
-import { solve, crossings, measure, atU, curveOf, isCurve, JUNCTIONS } from './joints.js';
+import { solve, crossings, measure, atU, atS, tangentS, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
 import { SCULPTS, sculptMark, effectiveSculpt } from './ink/sculpt.js';
@@ -213,6 +213,44 @@ function crossingMarks() {
   for (const p of crossCache.pts) for (const g of glyphLines('plus', p, 5 * upp)) lines.push({ pts: g.pts, color: 'hot', width: 1.2 });
 }
 
+// ---- sliding along a line, quantized ---------------------------------------------
+// A node (a joint on one line) or a traveler slides along its line. Quantized (settings.quant
+// beats, while Q is on), it lands on the divisions of the time it takes to get there along the
+// line: its lap from a traveler on it, else from its grid, else a grid cell a beat.
+let sliding = null; // { id, u, line } while a slide is under way
+const slideLineOf = (o) => (o?.kind === 'joint' && o.at?.length === 1 ? get(o.at[0].id) : o?.role === 'traveler' && isCurve(get(o.on)) ? get(o.on) : null);
+function lapBeatsOf(line) {
+  const path = shownPath(line), len = measure(path).total;
+  for (const t of travelers()) {
+    if (t.on !== line.id) continue;
+    const p = paramsOf(t);
+    if (p.speed > 0) return len / (p.speed * gridCell());
+    if (p.dur > 0) return p.dur;
+  }
+  const b = pathBeats(path, gridHere(line.space, path[path.length >> 1]));
+  return b > 0 ? b : Math.max(0.25, len / gridCell());
+}
+function quantU(line, u) {
+  const lap = lapBeatsOf(line), q = settings.quant;
+  return q > 0 && lap > 0 ? Math.max(0, Math.min(1, (Math.round((u * lap) / q) * q) / lap)) : u;
+}
+// The divisions as ticks across the line: taller on beats, taller still on bars.
+function quantTicks(line) {
+  const lap = lapBeatsOf(line), q = settings.quant, v = vis.get(line.id);
+  if (!(q > 0) || !v?.xf || lap / q > 512) return;
+  const path = shownPath(line), m = measure(path), upp = view.unitsPerPx() / v.xf.k, per = state.music.meter[0];
+  for (let k = 0; k * q <= lap + 1e-9; k++) {
+    const b = k * q, s = Math.min(m.total, (b / lap) * m.total), p = atS(m, s), t = tangentS(m, s), bar = Math.abs(b / per - Math.round(b / per)) < 1e-6, beat = Math.abs(b - Math.round(b)) < 1e-6;
+    const h = (bar ? 9 : beat ? 6 : 3.5) * upp, nx = -t[1] * h, ny = t[0] * h;
+    lines.push({ pts: [at(v.xf, [p[0] - nx, p[1] - ny]), at(v.xf, [p[0] + nx, p[1] + ny])], color: 'hot', width: bar ? 1.6 : 1, opacity: bar ? 0.95 : beat ? 0.75 : 0.5 });
+  }
+}
+function quantPreview() {
+  // while sliding; or, with Q on, for a selected node or traveler
+  const ids = sliding ? [sliding.line] : settings.quantOn ? [...state.selection].map((id) => slideLineOf(get(id))?.id).filter(Boolean) : [];
+  for (const id of new Set(ids)) { const l = get(id); if (l) quantTicks(l); }
+}
+
 // The riders a traveler has split into: copies of it, drawn where each one is.
 function ghostsOf(list) {
   for (const g of list) {
@@ -355,7 +393,7 @@ function playClips() {
 }
 // A line as it is shown: what a traveler follows.
 const shownPath = (l) => curveOf(l, run?.shown.get(l.id) ?? ptsOf(l));
-const paramsOf = (o) => { const p = {}; for (const q of blanketOf(o)?.params ?? []) p[q.name] = o.params?.[q.name] ?? q.value; return p; };
+const paramsOf = (o) => { const p = {}; for (const q of blanketOf(o)?.params ?? []) p[q.name] = o.params?.[q.name] ?? q.value; if (sliding?.id === o.id && o.role === 'traveler') p.start = sliding.u; return p; };
 
 let laidOut = -1; // the state version the last layout was made from
 // One frame. An error in it is noted (debug.js) and the next frame tries again, rather than
@@ -381,12 +419,12 @@ function frameInner() {
   for (const [id, when] of playEngine.hitAt) if (performance.now() - when < 160) playSig += when + id.length;
   run = dbg.time('code', () => step(state.objects, performance.now() / 1000));
   vis = new Map(); spaces = [{ id: null, kind: 'canvas', xf: ROOT }]; lines = []; ink3d = []; sceneList = []; dots = []; inkItems = []; pointSrc = [];
-  dbg.time('layout', () => { walk(null, ROOT); ghostsOf(played.ghosts); if (settings.showCrossings) crossingMarks(); });
+  dbg.time('layout', () => { walk(null, ROOT); ghostsOf(played.ghosts); if (settings.showCrossings) crossingMarks(); quantPreview(); });
   if (guide && !guide.scene) lines.push({ pts: [-1, 1].map((k) => at(guide.xf, [guide.pivot[0] + guide.axis[0] * 1e4 * k, guide.pivot[1] + guide.axis[1] * 1e4 * k])), color: 'hot', width: 1 });
   // Lines that code makes can change every frame; a cheap fingerprint tells.
   let made = 0;
   for (const pts of run.shown.values()) { const m = pts[pts.length >> 1]; made += pts.length + m[0] * 7 + m[1] * 13; }
-  const sig = `${state.version}|${dragSig}|${spaces.map((s) => s.id).join()}|${made}|${playSig}`;
+  const sig = `${state.version}|${dragSig}|${settings.quantOn}${settings.quant}|${spaces.map((s) => s.id).join()}|${made}|${playSig}`;
   const dirty = sig !== lastSig;
   lastSig = sig;
   if (dirty) dbg.time('lines', () => view.setLines(lines));
@@ -480,8 +518,8 @@ function jointAt(j) {
   if (j.rect && (r.cx !== j.rect.cx || r.cy !== j.rect.cy)) return [r.cx, r.cy]; // the joint itself is being dragged
   const q = j.at?.[0], l = q && get(q.id);
   if (!l?.points || l.space !== j.space) return j.pos;
-  const pts = ptsOf(l);
-  return atU(measure(curveOf(l, pts)), q.u).slice(0, pts[0].length > 2 ? 3 : 2);
+  const pts = ptsOf(l), u = sliding?.id === j.id ? sliding.u : q.u;
+  return atU(measure(curveOf(l, pts)), u).slice(0, pts[0].length > 2 ? 3 : 2);
 }
 // While something is dragged, what is joined to it follows: live, not yet a command.
 function follow(live, held) {
@@ -770,7 +808,7 @@ function placePoint(s, p) {
   batch(() => {
     let id;
     if (t?.joint) { setGlyph([get(t.joint)], kind); id = t.joint; }
-    else if (t) id = call('joint.add', { at: [{ id: t.id, u: round(t.u) }], node: true, glyph: kind, ...(MIDINOUS_KINDS.includes(kind) ? { code: nodeCodeFor(kind) } : {}) });
+    else if (t) id = call('joint.add', { at: [{ id: t.id, u: round(settings.quantOn ? quantU(get(t.id), t.u) : t.u) }], node: true, glyph: kind, ...(MIDINOUS_KINDS.includes(kind) ? { code: nodeCodeFor(kind) } : {}) });
     else { const q = snapHere(s.id, toSpace(s, p[0], p[1])); id = call('point.add', { space: s.id, at: q.map(round), glyph: kind, size: round(settings.pointSize * unitsPerPx(s)), ...(settings.stroke ? { style: { stroke: settings.stroke } } : {}) }); }
     if (id) call('select.set', { ids: [id] });
   });
@@ -1011,6 +1049,9 @@ pad.addEventListener('pointerdown', (e) => {
       } else if (!state.selection.has(id)) call('select.set', { ids: [id] });
       const v = vis.get(id);
       if (v.scene) return; // lines inside a target are selected, not dragged
+      // a node, or a traveler, slides along its line (quantized to the beat while Q is on; Ctrl the other way)
+      const sl = slideLineOf(get(id));
+      if (sl && !e.shiftKey) { gesture = { kind: 'slide', id, line: sl, start: p, moved: false }; return; }
       // Only what shares the picked object's space moves with it.
       const ids = [...state.selection].filter((i) => get(i)?.space === v.o.space);
       gesture = { kind: 'move', k: v.xf.k, ids, start: p, dx: 0, dy: 0, moved: false };
@@ -1085,6 +1126,14 @@ pad.addEventListener('pointermove', (e) => {
     g.b = b; g.end = q;
     showTouch(e.ctrlKey || e.metaKey ? null : touching(g.s, q));
     if (g.s.kind === 'scene') view.setPreview([g.a, g.b], g.s.id); else view.setPreview([g.a, g.b].map((pt) => at(g.s.xf, pt)));
+  } else if (g.kind === 'slide') {
+    if (!g.moved && Math.hypot(p[0] - g.start[0], p[1] - g.start[1]) < 3) return;
+    g.moved = true;
+    const s = spaces.find((x) => x.id === g.line.space) ?? spaces[0], q = toSpace(s, p[0], p[1]), path = shownPath(g.line);
+    let u = nearestU(path, q[0], q[1]);
+    if (settings.quantOn !== (e.ctrlKey || e.metaKey)) u = quantU(g.line, u);
+    sliding = { id: g.id, u, line: g.line.id };
+    dragSig = 'slide' + u;
   } else if (g.kind === 'move') {
     const u = view.unitsPerPx() / g.k;
     g.dx = snap((p[0] - g.start[0]) * u); g.dy = snap(-(p[1] - g.start[1]) * u);
@@ -1198,6 +1247,9 @@ function endGesture(e) {
       const id = call('line.add', { space: g.s.id, points: pts, tol: flat ? round(14 * unitsPerPx(g.s)) : 0, ...newStyle(false) });
       if (id && isCurve(get(id)) && !(e.ctrlKey || e.metaKey)) { joinEnd(g.s, id, 0, g.start); joinEnd(g.s, id, 1, g.end ?? g.start); }
     });
+  } else if (g.kind === 'slide') {
+    const s = sliding; sliding = null; dragSig = '';
+    if (g.moved && s) { const o = get(g.id); if (o?.kind === 'joint') call('joint.slide', { id: g.id, u: round(s.u) }); else call('object.set', { id: g.id, name: 'start', value: round(s.u) }); }
   } else if (g.kind === 'move') {
     setDrag(null); setLive(null); dragSig = '';
     if (g.moved) batch(() => { call('object.move', { ids: g.ids, dx: round(g.dx), dy: round(g.dy) }); if (!(e.ctrlKey || e.metaKey)) { if (laidOut !== state.version) frame(); joinTouching(g.ids); } });
@@ -1429,6 +1481,8 @@ const ACTIONS = [
   { id: 'tool.polygon', title: 'Polygon (sides and star in its settings)', icon: 'polygon', group: 'tool', bar: 'tools', tool: 'polygon', stack: 'shape' },
   // what a point or a joint is (glyphs.js): a submenu of the context menu
   ...POINT_KINDS.map((k) => ({ id: 'glyph.' + k, title: GLYPH_TITLE[k], short: k, icon: 'g.' + k, group: 'role', menu: 'Point', when: (c) => c.sel.some((o) => o.kind === 'point' || o.kind === 'joint'), on: () => [...state.selection].map(get).some((o) => o?.glyph === k), run: (c) => setGlyph(c.sel.filter((o) => o.kind === 'point' || o.kind === 'joint'), k) })),
+  { id: 'quant.toggle', title: 'Quantize sliding to the beat', icon: 'grid', keys: 'q', group: 'play', menu: 'Quantize', on: () => settings.quantOn, run: () => setSetting('quantOn', !settings.quantOn) },
+  ...[[1 / 16, '1/16 beat', 16], [1 / 8, '1/8 beat', 8], [1 / 4, '1/4 beat', 4], [1 / 3, '1/3 beat (triplets)', 3], [1 / 2, '1/2 beat', 2], [1, 'a beat', 1], [4, 'a bar of 4', 'bar']].map(([q, title, key]) => ({ id: 'quant.' + key, title: `Quantize to ${title}`, short: title, icon: 'grid', group: 'play', menu: 'Quantize', on: () => settings.quantOn && Math.abs(settings.quant - q) < 1e-9, run: () => { setSetting('quant', q); setSetting('quantOn', true); } })),
   { id: 'view.crossings', title: 'Show where lines cross', icon: 'crossing', group: 'show', menu: true, when: (c) => !c.hit, on: () => settings.showCrossings, run: () => setSetting('showCrossings', !settings.showCrossings) },
   { id: 'tool.sculpt', title: 'Sculpt', icon: 'sculpt', keys: 'u', group: 'tool', bar: 'tools', tool: 'sculpt' },
   { id: 'sculpt.smaller', title: 'Sculpt: smaller', keys: '[', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptRadius', Math.max(6, Math.round(settings.sculptRadius / 1.2))) },

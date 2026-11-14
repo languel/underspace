@@ -70,3 +70,13 @@ test('a traveler placed by hand drives on past a counter; a terminator ends it',
   assert.ok(Math.abs(r.moved.get(tr)[0] - 8) < 0.05, `past the counter, stopped at the terminator: ${r.moved.get(tr)}`);
   assert.ok(end);
 });
+
+test('a node slides along its line, and the line stays where it is', () => {
+  call('space.clear');
+  const line = call('line.add', { points: [[0, 0], [8, 0]], style: { path: 'straight' } });
+  const n = call('joint.add', { at: [{ id: line, u: 0.2 }], node: true, glyph: 'note' });
+  call('joint.slide', { id: n, u: 0.625 });
+  assert.equal(state.objects.get(n).at[0].u, 0.625);
+  assert.deepEqual(state.objects.get(line).points, [[0, 0], [8, 0]]);
+  assert.ok(Math.abs(state.objects.get(n).pos[0] - 5) < 1e-6, 'its position follows');
+});

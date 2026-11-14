@@ -206,6 +206,12 @@ define({
 });
 
 define({
+  name: 'joint.slide', doc: 'Move a node (a joint on one line) along its line, to u (0..1).',
+  args: { id: T.id, u: T.num }, required: ['id', 'u'], hold: () => [],
+  run(a) { const j = state.objects.get(a.id); if (j?.kind !== 'joint' || j.at.length !== 1) return false; j.at[0].u = Math.max(0, Math.min(1, round(a.u))); return true; },
+});
+
+define({
   name: 'joint.free', doc: 'Let lines go: remove the joints and pins that hold them, and their own rules (keep).',
   args: { ids: T.ids }, required: ['ids'], hold: (a) => a.ids,
   run(a) {
