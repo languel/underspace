@@ -813,6 +813,17 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
     moved as a whole: just below everything on the canvas when clicked, or
     centred where it is dropped when dragged from the panel. It comes in
     selected.
+- **The crash, found** (14 Nov 2026): a memory leak of about 55 MB a second
+  while anything played (15 MB to 1.6 GB in 30 s, then "This page
+  crashed"). While anything moves, the drawing changes every frame, and
+  `view.setLines` made new Line2 objects every frame. Their geometry was
+  disposed, but the WebGPU renderer keeps what it needs for every object it
+  has drawn. Now each group (the canvas, each target, the previews) keeps
+  its lines and fills and reuses them. Positions are written into buffers
+  that only grow (to the next power of two; `instanceCount` and the draw
+  range say how much is used), and what is not drawn this frame is hidden.
+  Memory now stays near 20 MB while playing. If many objects are ever made
+  per frame somewhere else, the same rule applies: reuse, do not remake.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a

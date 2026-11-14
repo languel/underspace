@@ -64,6 +64,65 @@ export async function createView({ canvas, stage, onFrame }) {
   }
   function empty(group) { for (const c of [...group.children]) { group.remove(c); c.geometry?.dispose(); } }
 
+  // ---- lines kept and reused ----------------------------------------------------
+  // While anything moves, the drawing changes every frame. Making new line objects every frame
+  // leaks in the WebGPU renderer (it keeps what it needs for every object it has drawn), so a
+  // group keeps its lines and fills and reuses them: positions are written into buffers that only
+  // grow (to the next power of two), and what is not needed this frame is hidden.
+  const pow2 = (n) => 2 ** Math.ceil(Math.log2(Math.max(1, n)));
+  function writeLine(line, pts, z) {
+    const n = Math.max(1, pts.length - 1), g = line.geometry, buf = g.attributes.instanceStart?.data;
+    let arr = buf?.array;
+    if (!arr || arr.length < n * 6) {
+      g.dispose();
+      const fresh = new LineGeometry();
+      fresh.setPositions(new Float32Array(pow2(n) * 6));
+      line.geometry = fresh;
+      arr = fresh.attributes.instanceStart.data.array;
+    }
+    const P = (i) => pts[i], put = (o, p) => { arr[o] = p[0]; arr[o + 1] = p[1]; arr[o + 2] = p[2] ?? z; };
+    if (pts.length === 1) { const p = P(0); put(0, [p[0] - 0.03, p[1], p[2]]); put(3, [p[0] + 0.03, p[1], p[2]]); }
+    else for (let i = 0; i < n; i++) { put(i * 6, P(i)); put(i * 6 + 3, P(i + 1)); }
+    line.geometry.attributes.instanceStart.data.needsUpdate = true;
+    line.geometry.instanceCount = n;
+  }
+  function writeFill(mesh, pts) {
+    const contour = pts.map((p) => new THREE.Vector2(p[0], p[1])), tris = THREE.ShapeUtils.triangulateShape(contour, []), n = tris.length * 3;
+    let attr = mesh.geometry.attributes.position;
+    if (!attr || attr.array.length < n * 3) {
+      mesh.geometry.dispose();
+      mesh.geometry = new THREE.BufferGeometry();
+      attr = new THREE.BufferAttribute(new Float32Array(pow2(Math.max(3, n)) * 3), 3);
+      mesh.geometry.setAttribute('position', attr);
+    }
+    let o = 0;
+    for (const t of tris) for (const k of t) { const p = pts[k]; attr.array[o++] = p[0]; attr.array[o++] = p[1]; attr.array[o++] = 0; }
+    attr.needsUpdate = true;
+    mesh.geometry.setDrawRange(0, n);
+  }
+  // fill a group with these lines: [{ pts, color, width, opacity, fill }], reusing what it has
+  function fillGroup(group, list, z = 0) {
+    const pool = (group.userData.pool ??= { lines: [], fills: [] });
+    let nl = 0, nf = 0;
+    list.forEach((l, i) => {
+      if (l.fill && l.pts.length > 2) {
+        let f = pool.fills[nf];
+        if (!f) { f = new THREE.Mesh(new THREE.BufferGeometry(), material(l.fill, 0, l.opacity ?? 1)); f.frustumCulled = false; pool.fills.push(f); group.add(f); }
+        f.material = material(l.fill, 0, l.opacity ?? 1); writeFill(f, l.pts); f.renderOrder = i * 2; f.visible = true; nf++;
+      }
+      if ((l.width ?? 2.2) > 0 && l.pts.length) {
+        let line = pool.lines[nl];
+        if (!line) { line = new Line2(new LineGeometry(), material(l.color, l.width ?? 2.2, l.opacity ?? 1)); line.frustumCulled = false; pool.lines.push(line); group.add(line); }
+        line.material = material(l.color, l.width ?? 2.2, l.opacity ?? 1); writeLine(line, l.pts, z); line.renderOrder = i * 2 + 1; line.visible = true; nl++;
+      }
+    });
+    for (let i = nl; i < pool.lines.length; i++) pool.lines[i].visible = false;
+    for (let i = nf; i < pool.fills.length; i++) pool.fills[i].visible = false;
+    // a pool much bigger than what is drawn gives back its unused half
+    if (pool.lines.length > 64 && nl < pool.lines.length / 4) { for (const x of pool.lines.splice(Math.max(nl, 16))) { group.remove(x); x.geometry.dispose(); } }
+    if (pool.fills.length > 64 && nf < pool.fills.length / 4) { for (const x of pool.fills.splice(Math.max(nf, 16))) { group.remove(x); x.geometry.dispose(); } }
+  }
+
   // ---- the canvas ----------------------------------------------------------
   const inkLines = new THREE.Group(), inkPreview = new THREE.Group();
   ink.add(inkLines, inkPreview);
@@ -79,13 +138,7 @@ export async function createView({ canvas, stage, onFrame }) {
   const toWorld = (px, py) => [cam.cx + (px - size.w / 2) * unitsPerPx(), cam.cy - (py - size.h / 2) * unitsPerPx()];
   const toScreen = (p) => [(p[0] - cam.cx) / unitsPerPx() + size.w / 2, size.h / 2 - (p[1] - cam.cy) / unitsPerPx()];
 
-  function setLines(list) {
-    empty(inkLines);
-    list.forEach((l, i) => {
-      if (l.fill && l.pts.length > 2) { const f = makeFill(l.pts, l.fill, l.opacity ?? 1); f.renderOrder = i * 2; inkLines.add(f); }
-      if (l.width > 0) { const line = makeLine(l.pts, l.color, l.width, 0, l.opacity ?? 1); line.renderOrder = i * 2 + 1; inkLines.add(line); }
-    });
-  }
+  function setLines(list) { fillGroup(inkLines, list); }
 
   // ---- render targets ------------------------------------------------------
   const scenes = new Map(); // id -> { scene, cam, lines, preview, px }
@@ -109,7 +162,7 @@ export async function createView({ canvas, stage, onFrame }) {
     for (const d of list) {
       const fresh = !scenes.has(d.id), s = sceneFor(d.id);
       s.px = d.px;
-      if (rebuild || fresh) { empty(s.lines); for (const m of d.marks) s.lines.add(makeLine(m.pts, m.color, 2.2)); }
+      if (rebuild || fresh) fillGroup(s.lines, d.marks.map((m) => ({ pts: m.pts, color: m.color, width: 2.2 })));
       const el = Math.max(-1.55, Math.min(1.55, d.el)), dist = d.dist ?? 13, c = d.center ?? [0, 0, 0];
       s.cam.position.set(c[0] + Math.sin(d.az) * Math.cos(el) * dist, c[1] + Math.sin(el) * dist, c[2] + Math.cos(d.az) * Math.cos(el) * dist);
       s.cam.lookAt(c[0], c[1], c[2]);
@@ -153,10 +206,9 @@ export async function createView({ canvas, stage, onFrame }) {
 
   // The stroke being drawn: on the canvas, or inside a target.
   function setPreview(pts, sceneId = null, color = 'accent') {
-    empty(inkPreview);
-    for (const s of scenes.values()) empty(s.preview);
-    if (!pts || pts.length < 2) return;
-    (sceneId ? scenes.get(sceneId)?.preview : inkPreview)?.add(makeLine(pts, color, 2.2));
+    // reused as the lines are, since it changes with every move of the pointer
+    const target = pts && pts.length >= 2 ? (sceneId ? scenes.get(sceneId)?.preview : inkPreview) : null;
+    for (const g of [inkPreview, ...[...scenes.values()].map((x) => x.preview)]) fillGroup(g, g === target ? [{ pts, color, width: 2.2 }] : []);
   }
 
   // ---- theme, size, loop ---------------------------------------------------
