@@ -90,3 +90,49 @@ test('a stroke turned event or traveler keeps its shape', () => {
   assert.ok(call('object.role', { id: e, role: 'event' }));
   assert.equal(state.objects.get(e).kind, 'line');
 });
+
+const T_HOOKS = { pointsOf: (l) => l.points, paramsOf: (o) => { const p = { dur: 2, loop: 0, start: 0 }; for (const m of (o.code ?? '').matchAll(/\/\/ param: (\w+) ([\d.]+)/g)) p[m[1]] = +m[2]; return { ...p, ...o.params }; }, note() {} };
+// A T: a stem coming down onto a bar; travelers set off down the stem.
+async function tee(junctionCode) {
+  const { createPlay } = await import('../src/play.js');
+  call('space.clear');
+  const bar = call('line.add', { points: [[-4, 0], [4, 0]], style: { path: 'straight' } });
+  const stem = call('line.add', { points: [[0, 4], [0, 0]], style: { path: 'straight' } });
+  const j = call('joint.add', { at: [{ id: stem, u: 1 }, { id: bar, u: 0.5 }] });
+  if (junctionCode) call('object.code', { id: j, code: junctionCode });
+  return { createPlay, bar, stem, j };
+}
+const run = (play, until, dt = 0.05) => { let r; for (let t = 0; t <= until + 1e-9; t += dt) r = play.step(state.objects, t, true, T_HOOKS); return r; };
+
+test('round robin: travelers arriving one after another take turns', async () => {
+  const { createPlay, stem } = await tee();
+  const a = call('traveler.add', { on: stem, dur: 2, loop: 0 }), b = call('traveler.add', { on: stem, dur: 2, loop: 0, u: 0 });
+  const r = run(createPlay(), 3); // 4 down, then 2 along the bar
+  const xs = [r.moved.get(a)[0], r.moved.get(b)[0]].sort((p, q) => p - q);
+  assert.ok(xs[0] < -1 && xs[1] > 1, `one went each way: ${xs}`);
+});
+
+test('a junction that splits sends copies every way', async () => {
+  const { JUNCTIONS } = await import('../src/joints.js');
+  const { createPlay, stem } = await tee(JUNCTIONS.split);
+  const a = call('traveler.add', { on: stem, dur: 2, loop: 0 });
+  const r = run(createPlay(), 3);
+  assert.equal(r.ghosts.length, 1);
+  assert.ok(Math.sign(r.ghosts[0].pos[0]) === -Math.sign(r.moved.get(a)[0]), 'the copy went the other way');
+});
+
+test('an event can send a traveler back, and a shape made an event keeps its look', async () => {
+  const { createPlay, EVENTS } = await import('../src/play.js');
+  call('space.clear');
+  const line = call('line.add', { points: [[0, 0], [10, 0]], style: { path: 'straight' } });
+  const tr = call('traveler.add', { on: line, dur: 10, loop: 0 });
+  const wall = call('line.add', { points: [[6, -1], [6, 1]] });
+  call('object.role', { id: wall, role: 'event' });
+  call('object.code', { id: wall, code: EVENTS.reflect });
+  const r = run(createPlay(), 8, 0.1); // to 6, then back 2
+  assert.ok(Math.abs(r.moved.get(tr)[0] - 4) < 0.15, `came back: ${r.moved.get(tr)}`);
+  const v = call('shape.add', { rect: { cx: 0, cy: 0, w: 1, h: 1 }, style: { stroke: '#123456' } });
+  call('object.role', { id: v, role: 'event' });
+  assert.equal(state.objects.get(v).keeps, true);
+  assert.equal(state.objects.get(v).style.stroke, '#123456');
+});

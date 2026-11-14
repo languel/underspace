@@ -27,13 +27,13 @@ import { PRESETS } from './presets.js';
 import { BRUSHES } from './brushes.js';
 import { read as readScore } from './score.js';
 import * as sound from './sound.js';
-import { createPlay, nearestU } from './play.js';
+import { createPlay, nearestU, EVENTS } from './play.js';
 import { icon } from './icons.js';
 import { createPoints, without } from './points.js';
 import { createModal, apply, applyRect } from './transform.js';
 import { snapPoints, snapBox, toSVG, toP5 } from './selection.js';
 import { showPie, recognize } from './pie.js';
-import { solve, crossings, measure, atU, curveOf, isCurve } from './joints.js';
+import { solve, crossings, measure, atU, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
 import { SCULPTS, sculptMark, effectiveSculpt } from './ink/sculpt.js';
@@ -99,8 +99,9 @@ function walk(space, xf) {
       const brushed = o.brush && !isWire(o);
       // A brushed line is painted on the ink layer; here it is only something to pick, and an outline while selected.
       if (brushed) inkItems.push(inkItem(o, element(raw, penOf(o), { closed: !!o.closed, color: st.stroke ?? inkColor }), xf, st));
-      const lit = o.role === 'event' && performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160, hot = isWire(o) || o.role === 'event' || o.role === 'traveler';
-      lines.push({ id: o.id, pts, color: sel ? 'accent' : st.stroke ?? (hot ? 'hot' : 'ink'), width: brushed ? (sel ? 1 : 0) : lit ? 4 : st.width ?? (isWire(o) ? 1.6 : 2.2), opacity: brushed ? 1 : st.opacity, fill: o.closed && !brushed ? st.fill : null });
+      lines.push({ id: o.id, pts, color: sel ? 'accent' : st.stroke ?? (isWire(o) ? 'hot' : 'ink'), width: brushed ? (sel ? 1 : 0) : st.width ?? (isWire(o) ? 1.6 : 2.2), opacity: brushed ? 1 : st.opacity, fill: o.closed && !brushed ? st.fill : null });
+      // an event keeps its look; a traveler reaching it flashes it
+      if (o.role === 'event' && performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160) lines.push({ pts, color: 'hot', width: (st.width ?? 2.2) + 3, opacity: 0.6 });
       if (tool === 'points' && !isWire(o) && !made) pointSrc.push({ o, pts: ptsOf(o), pen: penOf(o), xf });
       const cursor = run.cursors.get(o.id);
       if (cursor) dots.push(view.toScreen(at(xf, cursor)));
@@ -108,9 +109,10 @@ function walk(space, xf) {
     }
     const r = rectOf(o), [l, t] = view.toScreen(at(xf, [r.cx - r.w / 2, r.cy + r.h / 2]));
     const px = { l, t, w: r.w * xf.k / upp, h: r.h * xf.k / upp };
-    if (o.role === 'traveler' && o.kind === 'shape') lines.push({ id: o.id, pts: outline(r, 'ellipse').map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'hot', width: 1.6, fill: st.fill ?? st.stroke ?? 'hot', opacity: st.opacity ?? 0.85 });
-    if (o.role === 'event' && o.kind === 'shape') { const lit = performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160; lines.push({ id: o.id, pts: outline(r, o.shape).map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'hot', width: lit ? 3 : 1.4, fill: lit ? st.stroke ?? 'hot' : st.fill, opacity: lit ? 0.5 : st.opacity }); }
-    if (o.kind === 'shape' && o.role === 'visual') {
+    if (o.role === 'traveler' && o.kind === 'shape' && !o.keeps) lines.push({ id: o.id, pts: outline(r, 'ellipse').map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'hot', width: 1.6, fill: st.fill ?? st.stroke ?? 'hot', opacity: st.opacity ?? 0.85 });
+    if (o.role === 'event' && o.kind === 'shape' && !o.keeps) { const lit = performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160; lines.push({ id: o.id, pts: outline(r, o.shape).map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'hot', width: lit ? 3 : 1.4, fill: lit ? st.stroke ?? 'hot' : st.fill, opacity: lit ? 0.5 : st.opacity }); }
+    if (o.kind === 'shape' && (o.role === 'visual' || o.keeps)) {
+      if (o.keeps && performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160) lines.push({ pts: outline(r, o.shape).map((p) => at(xf, p)), color: 'hot', width: (st.width ?? 2.2) + 3, opacity: 0.6 });
       const edge = outline(r, o.shape);
       if (o.brush) inkItems.push(inkItem(o, element(edge.slice(0, -1), null, { closed: true, role: 'plane', color: st.fill ?? st.stroke ?? inkColor }), xf, { ...st, path: o.shape === 'rect' ? 'straight' : null }));
       lines.push({ id: o.id, pts: edge.map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'ink', width: o.brush ? (sel ? 1 : 0) : st.width ?? 2.2, opacity: o.brush ? 1 : st.opacity, fill: o.brush ? null : st.fill });
@@ -159,6 +161,22 @@ function walk(space, xf) {
   }
 }
 
+// The riders a traveler has split into: copies of it, drawn where each one is.
+function ghostsOf(list) {
+  for (const g of list) {
+    const o = get(g.of), v = vis.get(g.of);
+    if (!o || !v?.xf) continue;
+    const st = o.style ?? {};
+    if (o.kind === 'line') {
+      const pts = ptsOf(o), c = rectOf(o), dx = g.pos[0] - c.cx, dy = g.pos[1] - c.cy;
+      lines.push({ pts: curveOf(o, pts.map((p) => [p[0] + dx, p[1] + dy])).map((p) => at(v.xf, p)), color: st.stroke ?? 'ink', width: st.width ?? 2.2, opacity: 0.7 });
+    } else {
+      const r = { cx: g.pos[0], cy: g.pos[1], w: o.rect.w, h: o.rect.h };
+      lines.push({ pts: outline(r, o.keeps ? o.shape : 'ellipse').map((p) => at(v.xf, p)), color: st.stroke ?? (o.keeps ? 'ink' : 'hot'), width: 1.4, fill: o.keeps ? st.fill : st.fill ?? st.stroke ?? 'hot', opacity: 0.6 });
+    }
+  }
+}
+
 // ---- scores ----------------------------------------------------------------
 
 // What a score will play on its next pass: the lines in its frame, read now.
@@ -193,10 +211,12 @@ function frame() {
   setMoved(played.moved);
   let playSig = 0;
   for (const [id, out] of played.out) { step.report(id, { out, error: played.errors.get(id) ?? '' }); if (out.u != null) playSig += out.x * 3 + out.y * 7; }
+  for (const g of played.ghosts) playSig += g.pos[0] * 5 + g.pos[1] * 11;
   for (const [id, when] of playEngine.hitAt) if (performance.now() - when < 160) playSig += when + id.length;
   run = step(state.objects, performance.now() / 1000);
   vis = new Map(); spaces = [{ id: null, kind: 'canvas', xf: ROOT }]; lines = []; ink3d = []; sceneList = []; dots = []; inkItems = []; pointSrc = [];
   walk(null, ROOT);
+  ghostsOf(played.ghosts);
   if (guide && !guide.scene) lines.push({ pts: [-1, 1].map((k) => at(guide.xf, [guide.pivot[0] + guide.axis[0] * 1e4 * k, guide.pivot[1] + guide.axis[1] * 1e4 * k])), color: 'hot', width: 1 });
   // Lines that code makes can change every frame; a cheap fingerprint tells.
   let made = 0;
@@ -552,7 +572,7 @@ const clip = (text) => navigator.clipboard?.writeText(text);
 // ---- the hold menu: hold still while drawing to turn the stroke into something --
 
 // What the ring offers, clockwise from the top; each is an action, so it also has a key, a menu entry and a palette entry.
-const PIE = ['role.path', 'attach.traveler', 'line.travelNearest', 'line.toEvent', 'line.toShape', 'line.toTarget', 'join.crossings', 'line.straighten', 'simplify.strongly'];
+const PIE = ['role.path', 'attach.traveler', 'line.travelNearest', 'role.event', 'line.toShape', 'line.toTarget', 'join.crossings', 'line.straighten', 'simplify.strongly'];
 // Picks that leave the stroke a line on the drawing: its ends still join what they touch.
 const KEEPS_LINE = new Set(['role.path', 'attach.traveler', 'join.crossings', 'line.straighten', 'simplify.strongly']);
 const HOLD_MS = 450;
@@ -1116,6 +1136,8 @@ const cycle = (dir) => {
 };
 const addHere = (c, make, extra) => { const s = spaceAt(c.p[0], c.p[1], true); addShape(s, make, c.p, null, extra); };
 const can = (list, role) => list.some((o) => o.role !== role);
+// What can be made an event: lines on the flat canvas and plain shapes, not already events.
+const eventable = (c) => c.sel.filter((o) => o.role !== 'event' && ((isLine(o) && flatLine(o) && o.role !== 'traveler') || (o.kind === 'shape' && o.role === 'visual')));
 
 const ACTIONS = [
   // grab, rotate, scale: G, R, S with something selected (or points picked), as in Blender
@@ -1145,13 +1167,13 @@ const ACTIONS = [
   { id: 'role.score', title: 'Make score', icon: 'score', group: 'role', menu: 'Convert to', when: (c) => c.shapes.length && can(c.shapes, 'score'), run: (c) => setRole(c.shapes, 'score') },
   { id: 'tool.score', title: 'Score', icon: 'score', keys: 's', group: 'tool2', bar: 'tools', tool: 'score', stack: 'object' },
   { id: 'tool.event', title: 'Event', icon: 'event', keys: 'y', group: 'tool2', bar: 'tools', tool: 'event', stack: 'object' },
-  { id: 'role.event', title: 'Make event', icon: 'event', group: 'role', menu: 'Convert to', when: (c) => c.shapes.length && can(c.shapes, 'event') && !c.shapes.some((o) => o.role === 'traveler'), run: (c) => setRole(c.shapes, 'event') },
+  // Make event: the mark itself becomes the event, looking as it did (crossing a line, entering a closed one or a shape, fires it)
+  { id: 'role.event', title: 'Make event', icon: 'event', group: 'role', menu: 'Convert to', when: (c) => eventable(c).length > 0, run: (c) => setRole(eventable(c), 'event') },
   { id: 'attach.event', title: 'Attach an event here', icon: 'event', group: 'attach', menu: true, when: (c) => c.lines.length === 1 && flatLine(c.lines[0]),
     run: (c) => { const l = c.lines[0], { s, at: q } = onLineAt(l, c.p), size = round(26 * unitsPerPx(s)); call('shape.add', { space: l.space, role: 'event', shape: 'ellipse', rect: { cx: round(q[0]), cy: round(q[1]), w: size, h: size } }); } },
   { id: 'attach.nearest', title: 'Attach to the nearest line', icon: 'path', group: 'attach', menu: true, when: (c) => c.shapes.length && c.shapes.every((o) => o.kind === 'shape' && get(o.space)?.role !== 'target') && [...state.objects.values()].some((l) => flatLine(l) && l.space === c.shapes[0].space), run: attachToNearest },
   { id: 'line.travelNearest', title: 'Travel the nearest line', icon: 'traveler', group: 'attach', menu: 'Turn into', when: (c) => c.lines.length === 1 && flatLine(c.lines[0]) && !!nearestLine(c.lines[0].space, boxOf(c.lines[0]).cx, boxOf(c.lines[0]).cy, c.lines[0].id),
     run: (c) => { const l = c.lines[0], r = boxOf(l), near = nearestLine(l.space, r.cx, r.cy, l.id); call('traveler.attach', { id: l.id, on: near.l.id, u: round(near.u) }); } },
-  { id: 'line.toEvent', title: 'Make it an event', icon: 'event', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some((l) => flatLine(l) && l.role !== 'event'), run: (c) => setRole(c.lines.filter(flatLine), 'event') },
   // Constraints, after Sketchpad: joints between lines, pins, and rules a line keeps.
   { id: 'join.crossings', title: 'Join where it crosses', icon: 'joint', group: 'attach', menu: 'Constrain', when: (c) => c.lines.some((l) => isCurve(l) && get(l.space)?.role !== 'target'), run: joinCrossings },
   { id: 'join.touching', title: 'Join where its ends touch', icon: 'joint', group: 'attach', menu: 'Constrain', when: (c) => c.lines.some(isCurve), run: (c) => batch(() => joinTouching(ids(c.lines.filter(isCurve)), new Set())) },
@@ -1416,7 +1438,7 @@ onSettings(() => settingsVersion++);
 const app = {
   state, call, batch, get, tools, PRESETS, BRUSHES, INK, SCULPTS, brushesFor, actions: ACTIONS, onParam, onCode, frameIds, runAction,
   run: () => run, setRole, keysShown: (a) => showKey(a), tool: () => tool, settingsVersion: () => settingsVersion,
-  presetsFor: (o) => (o.role === 'score' ? BRUSHES : PRESETS),
+  presetsFor: (o) => (o.role === 'score' ? BRUSHES : o.role === 'junction' ? JUNCTIONS : o.role === 'event' ? EVENTS : PRESETS),
   addExample(ex) {
     const s = spaces[0], before = new Set(state.objects.keys());
     batch(() => {

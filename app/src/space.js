@@ -129,6 +129,7 @@ define({
     if (o.role !== 'traveler') {
       if (o.kind === 'group' || o.bind || ['target', 'code', 'score', 'note'].includes(o.role)) return false;
       if (o.code != null) { (o.stash ??= {})[o.role] = o.code; delete o.code; }
+      if (o.kind === 'shape' && o.role === 'visual') o.keeps = true; // it keeps looking as it did
       o.role = 'traveler';
       for (const j of [...state.objects.values()]) if (j.kind === 'joint' && j.at.some((q) => q.id === o.id)) dropPlaces(j, new Set([o.id])); // a traveler is not held anywhere
     }
@@ -245,6 +246,9 @@ define({
     if (o.bind) unbind(o);
     // Each role keeps its own code, so changing role and back loses nothing.
     if (o.code != null) (o.stash ??= {})[o.role] = o.code;
+    // A visual made an event (or a traveler) keeps looking as it did.
+    if (o.kind === 'shape' && o.role === 'visual' && (a.role === 'event' || a.role === 'traveler')) o.keeps = true;
+    if (a.role === 'visual') delete o.keeps;
     o.role = a.role;
     if (a.role === 'note') o.text ??= '';
     const fresh = { path: PRESETS.path, code: PRESETS.blank, score: BRUSHES.glissando, event: EVENT, junction: JUNCTION }[a.role];

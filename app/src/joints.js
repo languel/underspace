@@ -26,13 +26,54 @@
 
 import { smooth } from './object.js';
 
-export const JUNCTION = `// junction
+// What a junction does when a traveler arrives. Its code gets
+//   ways  where the traveler can go on, straightest first:
+//         { line, dir (1 forward, -1 back), turn (radians, left is +) }
+//   ev    { traveler, rider, from, count }   p  its parameters   mem  what it keeps
+// and returns a way or its index; several (an array) to split the traveler;
+// 'back' to send it back the way it came; 'stop' to stop it; nothing: straight on.
+export const JUNCTIONS = {
+  'round robin': `// round robin
 // out: count
-// param: turn 0
-// A traveler arrives. ways are where it can go on, straightest first:
-// { line, dir (1 forward, -1 back), turn (radians, left is +) }.
-// Return a way or its index; nothing goes straight on.
-if (Math.random() < p.turn && ways.length > 1) return 1 + Math.floor(Math.random() * (ways.length - 1));`;
+// each traveler that arrives takes the next way, in turn
+mem.n = (mem.n ?? -1) + 1;
+return mem.n % ways.length;`,
+  chance: `// chance
+// out: count
+// param: straight 1
+// param: left 1
+// param: right 1
+// param: back 0
+// each way is taken in proportion to its weight
+const kind = (w) => (Math.abs(w.turn) < 0.5 ? 'straight' : Math.abs(w.turn) > 2.6 ? 'back' : w.turn > 0 ? 'left' : 'right');
+const weights = ways.map((w) => p[kind(w)]).concat(p.back);
+let r = Math.random() * weights.reduce((a, b) => a + b, 0);
+for (let i = 0; i < ways.length; i++) if ((r -= weights[i]) < 0) return i;
+return p.back > 0 ? 'back' : 'stop';`,
+  random: `// random
+// out: count
+return Math.floor(Math.random() * ways.length);`,
+  straight: `// straight
+// out: count
+// straight on where it can, otherwise the gentlest turn
+return 0;`,
+  split: `// split
+// out: count
+// the traveler goes every way at once
+return ways.map((w, i) => i);`,
+  reflect: `// reflect
+// out: count
+return 'back';`,
+  stop: `// stop
+// out: count
+return 'stop';`,
+  every: `// every
+// out: count
+// param: n 2
+// straight on, but every nth traveler turns
+return ev.count % p.n === 0 ? ways.length - 1 : 0;`,
+};
+export const JUNCTION = JUNCTIONS['round robin'];
 
 export const isCurve = (o) => o?.kind === 'line' && !o.bind && o.role !== 'traveler' && o.points?.length > 1;
 export const isJoint = (o) => o?.kind === 'joint';

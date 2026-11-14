@@ -540,6 +540,31 @@ Added in a tenth pass (14 Nov 2026), joints and constraints:
   rigidly; joining at crossings in 3D; the ring for the line and shape
   tools.
 
+Added in an eleventh pass (14 Nov 2026), branching and events that act:
+
+- **Junction behaviours** (`JUNCTIONS` in `joints.js`, the preset menu in
+  the Code panel when a joint is selected): round robin (the default),
+  chance (weights for straight, left, right and back), random, straight,
+  split, reflect, stop, every (every nth traveler turns). A junction's
+  code may return a way or its index, an array of them (the traveler
+  splits), `'back'`, or `'stop'`.
+- **Riders** (`play.js`): a traveler is one or more riders, each with a
+  line, a distance along it, a direction and a speed. All travelers now
+  move this way, not only those on lines with joints. Copies made by
+  splitting are drawn faintly as the traveler (`ghosts`). A copy that runs
+  off an open end goes away. A traveler has at most 64 riders.
+- **Events act on travelers.** Besides `note()`, an event's code can call
+  `ev.reflect()`, `ev.stop()`, `ev.go()`, `ev.split()` and `ev.speed(k)`.
+  Presets (`EVENTS`): note, reflect, split, stop, speed, note and reflect.
+- **Make event keeps the look** (the owner: make the mark into an event,
+  do not attach one). One "Make event" action covers lines and plain
+  shapes, in Convert to › and the hold ring. A line keeps its stroke. A
+  visual made an event or a traveler gets `keeps` and is drawn as it was.
+  Either one flashes when a traveler reaches it. Events made with the
+  event tool, or with "Attach an event here", still look like events.
+- Tests: round robin at a T, a split, an event reflecting a traveler, a
+  shape keeping its look. 58 in all.
+
 The owner asked to match Poliplan's functionality "for starters" without
 copying it. Not matched yet: writing your own brushes and sculpt tools in
 the app, rotate and scale of lines, the point and lasso-plane tools,
