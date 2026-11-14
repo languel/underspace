@@ -1,7 +1,8 @@
-// Properties: the selection, or with nothing selected, the look that new
-// lines and shapes will take.
+// Properties: the selection, or with nothing selected, the settings of the
+// active tool. The same two builders fill the panel and the small copy that
+// opens at the pointer (Alt+right-click).
 
-import { h, row, section, glyphButton, numberField, textField, colorField, syncParams } from '../controls.js';
+import { h, row, section, glyphButton, numberField, textField, colorField, syncParams, choice } from '../controls.js';
 import { ROLES, blanketOf, hasCode, isTarget } from '../object.js';
 import { settings, setSetting } from '../settings.js';
 
@@ -9,22 +10,32 @@ const ROLE_ICON = { ink: 'ink', connector: 'connector', path: 'path', visual: 'v
 const ROLE_TITLE = { ink: 'Ink', connector: 'Connector', path: 'Path', visual: 'Visual', target: 'Render target', code: 'Code container', score: 'Score', note: 'Note' };
 const shared = (list, get) => { const v = get(list[0]); return list.every((o) => get(o) === v) ? v : undefined; };
 
-export function propertiesPanel(el, app) {
-  const body = h('div', 'panel-body'), live = h('div', 'params');
-  el.append(body);
-  let sig = null;
+const TOOL_TITLE = { select: 'Select', pan: 'Pan', draw: 'Draw', line: 'Straight line', rect: 'Rectangle', ellipse: 'Ellipse', note: 'Note', code: 'Code container', target: 'Render target', score: 'Score' };
 
-  function build(sel) {
+// What the active tool will make, and how.
+export function toolProps(app, tool) {
+  const out = [], check = (key) => { const c = h('input'); c.type = 'checkbox'; c.checked = settings[key]; c.addEventListener('change', () => setSetting(key, c.checked)); return c; };
+  const look = [];
+  if (['draw', 'line', 'rect', 'ellipse'].includes(tool)) look.push(row('stroke', colorField(settings.stroke, (c) => setSetting('stroke', c))));
+  if (['rect', 'ellipse'].includes(tool)) look.push(row('fill', colorField(settings.fill, (c) => setSetting('fill', c))));
+  if (tool === 'draw') look.push(row('smooth', check('smooth')), row('simplify', numberField(settings.simplify, (v) => setSetting('simplify', Math.max(0, v)), { step: 0.5, min: 0 })));
+  if (look.length) look.push(row('width', numberField(settings.width, (v) => setSetting('width', Math.max(0.5, v)), { step: 0.2, min: 0.5 })));
+  if (tool === 'code') look.push(row('preset', choice(Object.keys(app.PRESETS).filter((k) => !['path', 'wave'].includes(k)), settings.codePreset, (v) => setSetting('codePreset', v))));
+  if (tool === 'score') look.push(row('brush', choice(Object.keys(app.BRUSHES), settings.scoreBrush, (v) => setSetting('scoreBrush', v))));
+  if (tool === 'target') look.push(row('plane', choice(['view', 'front', 'top', 'side'], settings.targetPlane, (v) => setSetting('targetPlane', v))));
+  if (look.length) out.push(section(TOOL_TITLE[tool] ?? tool, ...look));
+  else out.push(section(TOOL_TITLE[tool] ?? tool));
+  out.push(section('Grid', row('show', check('grid')), row('snap', check('snap')), row('size', numberField(settings.gridSize, (v) => setSetting('gridSize', Math.max(0.05, v)), { step: 0.25, min: 0.05 }))));
+  return out;
+}
+
+// The selected objects. `live` is a container the caller keeps in step with
+// the parameters; without one they are filled in once.
+export function selectionProps(app, sel, live = null) {
+
     const ids = sel.map((o) => o.id), one = sel.length === 1 ? sel[0] : null;
     const style = (patch) => app.call('object.style', { ids, style: patch });
     const out = [];
-    if (!sel.length) {
-      out.push(section('New marks',
-        row('stroke', colorField(settings.stroke, (c) => setSetting('stroke', c))),
-        row('fill', colorField(settings.fill, (c) => setSetting('fill', c))),
-        row('width', numberField(settings.width, (v) => setSetting('width', Math.max(0.5, v)), { step: 0.2, min: 0.5 }))));
-      return out;
-    }
     if (one) out.push(section('', row('name', textField(one.name, (name) => app.call('object.name', { id: one.id, name }), blanketOf(one)?.name || one.role || one.kind))));
     else out.push(section('', h('p', 'muted', `${sel.length} objects`)));
 
@@ -39,6 +50,7 @@ export function propertiesPanel(el, app) {
         row('stroke', colorField(shared(sel, (o) => o.style?.stroke ?? null), (c) => style({ stroke: c }))),
         row('fill', colorField(shared(sel, (o) => o.style?.fill ?? null), (c) => style({ fill: c }))),
         row('width', numberField(shared(sel, (o) => o.style?.width ?? 2.2), (v) => style({ width: Math.max(0, v) }), { step: 0.2, min: 0 })),
+        ...(sel.some((o) => o.kind === 'line' && !o.closed) ? [row('strokes', (() => { const bar = h('span', 'glyph-row'), straight = shared(sel, (o) => o.style?.path === 'straight'); bar.append(glyphButton('draw', 'Smooth', () => style({ path: null }), straight === false), glyphButton('line', 'Straight', () => style({ path: 'straight' }), straight === true)); return bar; })())] : []),
         row('opacity', numberField(shared(sel, (o) => o.style?.opacity ?? 1), (v) => style({ opacity: Math.max(0, Math.min(1, v)) }), { step: 0.1, min: 0, max: 1 }))));
     }
     if (one?.rect) {
@@ -47,7 +59,7 @@ export function propertiesPanel(el, app) {
       for (const [k, label] of [['cx', 'x'], ['cy', 'y'], ['w', 'w'], ['h', 'h']]) grid.append(row(label, numberField(+r[k].toFixed(3), set(k), { step: 0.1 })));
       out.push(section('Place', grid));
     }
-    if (one && hasCode(one)) out.push(section('Parameters', live));
+    if (one && hasCode(one)) { const box = live ?? h('div', 'params'); if (!live) syncParams(box, one, blanketOf(one), app.onParam); out.push(section('Parameters', box)); }
     if (one?.role === 'note') {
       const text = h('textarea', 'note-text');
       text.value = one.text ?? ''; text.spellcheck = false;
@@ -69,13 +81,19 @@ export function propertiesPanel(el, app) {
       glyphButton('remove', 'Delete', () => app.runAction('remove')));
     out.push(section('', bar));
     return out;
-  }
+}
+
+export function propertiesPanel(el, app) {
+  const body = h('div', 'panel-body'), live = h('div', 'params');
+  el.append(body);
+  let sig = null;
+  const build = (sel) => (sel.length ? selectionProps(app, sel, live) : toolProps(app, app.tool()));
 
   return {
     update() {
       const sel = [...app.state.selection].map(app.get).filter(Boolean), one = sel.length === 1 ? sel[0] : null;
       if (one && hasCode(one)) syncParams(live, one, blanketOf(one), app.onParam);
-      const next = `${app.state.version}|${sel.map((o) => o.id).join()}|${settings.stroke}|${settings.fill}|${settings.width}`;
+      const next = `${app.state.version}|${sel.map((o) => o.id).join()}|${app.tool()}|${app.settingsVersion()}`;
       const typing = body.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
       if (next === sig || typing) return;
       sig = next;

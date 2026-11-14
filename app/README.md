@@ -65,6 +65,9 @@ or with a shape selected, makes it a render target.
 | ⌘] ⌘[ ⇧H ⇧L | bring to front, send to back, hide, lock |
 | ⌘' ⇧⌘' | grid, snap |
 | right-click | context menu |
+| Alt+right-click | properties at the pointer: the selection's, or the tool's |
+| ⇧S | selected lines: smooth or straight strokes |
+| right-click a tool | the other tools of its kind, or its settings |
 
 ## Scores
 

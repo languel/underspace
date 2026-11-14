@@ -14,7 +14,9 @@
 //             'note'       text on the canvas (`text`)
 //   kind 'group'   rect, inner (its interior frame), ports (the cut wires)
 //
-// Any object may carry `name`, `style` { stroke, fill, width, opacity },
+// Any object may carry `name`, `style` { stroke, fill, width, opacity, path }
+// (path 'straight' draws a line through its points as they are; otherwise
+// it is drawn as a smooth curve),
 // `hidden` and `locked`.
 // Code objects (path, code) carry `code` and `params`; the blanket is declared
 // in the code's header. Coordinates are local to the object's space (y up);
@@ -109,6 +111,50 @@ export function portPos(o, side, name) {
 export function innerXf(g) {
   const r = rectOf(g), k = 0.86 * Math.min(r.w / g.inner.w, r.h / g.inner.h);
   return { k, ox: r.cx - g.inner.cx * k, oy: r.cy - g.inner.cy * k };
+}
+
+// A smooth curve through the points (centripetal Catmull-Rom), for showing a
+// line; the points themselves are never changed.
+export function smooth(points, steps = 6) {
+  const n = points.length;
+  if (n < 3) return points;
+  const closed = Math.hypot(points[0][0] - points[n - 1][0], points[0][1] - points[n - 1][1]) < 1e-9;
+  const at = (i) => (closed ? points[((i % (n - 1)) + (n - 1)) % (n - 1)] : points[Math.max(0, Math.min(n - 1, i))]);
+  const knot = (a, b) => Math.max(1e-6, Math.sqrt(Math.hypot(b[0] - a[0], b[1] - a[1])));
+  const out = [];
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+    const t1 = knot(p0, p1), t2 = t1 + knot(p1, p2), t3 = t2 + knot(p2, p3);
+    for (let s = 0; s < steps; s++) {
+      const t = t1 + (t2 - t1) * (s / steps), q = [];
+      for (let k = 0; k < 2; k++) {
+        const a1 = p0[k] * (t1 - t) / t1 + p1[k] * t / t1;
+        const a2 = p1[k] * (t2 - t) / (t2 - t1) + p2[k] * (t - t1) / (t2 - t1);
+        const a3 = p2[k] * (t3 - t) / (t3 - t2) + p3[k] * (t - t2) / (t3 - t2);
+        const b1 = a1 * (t2 - t) / t2 + a2 * t / t2;
+        const b2 = a2 * (t3 - t) / (t3 - t1) + a3 * (t - t1) / (t3 - t1);
+        q.push(b1 * (t2 - t) / (t2 - t1) + b2 * (t - t1) / (t2 - t1));
+      }
+      out.push(q);
+    }
+  }
+  out.push(points[n - 1].slice(0, 2));
+  return out;
+}
+
+// Fewer points, same shape (Ramer-Douglas-Peucker): drops what lies within
+// `tol` of the line between its neighbours.
+export function simplify(points, tol) {
+  if (points.length < 3 || !(tol > 0)) return points;
+  const keep = new Uint8Array(points.length), stack = [[0, points.length - 1]];
+  keep[0] = keep[points.length - 1] = 1;
+  while (stack.length) {
+    const [a, b] = stack.pop(), pa = points[a], pb = points[b], dx = pb[0] - pa[0], dy = pb[1] - pa[1], len = Math.hypot(dx, dy) || 1e-9;
+    let far = -1, most = tol;
+    for (let i = a + 1; i < b; i++) { const d = Math.abs((points[i][0] - pa[0]) * dy - (points[i][1] - pa[1]) * dx) / len; if (d > most) { most = d; far = i; } }
+    if (far > 0) { keep[far] = 1; stack.push([a, far], [far, b]); }
+  }
+  return points.filter((_, i) => keep[i]);
 }
 
 // A point u (0..1) along a path, by arc length.

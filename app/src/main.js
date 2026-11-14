@@ -3,7 +3,8 @@
 
 import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, argTypes as T } from './space.js';
 import './patch.js';
-import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, setDrag, isLine, isTarget, hasCode, isWire } from './object.js';
+import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplify, setDrag, isLine, isTarget, hasCode, isWire } from './object.js';
+import { selectionProps, toolProps } from './panels/properties.js';
 import { wirePoints } from './bind.js';
 import { createRunner } from './run.js';
 import { createView } from './view.js';
@@ -19,7 +20,7 @@ import { settingsPanel } from './panels/settings.js';
 import { settings, setSetting, onSettings } from './settings.js';
 import { colorField } from './controls.js';
 import { createPalette } from './palette.js';
-import { showMenu, closeMenu } from './menu.js';
+import { showMenu, showPopover, closeMenu } from './menu.js';
 import { scripted, endpoint, listModels } from './assistant.js';
 import { sketchKind } from './sketch.js';
 import { PRESETS } from './presets.js';
@@ -62,7 +63,8 @@ function walk(space, xf) {
     const sel = state.selection.has(o.id), blanket = blanketOf(o), st = o.style ?? {};
     if (isLine(o)) {
       const made = run.shown.get(o.id);
-      const pts = (isWire(o) ? wirePoints(state.objects, o) : made ?? ptsOf(o)).map((p) => at(xf, p));
+      const raw = isWire(o) ? wirePoints(state.objects, o) : made ?? ptsOf(o);
+      const pts = (st.path === 'straight' || o.closed ? raw : smooth(raw)).map((p) => at(xf, p));
       lines.push({ id: o.id, pts, color: sel ? 'accent' : st.stroke ?? (isWire(o) ? 'hot' : 'ink'), width: st.width ?? (isWire(o) ? 1.6 : 2.2), opacity: st.opacity, fill: o.closed ? st.fill : null });
       const cursor = run.cursors.get(o.id);
       if (cursor) dots.push(view.toScreen(at(xf, cursor)));
@@ -222,12 +224,18 @@ let spaceKey = false, spaceUsed = false, spaceAt0 = 0, pointer = null;
 const touches = new Map();
 const MAKE = { rect: { role: 'visual', shape: 'rect' }, ellipse: { role: 'visual', shape: 'ellipse' }, code: { role: 'code', shape: 'rect' }, target: { role: 'target', shape: 'rect' }, score: { role: 'score', shape: 'rect' }, note: { role: 'note', shape: 'rect' } };
 // The look new lines and shapes take, from the toolbar swatches.
-const newStyle = (fillable) => { const st = {}; if (settings.stroke) st.stroke = settings.stroke; if (fillable && settings.fill) st.fill = settings.fill; if (settings.width !== 2.2) st.width = settings.width; return Object.keys(st).length ? { style: st } : {}; };
+const newStyle = (fillable) => { const st = {}; if (settings.stroke) st.stroke = settings.stroke; if (fillable && settings.fill) st.fill = settings.fill; if (settings.width !== 2.2) st.width = settings.width; if (!fillable && !settings.smooth) st.path = 'straight'; return Object.keys(st).length ? { style: st } : {}; };
 const snap = (v) => (settings.snap ? Math.round(v / settings.gridSize) * settings.gridSize : v);
 
+const stacks = new Map(); // stack -> { b, members, current }: tools of one kind share a button
 function setTool(name) {
   tool = name;
   for (const b of document.querySelectorAll('[data-tool]')) b.setAttribute('aria-pressed', String(b.dataset.tool === name));
+  for (const [key, st] of stacks) {
+    const m = st.members.find((a) => a.tool === name);
+    st.b.setAttribute('aria-pressed', String(!!m));
+    if (m && m !== st.current) { st.current = m; paintStack(st); setSetting('stacks', { ...settings.stacks, [key]: name }); }
+  }
   pad.dataset.tool = name;
 }
 function showMarquee(a, b) {
@@ -306,7 +314,7 @@ pad.addEventListener('pointermove', (e) => {
     if (!q) return;
     g.pts.push(q); g.last = p;
     if (g.s.kind === 'scene') view.setPreview(g.pts, g.s.id);
-    else view.setPreview(g.pts.map((pt) => at(g.s.xf, pt)), null, g.wire ? 'hot' : 'accent');
+    else view.setPreview((settings.smooth ? smooth(g.pts) : g.pts).map((pt) => at(g.s.xf, pt)), null, g.wire ? 'hot' : 'accent');
   } else if (g.kind === 'line') {
     // Shift holds a straight line to steps of 15 degrees.
     let q = p;
@@ -359,7 +367,9 @@ function endGesture(e) {
     view.setPreview(null);
     // A line begun on a port reaches further for the port at its other end.
     const tol = g.s.kind === 'scene' ? 0 : (g.wire ? 26 : 14) * unitsPerPx(g.s);
-    if (g.pts.length > 1 || !g.wire) call('line.add', { space: g.s.id, points: g.pts.map((q) => q.map(round)), tol: round(tol), ...(g.wire ? {} : newStyle(false)) });
+    // Keep the points that carry the shape; the curve through them is drawn smooth.
+    const kept = g.s.kind === 'scene' ? g.pts : simplify(g.pts, settings.simplify * unitsPerPx(g.s));
+    if (g.pts.length > 1 || !g.wire) call('line.add', { space: g.s.id, points: kept.map((q) => q.map(round)), tol: round(tol), ...(g.wire ? {} : newStyle(false)) });
   } else if (g.kind === 'line') {
     view.setPreview(null);
     const flat = g.s.kind !== 'scene', pts = [g.a, g.b].map((q) => q.map((v, i) => round(flat && i < 2 ? snap(v) : v)));
@@ -409,7 +419,8 @@ function addShape(s, make, start, end, extra = {}) {
   if (settings.snap && end) { const x0 = snap(rect.cx - rect.w / 2), x1 = snap(rect.cx + rect.w / 2), y0 = snap(rect.cy - rect.h / 2), y1 = snap(rect.cy + rect.h / 2); rect = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(settings.gridSize, x1 - x0), h: Math.max(settings.gridSize, y1 - y0) }; }
   for (const k in rect) rect[k] = round(rect[k]);
   return batch(() => {
-    const id = call('shape.add', { space: s.id, rect, shape: make.shape, role: make.role, ...(make.role === 'code' ? { preset: 'osc' } : {}), ...(make.role === 'visual' ? newStyle(true) : {}), ...extra });
+    const id = call('shape.add', { space: s.id, rect, shape: make.shape, role: make.role, ...(make.role === 'code' ? { preset: settings.codePreset } : make.role === 'score' ? { preset: settings.scoreBrush } : {}), ...(make.role === 'visual' ? newStyle(true) : {}), ...extra });
+    if (make.role === 'target' && settings.targetPlane !== 'view') call('target.set', { id, plane: settings.targetPlane });
     call('select.set', { ids: [id] });
     return id;
   });
@@ -537,21 +548,23 @@ const ACTIONS = [
   // tools
   { id: 'tool.select', title: 'Select', icon: 'select', keys: 'v', group: 'tool', bar: 'tools', tool: 'select' },
   { id: 'tool.pan', title: 'Pan', icon: 'pan', keys: 'h', group: 'tool', bar: 'tools', tool: 'pan' },
-  { id: 'tool.draw', title: 'Draw', icon: 'draw', keys: 'd', group: 'tool', bar: 'tools', tool: 'draw' },
-  { id: 'tool.line', title: 'Straight line', icon: 'line', keys: 'l', group: 'tool', bar: 'tools', tool: 'line' },
-  { id: 'tool.rect', title: 'Rectangle', icon: 'rect', keys: 'r', group: 'tool', bar: 'tools', tool: 'rect' },
-  { id: 'tool.ellipse', title: 'Ellipse', icon: 'ellipse', keys: 'o', group: 'tool', bar: 'tools', tool: 'ellipse' },
+  { id: 'tool.draw', title: 'Draw', icon: 'draw', keys: 'd', group: 'tool', bar: 'tools', tool: 'draw', stack: 'line' },
+  { id: 'tool.line', title: 'Straight line', icon: 'line', keys: 'l', group: 'tool', bar: 'tools', tool: 'line', stack: 'line' },
+  { id: 'tool.rect', title: 'Rectangle', icon: 'rect', keys: 'r', group: 'tool', bar: 'tools', tool: 'rect', stack: 'shape' },
+  { id: 'tool.ellipse', title: 'Ellipse', icon: 'ellipse', keys: 'o', group: 'tool', bar: 'tools', tool: 'ellipse', stack: 'shape' },
   { id: 'tool.note', title: 'Note', icon: 'note', keys: 'n', group: 'tool', bar: 'tools', tool: 'note' },
-  { id: 'tool.code', title: 'Code container', icon: 'box', keys: 'b', group: 'tool2', bar: 'tools', tool: 'code' },
+  { id: 'tool.code', title: 'Code container', icon: 'box', keys: 'b', group: 'tool2', bar: 'tools', tool: 'code', stack: 'object' },
   // roles: the same key means "tool" with nothing selected and "make this one" with a selection
   { id: 'role.target', title: 'Make render target', icon: 'target', keys: 't', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'target'), run: (c) => setRole(c.shapes, 'target') },
-  { id: 'tool.target', title: 'Render target', icon: 'target', keys: 't', group: 'tool2', bar: 'tools', tool: 'target' },
+  { id: 'tool.target', title: 'Render target', icon: 'target', keys: 't', group: 'tool2', bar: 'tools', tool: 'target', stack: 'object' },
   { id: 'role.score', title: 'Make score', icon: 'score', keys: 's', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'score'), run: (c) => setRole(c.shapes, 'score') },
-  { id: 'tool.score', title: 'Score', icon: 'score', keys: 's', group: 'tool2', bar: 'tools', tool: 'score' },
+  { id: 'tool.score', title: 'Score', icon: 'score', keys: 's', group: 'tool2', bar: 'tools', tool: 'score', stack: 'object' },
   { id: 'role.code', title: 'Make code container', icon: 'code', keys: 'c', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'code'), run: (c) => setRole(c.shapes, 'code') },
   { id: 'role.path', title: 'Make path', icon: 'path', keys: 'c', group: 'role', menu: true, when: (c) => c.lines.length && can(c.lines, 'path'), run: (c) => setRole(c.lines, 'path') },
   { id: 'role.connector', title: 'Make connector', icon: 'connector', keys: 'w', group: 'role', menu: true, when: (c) => c.lines.some((o) => !o.bind), run: (c) => setRole(c.lines, 'connector') },
   { id: 'role.ink', title: 'Make plain ink', icon: 'ink', keys: 'x', group: 'role', menu: true, when: (c) => c.lines.length && can(c.lines, 'ink'), run: (c) => setRole(c.lines, 'ink') },
+  { id: 'path.straight', title: 'Straight strokes', icon: 'line', keys: 'shift+s', group: 'role', menu: true, when: (c) => c.lines.some((o) => o.style?.path !== 'straight' && !o.closed), run: (c) => call('object.style', { ids: ids(c.lines), style: { path: 'straight' } }) },
+  { id: 'path.smooth', title: 'Smooth strokes', icon: 'draw', keys: 'shift+s', group: 'role', menu: true, when: (c) => c.lines.some((o) => o.style?.path === 'straight'), run: (c) => call('object.style', { ids: ids(c.lines), style: { path: null } }) },
   { id: 'role.visual', title: 'Make visual', icon: 'visual', keys: 'x', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'visual'), run: (c) => setRole(c.shapes, 'visual') },
   // sound: a tap of Space plays or stops (holding it and dragging pans)
   { id: 'play', title: 'Play or stop', icon: 'play', keys: 'mod+enter', group: 'play', bar: 'edit', menu: true, when: (c) => scores().length, run: (c) => togglePlay(c) },
@@ -635,15 +648,67 @@ $('file').addEventListener('change', async (e) => {
 function island(el, name) {
   let lastGroup = null;
   for (const a of ACTIONS.filter((x) => x.bar === name)) {
+    if (a.stack && stacks.has(a.stack)) { stacks.get(a.stack).members.push(a); continue; }
     if (lastGroup && a.group !== lastGroup) el.append(document.createElement('hr'));
     lastGroup = a.group;
     const b = document.createElement('button'), key = showKey(a);
-    b.title = key ? `${a.title} (${key})` : a.title; b.setAttribute('aria-label', a.title); b.innerHTML = icon(a.icon);
-    if (a.tool) b.dataset.tool = a.tool;
-    b.onclick = () => { const c = context(); if (allowed(a, c)) a.run(c); };
+    if (a.stack) {
+      // One button for the tools of a kind. Click picks the one shown; click
+      // again, or right-click, for the others.
+      const st = { b, members: [a], current: a };
+      stacks.set(a.stack, st);
+      b.className = 'stack';
+      b.onclick = () => (tool === st.current.tool ? stackMenu(st) : st.current.run());
+      b.oncontextmenu = (e) => { e.preventDefault(); stackMenu(st); };
+    } else {
+      b.title = key ? `${a.title} (${key})` : a.title; b.setAttribute('aria-label', a.title); b.innerHTML = icon(a.icon);
+      if (a.tool) { b.dataset.tool = a.tool; b.oncontextmenu = (e) => { e.preventDefault(); toolPopover(a.tool, b); }; }
+      b.onclick = () => { const c = context(); if (allowed(a, c)) a.run(c); };
+    }
     el.append(b);
   }
+  for (const [key, st] of stacks) { st.current = st.members.find((a) => a.tool === settings.stacks[key]) ?? st.current; paintStack(st); }
 }
+function paintStack(st) {
+  const a = st.current, key = showKey(a);
+  st.b.title = `${a.title}${key ? ` (${key})` : ''} · ${st.members.filter((x) => x !== a).map((x) => x.title).join(', ')}`;
+  st.b.setAttribute('aria-label', a.title); st.b.innerHTML = icon(a.icon);
+}
+function stackMenu(st) {
+  const r = st.b.getBoundingClientRect();
+  showMenu([...st.members.map((a) => ({ title: a.title, icon: a.icon, keys: showKey(a), run: () => a.run() })), null, { title: 'Tool settings', icon: 'props', run: () => toolPopover(st.current.tool, st.b) }], r.left, r.bottom + 6);
+}
+// The small Properties at a point: the tool's settings, or the selection's.
+let pop = null;
+function toolPopover(name, anchor) {
+  const r = anchor.getBoundingClientRect?.() ?? { left: anchor[0], bottom: anchor[1] };
+  pop = showPopover(() => toolProps(app, name), r.left, r.bottom + 6);
+}
+onChange(() => pop?.refresh());
+onSettings(() => pop?.refresh());
+
+// An island moves by its grip and stays where it is put; double-click the
+// grip to send it home.
+function placeIsland(el, x, y) {
+  x = Math.max(0, Math.min(x, stage.clientWidth - el.offsetWidth)); y = Math.max(0, Math.min(y, stage.clientHeight - el.offsetHeight));
+  el.style.cssText = `left:${x}px;top:${y}px;right:auto;bottom:auto;transform:none`;
+  return [x, y];
+}
+function grip(el) {
+  const g = document.createElement('i');
+  g.className = 'grip'; g.title = 'Drag to move · double-click to put back';
+  el.prepend(g);
+  g.addEventListener('pointerdown', (e) => {
+    g.setPointerCapture(e.pointerId);
+    const r = el.getBoundingClientRect(), s = stage.getBoundingClientRect(), off = [e.clientX - r.left, e.clientY - r.top];
+    let at = null;
+    const move = (ev) => { at = placeIsland(el, ev.clientX - s.left - off[0], ev.clientY - s.top - off[1]); };
+    const up = () => { g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up); if (at) setSetting('islands', { ...settings.islands, [el.id]: at }); };
+    g.addEventListener('pointermove', move); g.addEventListener('pointerup', up);
+  });
+  g.addEventListener('dblclick', () => { el.style.cssText = ''; const rest = { ...settings.islands }; delete rest[el.id]; setSetting('islands', rest); });
+}
+const placeIslands = () => { for (const [id, at] of Object.entries(settings.islands)) if ($(id)) placeIsland($(id), at[0], at[1]); };
 const runAction = (id, c = context()) => { const a = ACTIONS.find((x) => x.id === id); if (a && allowed(a, c)) a.run(c); };
 const glyph = (name, title, onClick) => { const b = document.createElement('button'); b.title = title; b.setAttribute('aria-label', title); b.innerHTML = icon(name); b.onclick = onClick; return b; };
 
@@ -689,9 +754,11 @@ $('peek').innerHTML = icon('clean');
 $('peek').onclick = () => document.body.classList.toggle('clean');
 
 // What the panels may use.
+let settingsVersion = 0;
+onSettings(() => settingsVersion++);
 const app = {
   state, call, batch, get, tools, PRESETS, BRUSHES, actions: ACTIONS, onParam, onCode, frameIds, runAction,
-  run: () => run, setRole, keysShown: (a) => showKey(a),
+  run: () => run, setRole, keysShown: (a) => showKey(a), tool: () => tool, settingsVersion: () => settingsVersion,
   presetsFor: (o) => (o.role === 'score' ? BRUSHES : PRESETS),
   addExample(ex) {
     const s = spaces[0], before = new Set(state.objects.keys());
@@ -720,6 +787,9 @@ function applySettings() {
 }
 onSettings(applySettings);
 applySettings();
+for (const id of ['edit', 'tools', 'tabs', 'zoom']) grip($(id));
+placeIslands();
+addEventListener('resize', placeIslands);
 
 const palette = createPalette($('palette'), { ask, getActions: () => { const c = context(); return ACTIONS.filter((a) => !a.hidden && a.id !== 'palette' && allowed(a, c)).map((a) => asItem(a, c)); } });
 
@@ -729,6 +799,11 @@ pad.addEventListener('contextmenu', (e) => {
   const p = local(e), id = pick(p[0], p[1]);
   pointer = p;
   if (id && !state.selection.has(id)) call('select.set', { ids: [id] });
+  if (e.altKey) { // Alt+right-click: properties here, of what is selected or else of the tool
+    const sel = () => [...state.selection].map(get).filter(Boolean);
+    pop = showPopover(() => (sel().length ? selectionProps(app, sel()) : toolProps(app, tool)), e.clientX, e.clientY);
+    return;
+  }
   const c = context(id ?? null), items = [];
   let group = null;
   for (const a of ACTIONS) {

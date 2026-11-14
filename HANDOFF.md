@@ -321,6 +321,24 @@ Added in a third pass (the UI):
 - **Settings** (`src/settings.js`) live in localStorage, apart from the
   take: theme, grid, snap, the look of new marks, the assistant's endpoint.
 
+Added in a fourth pass (toolbars after AMS):
+
+- **Islands move.** Each has a dotted grip: drag to place it, double-click
+  to send it home. Positions are a setting.
+- **Tool stacks.** Tools of a kind share a button (draw and straight line;
+  rectangle and ellipse; code container, render target and score). Click
+  picks the one shown; click again or right-click for the others. An
+  action joins a stack by its `stack` key.
+- **Properties at the pointer.** Alt+right-click on the canvas opens a
+  small Properties there: the selection's, or with nothing selected the
+  active tool's settings. Right-clicking a tool button opens that tool's
+  settings. `selectionProps` and `toolProps` in `src/panels/properties.js`
+  fill both this and the panel.
+- **Smooth lines.** A drawn stroke is thinned to the points that carry its
+  shape (`simplify`, a setting in pixels) and shown as a centripetal
+  Catmull-Rom curve through them (`smooth`). The stored points are not
+  changed. `style.path: 'straight'` shows them as they are; ⇧S toggles.
+
 The owner asked to match Poliplan's functionality "for starters" without
 copying it. Not matched yet: textured brushes and the brush kit, sculpt
 tools, rotate and scale of lines, the point and lasso-plane tools,

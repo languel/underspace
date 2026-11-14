@@ -36,7 +36,7 @@ const T = {
   space: { type: ['string', 'null'], description: 'id of the group or target to work in; null or omitted for the canvas' },
   rect: { type: 'object', description: '{ cx, cy, w, h } in the space\'s units (y up)', properties: { cx: { type: 'number' }, cy: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' } } },
   num: { type: 'number' }, str: { type: 'string' },
-  style: { type: 'object', description: '{ stroke, fill, width, opacity }: colours as CSS hex, null for the default', properties: { stroke: { type: ['string', 'null'] }, fill: { type: ['string', 'null'] }, width: { type: 'number' }, opacity: { type: 'number' } } },
+  style: { type: 'object', description: '{ stroke, fill, width, opacity, path }: colours as CSS hex, null for the default', properties: { stroke: { type: ['string', 'null'] }, fill: { type: ['string', 'null'] }, width: { type: 'number' }, opacity: { type: 'number' }, path: { enum: ['smooth', 'straight', null], description: 'how a line is drawn through its points; smooth is the default' } } },
 };
 export { T as argTypes };
 

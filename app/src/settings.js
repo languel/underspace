@@ -6,6 +6,10 @@ export const DEFAULTS = {
   theme: 'auto',        // 'auto' | 'light' | 'dark'
   grid: true, gridSize: 1, snap: false,
   stroke: null, fill: null, width: 2.2, // the look new lines and shapes take; null is the default ink
+  smooth: true, simplify: 1.5,          // new lines: drawn smooth; points within this many pixels of the line are dropped
+  codePreset: 'osc', scoreBrush: 'glissando', targetPlane: 'view', // what the object tools make
+  islands: {},          // where toolbars were dragged to: id -> [x, y]
+  stacks: {},           // the tool each stack last used
   panel: 'code', panelOpen: false,
   assistBase: 'http://127.0.0.1:11434', assistModel: '',
 };

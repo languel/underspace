@@ -101,3 +101,13 @@ test('undo replays the take without its last change', () => {
   undo();
   assert.equal(state.objects.size, 2);
 });
+
+test('smooth draws a curve through the points; simplify drops what the line does not need', async () => {
+  const { smooth, simplify } = await import('../src/object.js');
+  const pts = [[0, 0], [1, 1], [2, 0], [3, 1]];
+  const curve = smooth(pts, 4);
+  assert.equal(curve.length, 13);
+  for (const p of pts) assert.ok(curve.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 1e-9), 'the curve passes through every point');
+  assert.deepEqual(smooth([[0, 0], [1, 1]]), [[0, 0], [1, 1]], 'two points stay a straight line');
+  assert.deepEqual(simplify([[0, 0], [1, 0.01], [2, 0], [3, 2], [4, 0]], 0.1), [[0, 0], [2, 0], [3, 2], [4, 0]]);
+});

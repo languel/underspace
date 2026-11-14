@@ -37,5 +37,24 @@ export function showMenu(items, x, y, host = document.body) {
     e.stopPropagation();
   });
 }
+// A popover holds controls. build() -> nodes; refresh() rebuilds it in place
+// unless a field in it is being typed in.
+export function showPopover(build, x, y) {
+  closeMenu();
+  const el = h('div', 'menu popover props');
+  el.append(...build());
+  document.body.append(el);
+  const r = el.getBoundingClientRect();
+  el.style.left = Math.max(4, Math.min(x, innerWidth - r.width - 4)) + 'px';
+  el.style.top = Math.max(4, Math.min(y, innerHeight - r.height - 4)) + 'px';
+  el.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') closeMenu(); });
+  open = el;
+  return {
+    refresh() {
+      if (open !== el || (el.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) return;
+      el.replaceChildren(...build());
+    },
+  };
+}
 addEventListener('pointerdown', (e) => { if (open && !open.contains(e.target)) closeMenu(); }, true);
 addEventListener('blur', closeMenu);
