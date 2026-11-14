@@ -919,6 +919,32 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   throws every frame ("Cannot access … before initialization"). The frame
   guard keeps the page alive and ⌥D shows the error; check it after
   changing `walk()`.
+- **One editor, first pass: the manner of the tools.**
+  - Sculpt is a stack in the toolbar: its button shows the kind in use,
+    and opens the ten kinds (each has its own glyph, `sc.*` in
+    `icons.js`). A stack's member may be one tool in several kinds:
+    `pick()` on the action says which is in use; a tool action with its
+    own `run` keeps it.
+  - The ring of tools (Shift+Space, `ring.tools`; `openToolRing` in
+    `main.js`, drawn by `showPie`): the members of the current tool's
+    stack, or else one of each. Hold, move toward one, let go; or open
+    it from the palette and click. Escape closes it.
+  - Sculpt in a target (`sculptIn3d`, `sculptMove3d`): the same tools,
+    run on the screen. A point is `[sx, sy, ms, pressure, x, y, z]`; the
+    tools pass on what follows pressure and interpolate it for points
+    they add (`ink/sculpt.js`), and after each pass a point goes back
+    into the scene on the plane facing the camera through where it was.
+    Meshes too: their corners move and none are added (`MESH_SCULPTS`:
+    push, grab, pinch, twist, jitter, smooth; smooth takes a corner's
+    neighbours from the edges, `e.mean`). With something selected in the
+    scene only that is sculpted.
+  - Feedback: the brush ring is its reach and the disc inside it its
+    strength; dashed while Alt inverts, heavier while it works. Beside
+    the pointer, the tool in hand (`#toolmark`): its glyph (the opposite
+    sculpt kind while Cmd is held) and the stroke and fill it will make.
+  - Control points in any tool (`'`, `view.points`, the setting
+    `showPoints`): shown small and not picked; the sculpt brush marks the
+    ones in its reach.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a
@@ -978,8 +1004,31 @@ points and segments in 3D, guides; (3) grease pencil strokes: pressure as
 radius in a screen-space ribbon, fills of closed strokes (earcut), from
 threegrease's renderer; (4) Poly Build (`src/tools/polytool.ts`): a mesh
 kind in targets, built by clicking, with faces, extrude and welds, joined
-to strokes; (5) then events and points in 3D, and the rest of
-threegrease's edit and sculpt modes as they are asked for.
+to strokes; (5) done: events and points in 3D.
+
+**One editor (the owner, 14 Nov 2026).** Before more of threegrease's
+modes, the three sources become one thing: "Sketchpad in 3D, that can
+still sculpt and transform the geometry while composing and performing
+the graphical scores". Sketchpad is the north star (what you draw
+connects and holds, and every mark is an object with code); AMS gives the
+manner of the tools (the sculpt dropdown, the ring of tools at the
+pointer, properties where you work, control points shown on demand);
+threegrease gives what the tools do in 3D (the magnet, sculpt over any
+kind of point, Poly Build, edit operations). The rule that unifies them:
+**one tool, wherever the pointer is.** A tool is not "2D" or "3D": the
+space under the pointer decides how its result is placed (on the canvas;
+in a target, by the magnet and the drawing plane), and what it works on
+is points (a line's, a mesh's corners), whatever owns them. Steps:
+(a) done: the manner (below); (b) joints in targets, so lines that touch
+in 3D connect and hold as they do on the canvas (the solver in
+`joints.js` is 2D: it needs a rigid motion in 3D, or a first version
+that only keeps the points together); (c) edit operations on points in
+both spaces under the same keys (delete and dissolve, subdivide, join,
+cut; threegrease `editops.ts`, `polyops.ts`); (d) the selection of
+points, edges and faces as one thing the transform (G, R, S), sculpt and
+the operations all read; (e) sculpt tools and brushes as code you can
+write (AMS's panels), then performance: tools and their settings as
+things a score can drive.
 
 **The owner's order (14 Nov 2026):** first a comprehensive score and
 timeline like AMS's, worked on autonomously with commits at natural

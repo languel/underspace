@@ -25,7 +25,7 @@ export function createPoints(layer) {
     if (tip.parentNode !== layer) layer.prepend(tip);
     shown.forEach((h, n) => {
       const el = layer.children[n + 1];
-      el.className = (picked.has(key(h.id, h.i)) ? 'on' : '') + (h.i === 0 ? ' first' : '');
+      el.className = (picked.has(key(h.id, h.i)) ? 'on' : '') + (h.i === 0 ? ' first' : '') + (h.near ? ' near' : '');
       el.style.transform = `translate(${h.x.toFixed(1)}px,${h.y.toFixed(1)}px)`;
     });
   }

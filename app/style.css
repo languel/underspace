@@ -30,6 +30,21 @@ body { display: flex; background: var(--bg); color: var(--ink);
 #dots i { position: absolute; left: -4px; top: -4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 #ring { position: absolute; margin: 0; transform: translate(-50%, -50%); border: 1px solid var(--accent); border-radius: 50%; pointer-events: none; opacity: 0.7; }
 #pad[data-tool=sculpt] { cursor: none; }
+/* the brush: the ring is its reach, the disc inside its strength; dashed while Alt inverts it, solid while it works */
+#ring::after { content: ''; position: absolute; left: 50%; top: 50%; width: calc(var(--k, 0.5) * 100%); height: calc(var(--k, 0.5) * 100%); transform: translate(-50%, -50%); border-radius: 50%; background: var(--accent); opacity: 0.14; }
+#ring::before { content: ''; position: absolute; left: 50%; top: 50%; width: 3px; height: 3px; margin: -1.5px; border-radius: 50%; background: var(--accent); }
+#ring[data-mode=invert] { border-style: dashed; }
+#ring[data-down='1'] { opacity: 1; border-width: 1.5px; }
+#ring[data-down='1']::after { opacity: 0.24; }
+/* the tool in hand, beside the pointer */
+#toolmark { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 3px; padding: 2px 3px; border-radius: 6px; pointer-events: none; z-index: 12; color: var(--ink); background: color-mix(in srgb, var(--panel) 80%, transparent); box-shadow: 0 0 0 1px var(--line); opacity: 0.85; }
+#toolmark[hidden] { display: none; }
+#toolmark svg { width: 13px; height: 13px; }
+#toolmark b { width: 9px; height: 9px; box-sizing: border-box; border: 2px solid; border-radius: 2px; }
+#toolmark u { font: 11px/1 var(--mono, ui-monospace, monospace); text-decoration: none; color: var(--accent); }
+/* control points only shown (') are small and cannot be picked; the sculpt brush marks the ones in its reach */
+#handles.ghost i { left: -2px; top: -2px; width: 4px; height: 4px; border-width: 1px; opacity: 0.7; }
+#handles.ghost i.near { left: -3px; top: -3px; width: 6px; height: 6px; background: var(--accent); opacity: 1; }
 #marquee { position: absolute; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); pointer-events: none; }
 
 button, select, input, textarea { font: inherit; color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 5px; }

@@ -242,6 +242,12 @@ Magnet; Shift+M on and off; Ctrl while drawing leaves it out). Poly Build (Shift
 makes meshes in a target: click corners, click the first again to close a
 face, click an existing corner to share it, drag a corner to move it, drag
 an edge to grow a quad from it; Enter ends a run, Escape drops it.
+Sculpt (U) works in a target as on the canvas, on lines and on meshes (a
+mesh's corners move; none are added). The sculpt button in the toolbar
+holds the ten kinds; Shift+Space opens the tools of the kind in use in a
+ring at the pointer (hold, move toward one, let go). The brush ring shows
+its reach and, inside, its strength; the tool in hand is shown beside the
+pointer. `'` shows control points in any tool.
 
 ## Scores
 

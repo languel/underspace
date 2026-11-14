@@ -50,7 +50,7 @@ import { INSTRUMENTS, DEFAULT_CHANNELS } from './instruments.js';
 import { solve, crossings, measure, atU, atS, tangentS, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
-import { SCULPTS, sculptMark, effectiveSculpt } from './ink/sculpt.js';
+import { SCULPTS, MESH_SCULPTS, sculptMark, effectiveSculpt } from './ink/sculpt.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage'), pad = $('pad'), marquee = $('marquee'), dotLayer = $('dots');
@@ -137,7 +137,7 @@ function walk(space, xf) {
       else lines.push({ id: o.id, pts, color: sel ? 'accent' : st.stroke ?? (isWire(o) ? 'hot' : 'ink'), width: brushed ? (sel ? 1 : 0) : st.width ?? (isWire(o) ? 1.6 : 2.2), opacity: brushed ? 1 : st.opacity, fill: o.closed && !brushed ? st.fill : null });
       // an event keeps its look; a traveler reaching it flashes it
       if (o.role === 'event' && performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160) lines.push({ pts, color: 'hot', width: (st.width ?? 2.2) + 3, opacity: 0.6 });
-      if (tool === 'points' && !isWire(o) && !made) pointSrc.push({ o, pts: ptsOf(o), pen: penOf(o), xf });
+      if (wantPoints() && !isWire(o) && !made) pointSrc.push({ o, pts: ptsOf(o), pen: penOf(o), xf });
       const cursor = run.cursors.get(o.id);
       if (cursor) dots.push(view.toScreen(at(xf, cursor)));
       if (!blanket) { vis.set(o.id, { o, face: 'line', xf }); continue; }
@@ -189,7 +189,7 @@ function walk(space, xf) {
         if (runs) for (const r of runs) marks.push({ pts: r.pts, color, width: r.width, opacity: mst.opacity });
         else marks.push({ pts, color, width, opacity: mst.opacity });
         ink3d.push({ id: m.id, scene: o.id, pts });
-        if (tool === 'points') pointSrc.push({ o: m, pts: ptsOf(m), pen: penOf(m), scene: o.id });
+        if (wantPoints()) pointSrc.push({ o: m, pts: ptsOf(m), pen: penOf(m), scene: o.id });
         vis.set(m.id, { o: m, face: 'line', scene: o.id });
       }
       for (const j of state.objects.values()) {
@@ -686,16 +686,20 @@ function showMagnet(s, m) {
 
 // ---- the points tool --------------------------------------------------------
 
-const handles = createPoints($('handles'));
+const handlesEl = $('handles'), handles = createPoints(handlesEl);
+const wantPoints = () => tool === 'points' || settings.showPoints;
 // The handles of the selected lines, or with no line selected, of every line.
 function showPoints() {
-  if (tool !== 'points') { if (handles.shown.length) handles.set([]); return; }
+  if (!wantPoints()) { if (handles.shown.length) handles.set([]); return; }
+  // In the points tool they are handles; in any other tool (') they are only shown, and the sculpt brush marks the ones in its reach.
+  const edit = tool === 'points', reach = tool === 'sculpt' && pointer ? settings.sculptRadius : 0;
+  handlesEl.classList.toggle('ghost', !edit);
   const only = pointSrc.some((l) => state.selection.has(l.o.id)), list = [];
   for (const l of pointSrc) {
     if (only && !state.selection.has(l.o.id)) continue;
     l.pts.forEach((p, i) => {
       const q = l.scene ? view.sceneToScreen(l.scene, p) : view.toScreen(at(l.xf, p));
-      if (q) list.push({ id: l.o.id, i, x: q[0], y: q[1], p, pen: l.pen?.[i], scene: l.scene, xf: l.xf });
+      if (q) list.push({ id: l.o.id, i, x: q[0], y: q[1], p, pen: l.pen?.[i], scene: l.scene, xf: l.xf, near: reach > 0 && Math.hypot(q[0] - pointer[0], q[1] - pointer[1]) < reach });
     });
     if (list.length > 6000) break;
   }
@@ -1090,19 +1094,83 @@ const gridHere = (space, p) => gridAt(state.objects, space, p, state.grid, param
 const snapHere = (space, p) => { const g = gridHere(space, p); return g.frame ? (g.snap ? snapPoint(p, g) : p) : settings.snap ? snapPoint(p, g) : p; };
 
 const stacks = new Map(); // stack -> { b, members, current }: tools of one kind share a button
+// ---- sculpt in a 3D scene ----------------------------------------------------
+// The same tools, on the screen: every point is brushed where it is seen, and
+// goes back into the scene on the plane that faces the camera through where it
+// was (so a brush never pushes a point toward or away from the eye). A point
+// carries its place in the scene after its pressure: [sx, sy, ms, pressure, x, y, z].
+// Lines and meshes both: a mesh's corners move, and none are added.
+function sculptIn3d(s, p) {
+  const marks = new Map(), some = [...state.selection].some((id) => get(id)?.space === s.id);
+  for (const o of state.objects.values()) {
+    if (o.space !== s.id || o.locked || o.hidden || o.bind || (some && !state.selection.has(o.id))) continue;
+    if (o.kind !== 'mesh' && !(o.kind === 'line' && o.points?.length > 1)) continue;
+    const pts = [];
+    for (const [i, v] of ptsOf(o).entries()) {
+      const q = view.sceneToScreen(s.id, v);
+      if (!q) { pts.length = 0; break; }
+      pts.push([q[0], q[1], o.pen?.[i]?.[0] ?? 0, o.pen?.[i]?.[1] ?? 0.5, v[0], v[1], v[2] ?? 0]);
+    }
+    if (pts.length < 2) continue;
+    let mean = null;
+    if (o.kind === 'mesh') {
+      const nb = pts.map(() => []);
+      for (const e of edgesOf(o.faces)) { nb[e.a].push(e.b); nb[e.b].push(e.a); }
+      mean = (list, i) => (nb[i].length < 2 ? null : [nb[i].reduce((t, j) => t + list[j][0], 0) / nb[i].length, nb[i].reduce((t, j) => t + list[j][1], 0) / nb[i].length]);
+    }
+    marks.set(o.id, { o, pts, orig: pts, state: {}, changed: false, mean });
+  }
+  return { kind: 'sculpt', scene: true, s, marks, last: p, start: p, first: true, n: 0 };
+}
+function sculptMove3d(g, p, e) {
+  const boost = e.metaKey || e.ctrlKey, id = effectiveSculpt(settings.sculpt, boost), vals = settings.sculptParams[id];
+  const stroke = { x: p[0], y: p[1], dx: p[0] - g.last[0], dy: p[1] - g.last[1], radius: settings.sculptRadius, strength: settings.sculptStrength,
+    pressure: e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 1, invert: e.altKey, boost, first: g.first, start: g.start };
+  const lift = (q) => { const r = view.sceneToLocal(g.s.id, q[0], q[1], 'view', [q[4], q[5], q[6]]); return r ? [q[0], q[1], q[2], q[3], r[0], r[1], r[2]] : q; };
+  const shown = new Map();
+  for (const [mid, mk] of g.marks) {
+    const mesh = mk.o.kind === 'mesh';
+    if (mesh && !MESH_SCULPTS.has(id)) continue;
+    const out = sculptMark(id, { points: mk.pts, closed: !!mk.o.closed, path: mesh ? 'straight' : mk.o.style?.path, mean: mk.mean }, stroke, mesh ? { ...vals, detail: 0 } : vals, Math.random, mk);
+    if (out && out.every((q) => q.length >= 7) && !(mesh && out.length !== mk.pts.length)) { mk.pts = out.map(lift); mk.changed = true; }
+    if (mk.changed) shown.set(mid, { points: mk.pts.map((q) => [q[4], q[5], q[6]]), ...(mk.o.pen ? { pen: mk.pts.map((q) => [q[2] ?? 0, q[3] ?? 0.5]) } : {}) });
+  }
+  setLive(shown); dragSig = 'sculpt' + (++g.n);
+  g.last = p; g.first = false;
+}
+
+// The tool in hand, beside the pointer: its glyph (the opposite sculpt tool while
+// Cmd is held), and for a tool that makes marks, the stroke and fill they will get.
+const toolMark = $('toolmark');
+let toolMarkSig = '';
+function showToolMark(p, e) {
+  const quiet = tool === 'select' || tool === 'pan' || tool === 'points' || spaceKey || !!toolRing || (gesture && gesture.kind !== 'sculpt');
+  toolMark.hidden = quiet;
+  if (quiet) return;
+  const sc = tool === 'sculpt', id = sc ? effectiveSculpt(settings.sculpt, e.metaKey || e.ctrlKey) : null;
+  const a = sc ? { icon: 'sc.' + id } : ACTIONS.find((x) => x.tool === tool && x.bar);
+  const inks = ['draw', 'line', 'polyline', 'point', 'rect', 'ellipse', 'polygon', 'poly'].includes(tool), fills = ['rect', 'ellipse', 'polygon'].includes(tool);
+  const off = sc ? settings.sculptRadius * 0.72 + 6 : 14, sig = `${a?.icon}|${inks && settings.stroke}|${fills && settings.fill}|${sc && e.altKey}`;
+  toolMark.style.transform = `translate(${(p[0] + off).toFixed(1)}px, ${(p[1] + off).toFixed(1)}px)`;
+  if (sig === toolMarkSig) return;
+  toolMarkSig = sig;
+  toolMark.innerHTML = (a ? icon(a.icon) : '') + (inks ? `<b style="border-color:${settings.stroke};background:${fills && settings.fill ? settings.fill : 'transparent'}"></b>` : '') + (sc && e.altKey ? '<u>−</u>' : '');
+}
+
 function setTool(name) {
   if (name !== 'poly' && build) { build = null; view.setPreview(null); }
   if (name !== 'polyline' && poly) finishPoly(true);
   tool = name;
   for (const b of document.querySelectorAll('[data-tool]')) b.setAttribute('aria-pressed', String(b.dataset.tool === name));
   for (const [key, st] of stacks) {
-    const m = st.members.find((a) => a.tool === name);
+    const m = st.members.find((a) => a.tool === name && (a.pick?.() ?? true));
     st.b.setAttribute('aria-pressed', String(!!m));
-    if (m && m !== st.current) { st.current = m; paintStack(st); setSetting('stacks', { ...settings.stacks, [key]: name }); }
+    if (m && m !== st.current) { st.current = m; paintStack(st); if (settings.stacks[key] !== name) setSetting('stacks', { ...settings.stacks, [key]: name }); }
   }
   pad.dataset.tool = name;
   if (name !== 'points') { handles.clear(); handles.hover(null); }
   if (name !== 'sculpt') ring.hidden = true;
+  toolMark.hidden = true; toolMarkSig = '';
 }
 function showMarquee(a, b) {
   marquee.hidden = false;
@@ -1192,6 +1260,8 @@ pad.addEventListener('pointerdown', (e) => {
     gesture = { kind: 'resize', id: one.o.id, k: one.xf.k, rect: { ...one.o.rect }, start: p, next: null }; return;
   }
   if (tool === 'sculpt') {
+    const s3 = spaceAt(p[0], p[1]);
+    if (s3.kind === 'scene') { gesture = sculptIn3d(s3, p); return; }
     // Sculpt the selected lines, or with none selected, every line in this space.
     const s = spaceAt(p[0], p[1], true), marks = new Map();
     for (const l of state.objects.values()) {
@@ -1250,11 +1320,13 @@ pad.addEventListener('pointermove', (e) => {
     touches.set(e.pointerId, p);
   }
   ring.hidden = tool !== 'sculpt';
-  if (tool === 'sculpt') ring.style.cssText = `left:${p[0]}px;top:${p[1]}px;width:${settings.sculptRadius * 2}px;height:${settings.sculptRadius * 2}px`;
+  if (tool === 'sculpt') { ring.style.cssText = `left:${p[0]}px;top:${p[1]}px;width:${settings.sculptRadius * 2}px;height:${settings.sculptRadius * 2}px;--k:${settings.sculptStrength}`; ring.dataset.mode = e.altKey ? 'invert' : ''; ring.dataset.down = gesture?.kind === 'sculpt' ? '1' : ''; }
+  showToolMark(p, e);
   if (!gesture && poly) previewPoly(p);
   if (!gesture && build && tool === 'poly') buildPreview(p);
   if (!gesture) { pad.dataset.over = portAt(p[0], p[1]) ? 'port' : ''; if (tool === 'points') handles.hover(handles.at(p[0], p[1])); return; }
   const g = gesture;
+  if (g.kind === 'sculpt' && g.scene) { sculptMove3d(g, p, e); return; }
   if (g.kind === 'sculpt') {
     const a = toSpace(g.s, g.last[0], g.last[1]), b = toSpace(g.s, p[0], p[1]), c = toSpace(g.s, g.start[0], g.start[1]);
     const boost = e.metaKey || e.ctrlKey, id = effectiveSculpt(settings.sculpt, boost);
@@ -1390,6 +1462,16 @@ function endGesture(e) {
     if (x1 - x0 > 3 || y1 - y0 > 3) for (const h of handles.within(x0, y0, x1, y1)) handles.picked.add(handles.key(h.id, h.i));
     else if (!g.add && state.selection.size) call('select.set', { ids: [] }); // a click on nothing: all lines' points again
     dragSig = 'picked' + handles.picked.size + Math.random();
+    return;
+  }
+  if (g.kind === 'sculpt' && g.scene) {
+    setLive(null); dragSig = '';
+    const changed = [...g.marks.values()].filter((mk) => mk.changed);
+    if (changed.length) batch(() => { for (const mk of changed) {
+      const at = mk.pts.map((q) => [round(q[4]), round(q[5]), round(q[6])]);
+      if (mk.o.kind === 'mesh') call('mesh.set', { id: mk.o.id, verts: at });
+      else call('line.set', { id: mk.o.id, points: at, ...(mk.o.pen ? { pen: mk.pts.map((q) => [Math.round(q[2] ?? 0), +(q[3] ?? 0.5).toFixed(3)]) } : {}) });
+    } });
     return;
   }
   if (g.kind === 'sculpt') {
@@ -1674,15 +1756,17 @@ const ACTIONS = [
   ...POINT_KINDS.map((k) => ({ id: 'glyph.' + k, title: GLYPH_TITLE[k], short: k, icon: 'g.' + k, group: 'role', menu: 'Point', when: (c) => c.sel.some((o) => o.kind === 'point' || o.kind === 'joint'), on: () => [...state.selection].map(get).some((o) => o?.glyph === k), run: (c) => setGlyph(c.sel.filter((o) => o.kind === 'point' || o.kind === 'joint'), k) })),
   { id: 'quant.toggle', title: 'Quantize sliding to the beat', icon: 'grid', keys: 'q', group: 'play', menu: 'Quantize', on: () => settings.quantOn, run: () => setSetting('quantOn', !settings.quantOn) },
   ...[[1 / 16, '1/16 beat', 16], [1 / 8, '1/8 beat', 8], [1 / 4, '1/4 beat', 4], [1 / 3, '1/3 beat (triplets)', 3], [1 / 2, '1/2 beat', 2], [1, 'a beat', 1], [4, 'a bar of 4', 'bar']].map(([q, title, key]) => ({ id: 'quant.' + key, title: `Quantize to ${title}`, short: title, icon: 'grid', group: 'play', menu: 'Quantize', on: () => settings.quantOn && Math.abs(settings.quant - q) < 1e-9, run: () => { setSetting('quant', q); setSetting('quantOn', true); } })),
+  { id: 'ring.tools', title: 'Tools in a ring at the pointer (hold, move, let go)', icon: 'ring', keys: 'shift+space', group: 'tool', run: () => openToolRing(false) },
+  { id: 'view.points', title: 'Show control points', icon: 'points', keys: "'", group: 'show', menu: true, on: () => settings.showPoints, run: () => setSetting('showPoints', !settings.showPoints) },
   { id: 'magnet.toggle', title: 'Magnet in 3D', icon: 'magnet', keys: 'shift+m', group: 'plane', menu: 'Magnet', on: () => settings.magnet !== 'off', run: () => { if (settings.magnet !== 'off') { setSetting('magnetLast', settings.magnet); setSetting('magnet', 'off'); } else setSetting('magnet', settings.magnetLast || 'auto'); } },
   ...MAGNETS.filter((m) => m !== 'off').map((m) => ({ id: 'magnet.' + m, title: `Magnet: ${MAGNET_TITLE[m]}`, short: MAGNET_TITLE[m], icon: 'magnet', group: 'plane', menu: 'Magnet', on: () => settings.magnet === m, run: () => setSetting('magnet', m) })),
   { id: 'view.crossings', title: 'Show where lines cross', icon: 'crossing', group: 'show', menu: true, when: (c) => !c.hit, on: () => settings.showCrossings, run: () => setSetting('showCrossings', !settings.showCrossings) },
-  { id: 'tool.sculpt', title: 'Sculpt', icon: 'sculpt', keys: 'u', group: 'tool', bar: 'tools', tool: 'sculpt' },
+  { id: 'tool.sculpt', title: 'Sculpt', icon: 'sculpt', keys: 'u', group: 'tool', tool: 'sculpt' },
   { id: 'sculpt.smaller', title: 'Sculpt: smaller', keys: '[', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptRadius', Math.max(6, Math.round(settings.sculptRadius / 1.2))) },
   { id: 'sculpt.larger', title: 'Sculpt: larger', keys: ']', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptRadius', Math.min(400, Math.round(settings.sculptRadius * 1.2))) },
   { id: 'sculpt.weaker', title: 'Sculpt: weaker', keys: 'shift+{', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptStrength', Math.max(0.05, +(settings.sculptStrength - 0.1).toFixed(2))) },
   { id: 'sculpt.stronger', title: 'Sculpt: stronger', keys: 'shift+}', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptStrength', Math.min(1, +(settings.sculptStrength + 0.1).toFixed(2))) },
-  ...Object.entries(SCULPTS).map(([id, t]) => ({ id: 'sculpt.' + id, title: `Sculpt: ${t.label}`, short: t.label, icon: 'sculpt', group: 'brush', menu: 'Sculpt', menuWhen: (c) => c.lines.some(flatLine), on: () => settings.sculpt === id && tool === 'sculpt', run: () => { setSetting('sculpt', id); setTool('sculpt'); } })),
+  ...Object.entries(SCULPTS).map(([id, t]) => ({ id: 'sculpt.' + id, title: `Sculpt: ${t.label}`, short: t.label, icon: 'sc.' + id, group: 'tool', bar: 'tools', stack: 'sculpt', tool: 'sculpt', pick: () => settings.sculpt === id, menu: 'Sculpt', menuWhen: (c) => c.lines.some(flatLine), on: () => settings.sculpt === id && tool === 'sculpt', run: () => { setSetting('sculpt', id); setTool('sculpt'); } })),
   { id: 'tool.note', title: 'Note', icon: 'note', keys: 'n', group: 'tool', bar: 'tools', tool: 'note' },
   { id: 'tool.code', title: 'Code container', icon: 'box', keys: 'b', group: 'tool2', bar: 'tools', tool: 'code', stack: 'object' },
   // roles: the same key means "tool" with nothing selected and "make this one" with a selection
@@ -1832,7 +1916,7 @@ const ACTIONS = [
   { id: 'snap', title: 'Snap to the grid', icon: 'grid', keys: "mod+shift+'", group: 'panel', menu: true, when: (c) => !c.hit, on: () => settings.snap, run: () => setSetting('snap', !settings.snap) },
   { id: 'clean', title: 'Hide the interface', icon: 'clean', keys: ['tab', 'alt+z', 'mod+.'], group: 'panel', run: () => document.body.classList.toggle('clean') },
 ];
-for (const a of ACTIONS) if (a.tool) a.run = () => setTool(a.tool);
+for (const a of ACTIONS) if (a.tool) a.run ??= () => setTool(a.tool);
 
 const SYMBOL = { mod: '⌘', shift: '⇧', alt: '⌥', backspace: '⌫', enter: '↵', escape: 'esc', arrowleft: '←', arrowright: '→', arrowup: '↑', arrowdown: '↓', tab: 'tab' };
 const keysOf = (a) => [a.keys ?? []].flat();
@@ -1892,7 +1976,7 @@ function island(el, name) {
     }
     el.append(b);
   }
-  for (const [key, st] of stacks) { st.current = st.members.find((a) => a.tool === settings.stacks[key]) ?? st.current; paintStack(st); }
+  for (const [key, st] of stacks) { st.current = st.members.find((a) => a.tool === settings.stacks[key] && (a.pick?.() ?? true)) ?? st.members.find((a) => a.pick?.()) ?? st.current; paintStack(st); }
 }
 function paintStack(st) {
   const a = st.current, key = showKey(a);
@@ -1911,6 +1995,8 @@ function toolPopover(name, anchor) {
 }
 onChange(() => pop?.refresh());
 onSettings(() => pop?.refresh());
+// a stack whose members are one tool in several kinds (sculpt) shows the kind in use
+onSettings(() => { for (const st of stacks.values()) { const m = st.members.find((a) => a.pick?.()); if (m && m !== st.current) { st.current = m; paintStack(st); } } });
 
 // An island moves by its grip and stays where it is put; double-click the
 // grip to send it home.
@@ -2229,6 +2315,34 @@ pad.addEventListener('contextmenu', (e) => {
 
 // Keys: the first action bound to the key whose context holds.
 // With Alt (Option) a Mac types another character (Alt+T is †): read the key that was pressed instead.
+// ---- the ring of tools at the pointer (Shift+Space, after AMS's radial menu) ----
+// The tools of the kind in use: the members of the current tool's stack (the
+// sculpt tools while sculpting, the lines while drawing), or else one of each
+// stack. Hold the keys, move toward one, let go; or open it, then click.
+let toolRing = null;
+function toolRingItems() {
+  const mine = [...stacks.values()].find((st) => st.members.some((a) => a.tool === tool));
+  if (mine && mine.members.length > 2) return mine.members;
+  return ACTIONS.filter((a) => a.bar === 'tools' && a.tool && (!a.stack || stacks.get(a.stack)?.current === a));
+}
+function openToolRing(held) {
+  if (toolRing || gesture) return;
+  const items = toolRingItems(), at = pointer ?? [stage.clientWidth / 2, stage.clientHeight / 2];
+  const r = Math.max(62, Math.ceil((items.length * 36) / (2 * Math.PI))), x = Math.max(r + 20, Math.min(stage.clientWidth - r - 20, at[0])), y = Math.max(r + 20, Math.min(stage.clientHeight - r - 40, at[1]));
+  const pie = showPie(stage, items.map((a) => ({ title: a.short ?? a.title, icon: a.icon })), x, y, r);
+  const move = (e) => { const p = local(e); toolRing.choice = pie.at(p[0], p[1]); };
+  const down = (e) => { e.preventDefault(); e.stopPropagation(); move(e); closeToolRing(true); };
+  addEventListener('pointermove', move, true); addEventListener('pointerdown', down, true);
+  toolRing = { pie, items, held, choice: -1, off() { removeEventListener('pointermove', move, true); removeEventListener('pointerdown', down, true); } };
+}
+function closeToolRing(take) {
+  const t = toolRing;
+  if (!t) return;
+  toolRing = null; t.off(); t.pie.close();
+  const a = take ? t.items[t.choice] : null;
+  if (a) a.run(context());
+}
+
 const CODE_KEY = { Comma: ',', Period: '.', Semicolon: ';', Slash: '/', BracketLeft: '[', BracketRight: ']', Quote: "'", Minus: '-', Equal: '=', Backslash: '\\' };
 const baseKey = (e) => (e.altKey && /^(Key|Digit)./.test(e.code ?? '') ? e.code.slice(-1).toLowerCase() : e.altKey && CODE_KEY[e.code] ? CODE_KEY[e.code] : e.key === ' ' ? 'space' : e.key.toLowerCase());
 const keyOf = (e) => [(e.metaKey || e.ctrlKey) && 'mod', e.shiftKey && 'shift', e.altKey && 'alt', baseKey(e)].filter(Boolean).join('+');
@@ -2236,6 +2350,8 @@ addEventListener('keydown', (e) => {
   if (poly && (e.key === 'Enter' || e.key === 'Escape')) { finishPoly(e.key === 'Enter'); e.preventDefault(); return; }
   if (build && (e.key === 'Enter' || e.key === 'Escape' || e.key === 'Backspace')) { buildKey(e.key); e.preventDefault(); return; }
   if (e.target.closest?.('input, textarea, select, .menu')) return;
+  if (e.key === ' ' && e.shiftKey) { if (!toolRing) openToolRing(true); e.preventDefault(); return; }
+  if (e.key === 'Escape' && toolRing) { closeToolRing(false); e.preventDefault(); return; }
   if (e.key === ' ') { if (!spaceKey) { spaceUsed = false; spaceAt0 = performance.now(); } spaceKey = true; pad.dataset.pan = '1'; e.preventDefault(); return; }
   const k = keyOf(e), c = context();
   if (k === 'mod+c' && !c.sel.length) return; // let the browser copy
@@ -2243,6 +2359,7 @@ addEventListener('keydown', (e) => {
   if (a) { e.preventDefault(); a.run(c, e); }
 });
 addEventListener('keyup', (e) => {
+  if (toolRing?.held && (e.key === ' ' || e.key === 'Shift')) { closeToolRing(true); return; }
   if (e.key !== ' ' || !spaceKey) return;
   spaceKey = false; delete pad.dataset.pan;
   if (!spaceUsed && performance.now() - spaceAt0 < 400 && canPlay()) togglePlay(); // a tap, not a hold

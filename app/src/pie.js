@@ -7,10 +7,10 @@
 
 import { icon } from './icons.js';
 
-const RADIUS = 62, DEAD = 20;
+const DEAD = 20;
 
 // items: [{ title, icon }]. Returns { at(x, y) -> index or -1 (and highlights it), close() }.
-export function showPie(host, items, x, y) {
+export function showPie(host, items, x, y, RADIUS = 62) {
   const el = document.createElement('div');
   el.className = 'pie';
   el.style.transform = `translate(${x}px, ${y}px)`;
@@ -18,6 +18,7 @@ export function showPie(host, items, x, y) {
   centre.className = 'pie-centre';
   const tip = document.createElement('span');
   tip.className = 'pie-tip';
+  tip.style.top = `${RADIUS + 30}px`;
   el.append(centre, tip);
   const n = items.length, step = (Math.PI * 2) / n;
   const buttons = items.map((it, i) => {

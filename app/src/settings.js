@@ -21,6 +21,7 @@ export const DEFAULTS = {
   smooth: true, simplify: 1.5,          // new lines: drawn smooth; points within this many pixels of the line are dropped
   codePreset: 'osc', scoreBrush: 'glissando', targetPlane: 'view', // what the object tools make
   islands: {},          // where toolbars were dragged to: id -> [x, y]
+  showPoints: false,    // control points shown in every tool (')
   stacks: {},           // the tool each stack last used
   panel: 'code', panelOpen: false,
   assistBase: 'http://127.0.0.1:11434', assistModel: '',
