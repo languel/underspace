@@ -204,3 +204,12 @@ div.menu-item { cursor: default; }
 .palette-list { margin-top: 4px; }
 .palette-note { margin: 0; padding: 0 9px; color: var(--muted); white-space: pre-wrap; }
 .palette-note:not(:empty) { padding: 5px 9px 3px; }
+
+/* the hold menu: a ring of glyphs around the pointer */
+.pie { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; z-index: 30; }
+.pie-centre { position: absolute; left: -16px; top: -16px; width: 32px; height: 32px; border-radius: 50%; border: 1px dashed var(--muted); opacity: 0.6; }
+.pie-item { position: absolute; left: -15px; top: -15px; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; color: var(--ink); background: var(--panel); box-shadow: 0 0 0 1px var(--line), 0 2px 8px rgba(0,0,0,.18); }
+.pie-item svg { width: 16px; height: 16px; }
+.pie-item.on { color: var(--bg); background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pie-tip { position: absolute; left: 0; top: 92px; transform: translateX(-50%); padding: 1px 7px; border-radius: 4px; font-size: 11px; white-space: nowrap; color: var(--ink); background: var(--panel); box-shadow: 0 0 0 1px var(--line); }
+.pie-tip:empty { display: none; }

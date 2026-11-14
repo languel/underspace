@@ -32,6 +32,7 @@ import { icon } from './icons.js';
 import { createPoints, without } from './points.js';
 import { createModal, apply, applyRect } from './transform.js';
 import { snapPoints, snapBox, toSVG, toP5 } from './selection.js';
+import { showPie, recognize } from './pie.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
 import { SCULPTS, sculptMark, effectiveSculpt } from './ink/sculpt.js';
@@ -445,6 +446,53 @@ function copyJSON(c) {
 }
 const clip = (text) => navigator.clipboard?.writeText(text);
 
+// ---- the hold menu: hold still while drawing to turn the stroke into something --
+
+// What the ring offers, clockwise from the top; each is an action, so it also has a key, a menu entry and a palette entry.
+const PIE = ['role.path', 'attach.traveler', 'line.travelNearest', 'line.toEvent', 'line.toShape', 'line.toTarget', 'line.toCode', 'line.straighten', 'simplify.strongly'];
+const HOLD_MS = 450;
+let holdTimer = 0;
+function armHold(g) {
+  clearTimeout(holdTimer);
+  if (g.wire) return;
+  holdTimer = setTimeout(() => {
+    if (gesture !== g || g.pie) return;
+    // the stroke so far, as if it were a line already, for the actions to judge
+    const line = { id: '', kind: 'line', role: 'ink', points: g.pts, off: [0, 0], space: g.s.id }, c = { ...context(), sel: [line], one: line, lines: [line], shapes: [], groups: [], hit: line };
+    let len = 0;
+    for (let i = 1; i < g.pts.length; i++) len += Math.hypot(g.pts[i][0] - g.pts[i - 1][0], g.pts[i][1] - g.pts[i - 1][1]);
+    if (len / unitsPerPx(g.s) < 12) return;
+    const items = PIE.map((id, i) => [ACTIONS.find((a) => a.id === id), i]).filter(([a]) => a && allowed(a, c));
+    if (!items.length) return;
+    g.pie = showPie(stage, items.map(([a]) => ({ title: a.title, icon: a.icon })), g.last[0], g.last[1]);
+    g.pie.items = items.map(([, i]) => i);
+    g.choice = -1;
+  }, HOLD_MS);
+}
+// A line's own box (no padding), in its space.
+function boxOf(o) {
+  const pts = ptsOf(o);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+  return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
+}
+// Replace flat lines by shapes made from their boxes.
+function linesTo(c, make) {
+  const out = batch(() => {
+    const made = [];
+    for (const l of c.lines.filter(flatLine)) {
+      const v = vis.get(l.id), min = 24 * view.unitsPerPx() / (v?.xf?.k ?? 1), r = boxOf(l), extra = make(l, r);
+      if (!extra) continue;
+      const rect = { cx: round(r.cx), cy: round(r.cy), w: round(Math.max(min, r.w)), h: round(Math.max(min, r.h)), ...extra.rect };
+      made.push(call('shape.add', { space: l.space, rect, shape: extra.shape ?? 'rect', role: extra.role, ...(extra.role === 'code' ? { preset: settings.codePreset } : {}), ...(extra.role === 'visual' && l.style?.stroke ? { style: { stroke: l.style.stroke } } : {}) }));
+      call('object.remove', { ids: [l.id] });
+    }
+    if (made.length) call('select.set', { ids: made });
+    return made;
+  });
+  return out;
+}
+
 // ---- gestures: what a press means depends on what is under it --------------
 
 let tool = 'select';
@@ -631,8 +679,11 @@ pad.addEventListener('pointermove', (e) => {
   if (g.kind === 'pan') {
     const u = view.unitsPerPx();
     view.cam.cx -= (p[0] - g.last[0]) * u; view.cam.cy += (p[1] - g.last[1]) * u; g.last = p;
+  } else if (g.kind === 'draw' && g.pie) {
+    g.choice = g.pie.at(p[0], p[1]);
   } else if (g.kind === 'draw') {
     if (Math.hypot(p[0] - g.last[0], p[1] - g.last[1]) < 1.5) return;
+    armHold(g);
     const q = toSpace(g.s, p[0], p[1]);
     if (!q) return;
     // Pressure from a pen; with a mouse, a slower hand presses harder.
@@ -694,6 +745,7 @@ function commitCam() {
 }
 
 function cancelGesture() {
+  gesture?.pie?.close(); clearTimeout(holdTimer);
   gesture = null; marquee.hidden = true; view.setPreview(null); setDrag(null); setLive(null); dragSig = ''; orbit = null;
 }
 
@@ -710,6 +762,7 @@ function shapeIn3d(g) {
 
 function endGesture(e) {
   touches.delete(e.pointerId);
+  clearTimeout(holdTimer);
   const g = gesture;
   gesture = null;
   marquee.hidden = true;
@@ -741,7 +794,12 @@ function endGesture(e) {
     // Keep the points that carry the shape; the curve through them is drawn smooth.
     const keep = g.s.kind === 'scene' ? g.pts.map((_, i) => i) : simplifyIndex(g.pts, settings.simplify * unitsPerPx(g.s));
     const brush = !g.wire && settings.brush && g.s.kind !== 'scene' ? { brush: { id: settings.brush, params: settings.brushParams[settings.brush] ?? {} } } : {};
-    if (g.pts.length > 1 || !g.wire) call('line.add', { space: g.s.id, points: keep.map((i) => g.pts[i].map(round)), tol: round(tol), ...(g.wire ? {} : { pen: keep.map((i) => g.pen[i]), ...newStyle(false), ...brush }) });
+    const add = () => call('line.add', { space: g.s.id, points: keep.map((i) => g.pts[i].map(round)), tol: round(tol), ...(g.wire ? {} : { pen: keep.map((i) => g.pen[i]), ...newStyle(false), ...brush }) });
+    // Held, and let go on a glyph of the ring: the stroke becomes that, in one step.
+    const pick = g.pie ? PIE.map((id) => ACTIONS.find((a) => a.id === id))[g.pie.items[g.choice ?? -1] ?? -1] : null;
+    g.pie?.close();
+    if (pick) batch(() => { const id = add(); call('select.set', { ids: [id] }); pick.run(context()); });
+    else if (g.pts.length > 1 || !g.wire) add();
   } else if (g.kind === 'line') {
     view.setPreview(null);
     const flat = g.s.kind !== 'scene', pts = [g.a, g.b].map((q) => q.map((v, i) => round(flat && i < 2 ? snap(v) : v)));
@@ -977,6 +1035,13 @@ const ACTIONS = [
   { id: 'attach.event', title: 'Attach an event here', icon: 'event', group: 'attach', menu: true, when: (c) => c.lines.length === 1 && flatLine(c.lines[0]),
     run: (c) => { const l = c.lines[0], { s, at: q } = onLineAt(l, c.p), size = round(26 * unitsPerPx(s)); call('shape.add', { space: l.space, role: 'event', shape: 'ellipse', rect: { cx: round(q[0]), cy: round(q[1]), w: size, h: size } }); } },
   { id: 'attach.nearest', title: 'Attach to the nearest line', icon: 'path', group: 'attach', menu: true, when: (c) => c.shapes.length && c.shapes.every((o) => o.kind === 'shape' && get(o.space)?.role !== 'target') && [...state.objects.values()].some((l) => flatLine(l) && l.space === c.shapes[0].space), run: attachToNearest },
+  { id: 'line.travelNearest', title: 'Travel the nearest line', icon: 'traveler', group: 'attach', menu: 'Turn into', when: (c) => c.lines.length === 1 && flatLine(c.lines[0]) && !!nearestLine(c.lines[0].space, boxOf(c.lines[0]).cx, boxOf(c.lines[0]).cy, c.lines[0].id),
+    run: (c) => { const l = c.lines[0], r = boxOf(l), near = nearestLine(l.space, r.cx, r.cy, l.id), v = vis.get(l.id), min = 14 * view.unitsPerPx() / (v?.xf?.k ?? 1); batch(() => { const id = call('traveler.add', { on: near.l.id, u: round(near.u), size: round(Math.max(min, Math.min(r.w, r.h) || Math.max(r.w, r.h))) }); call('object.remove', { ids: [l.id] }); if (id) call('select.set', { ids: [id] }); }); } },
+  { id: 'line.toEvent', title: 'Turn into an event', icon: 'event', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some(flatLine), run: (c) => linesTo(c, () => ({ role: 'event', shape: 'ellipse' })) },
+  { id: 'line.toShape', title: 'Turn into the shape it looks like', icon: 'ellipse', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some((l) => flatLine(l) && recognize(ptsOf(l))), run: (c) => linesTo(c, (l) => { const r = recognize(ptsOf(l)); return r && { role: 'visual', shape: r.shape }; }) },
+  { id: 'line.toTarget', title: 'Turn into a render target', icon: 'target', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some(flatLine), run: (c) => linesTo(c, () => ({ role: 'target' })) },
+  { id: 'line.toCode', title: 'Turn into a code container', icon: 'box', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some(flatLine), run: (c) => linesTo(c, () => ({ role: 'code' })) },
+  { id: 'line.straighten', title: 'Straighten', icon: 'straighten', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some((o) => !o.bind && o.points.length > 2), run: (c) => batch(() => { for (const l of c.lines.filter((o) => !o.bind && o.points.length > 2)) { const pts = ptsOf(l); call('line.set', { id: l.id, points: [pts[0], pts[pts.length - 1]].map((p) => p.map(round)), ...(l.pen?.length === pts.length ? { pen: [l.pen[0], l.pen[l.pen.length - 1]] } : {}) }); } }) },
   { id: 'attach.traveler', title: 'Attach a traveler here', icon: 'traveler', keys: 'a', group: 'attach', menu: true, when: (c) => c.lines.length === 1 && !c.lines[0].bind && get(c.lines[0].space)?.role !== 'target', // not inside a 3D space, for now
     run: (c) => { const l = c.lines[0], s = spaces.find((x) => x.id === l.space) ?? spaces[0], q = toSpace(s, c.p[0], c.p[1]); const id = call('traveler.add', { on: l.id, u: round(nearestU(shownPath(l), q[0], q[1])), size: round(22 * unitsPerPx(s)) }); if (id) call('select.set', { ids: [id] }); } },
   { id: 'role.code', title: 'Make code container', icon: 'code', keys: 'c', group: 'role', menu: 'Convert to', when: (c) => c.shapes.length && can(c.shapes, 'code'), run: (c) => setRole(c.shapes, 'code') },
@@ -1005,7 +1070,7 @@ const ACTIONS = [
   { id: 'copy.json', title: 'Copy', short: 'JSON', icon: 'copy', keys: 'mod+c', group: 'edit', menu: 'Copy as', when: (c) => c.sel.some((o) => !o.bind), run: copyJSON },
   { id: 'copy.svg', title: 'Copy as SVG', short: 'SVG', icon: 'visual', group: 'edit', menu: 'Copy as', when: (c) => marksOf(c).length, run: (c) => clip(toSVG(marksOf(c))) },
   { id: 'copy.p5', title: 'Copy as p5 code', short: 'p5 code', icon: 'code', group: 'edit', menu: 'Copy as', when: (c) => marksOf(c).length, run: (c) => clip(toP5(marksOf(c))) },
-  ...[['lightly', 'Lightly', 1.5], ['moderately', 'Moderately', 4], ['strongly', 'Strongly', 10]].map(([id, title, px]) => ({ id: 'simplify.' + id, title: `Simplify ${id}`, short: title, icon: 'line', group: 'edit', menu: 'Simplify', when: (c) => c.lines.some(flatLine), run: (c) => simplifyLines(c, px) })),
+  ...[['lightly', 'Lightly', 1.5], ['moderately', 'Moderately', 4], ['strongly', 'Strongly', 10]].map(([id, title, px]) => ({ id: 'simplify.' + id, title: `Simplify ${id}`, short: title, icon: 'simplify', group: 'edit', menu: 'Simplify', when: (c) => c.lines.some(flatLine), run: (c) => simplifyLines(c, px) })),
   ...[['points', 'Points to grid', 'points'], ['tidy', 'Points to grid, tidy', 'tidy'], ['topleft', 'Position: top left', 'topleft'], ['center', 'Position: centre', 'center'], ['q2', 'Quantize 2× grid', 'tidy', 2], ['q4', 'Quantize 4× grid', 'tidy', 4]].map((d) => ({ id: 'snap.' + d[0], title: `Snap: ${d[1]}`, short: d[1], icon: 'grid', group: 'edit', menu: 'Snap', when: (c) => (d[2] === 'topleft' || d[2] === 'center' ? c.sel.some((o) => !o.bind && vis.get(o.id)?.xf) : c.lines.some(flatLine)), run: (c) => snapSelection(c, d[2], d[3]) })),
   { id: 'front', title: 'Bring to front', icon: 'front', keys: 'mod+shift+]', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'front' }) },
   { id: 'forward', title: 'Bring forward', icon: 'front', keys: 'mod+]', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'forward' }) },

@@ -21,6 +21,7 @@ const GESTURES = [
   ['Tap Space', 'play or stop the scores'],
   ['G, R, S with a selection', 'grab, rotate, scale: X Y Z hold to an axis (Shift: the plane without it), type a number, Shift fine, Ctrl steps, click or Enter accepts, right-click or Esc cancels'],
   ['Points tool, G R S', 'the same, on the picked points'],
+  ['Draw, then hold still before letting go', 'a ring: move to a glyph and let go to turn the stroke into it; in the middle it stays ink'],
   ['Right-click', 'what can be done here'],
   ['Paste code on the canvas', 'a code container; a p5.js or three.js sketch runs'],
 ];

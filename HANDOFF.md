@@ -453,6 +453,23 @@ Added in an eighth pass (14 Nov 2026):
   headers), so reload hard (⌘⇧R) after changes. Whether that pane turns a
   trackpad pinch into Ctrl+wheel at all is not yet known.
 
+Added in a ninth pass (14 Nov 2026):
+
+- **The hold menu** (`src/pie.js`): while drawing, hold still for 450 ms
+  and a ring of glyphs opens at the pointer (a marking menu, glyphs with a
+  tip for the one pointed at). Let go on a glyph and the stroke becomes
+  that, in one undo step; let go in the middle and it stays ink. The ring
+  is the `PIE` list in `main.js`, each an action (so each also has a menu
+  entry under Turn into ›, a palette entry, and works on any selected
+  line): make path, attach a traveler here, travel the nearest line,
+  turn into an event, turn into the shape it looks like (a closed stroke
+  recognised as ellipse or rectangle), render target, code container,
+  straighten, simplify. Only what applies to the stroke shows. Not yet:
+  the ring for the line and shape tools, in targets beyond straighten,
+  and connectors to the nearest ports.
+- Fixed: simplifying a stroke whose ends meet dropped all its middle
+  points (`simplifyIndex` measured from a zero-length baseline).
+
 The owner asked to match Poliplan's functionality "for starters" without
 copying it. Not matched yet: writing your own brushes and sculpt tools in
 the app, rotate and scale of lines, the point and lasso-plane tools,

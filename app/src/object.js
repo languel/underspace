@@ -172,9 +172,10 @@ export function simplifyIndex(points, tol) {
   const keep = new Uint8Array(points.length), stack = [[0, points.length - 1]];
   keep[0] = keep[points.length - 1] = 1;
   while (stack.length) {
-    const [a, b] = stack.pop(), pa = points[a], pb = points[b], dx = pb[0] - pa[0], dy = pb[1] - pa[1], len = Math.hypot(dx, dy) || 1e-9;
+    const [a, b] = stack.pop(), pa = points[a], pb = points[b], dx = pb[0] - pa[0], dy = pb[1] - pa[1], len = Math.hypot(dx, dy);
     let far = -1, most = tol;
-    for (let i = a + 1; i < b; i++) { const d = Math.abs((points[i][0] - pa[0]) * dy - (points[i][1] - pa[1]) * dx) / len; if (d > most) { most = d; far = i; } }
+    // ends that meet (a closed stroke): distance from that point, not from a line through it
+    for (let i = a + 1; i < b; i++) { const d = len > 1e-9 ? Math.abs((points[i][0] - pa[0]) * dy - (points[i][1] - pa[1]) * dx) / len : Math.hypot(points[i][0] - pa[0], points[i][1] - pa[1]); if (d > most) { most = d; far = i; } }
     if (far > 0) { keep[far] = 1; stack.push([a, far], [far, b]); }
   }
   return points.map((_, i) => i).filter((i) => keep[i]);
