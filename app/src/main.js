@@ -37,6 +37,7 @@ import { createTransport } from './transport.js';
 import { createTimeline } from './timeline.js';
 import { pitch as pitchOf, step as stepOf, snap as snapOf, secPerBeat, degrees } from './music.js';
 import { midiFile, createMidiOut } from './midi.js';
+import { INSTRUMENTS, DEFAULT_CHANNELS } from './instruments.js';
 import { solve, crossings, measure, atU, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
@@ -259,18 +260,20 @@ function catchUp() {
 // What travelers, events and junctions play with: the music context, and notes that are heard, sent and recorded.
 function musicHooks() {
   const m = state.music;
-  return { pointsOf: shownPath, paramsOf, note: playNote, hold: holdNote, spb: secPerBeat(m), grid: settings.gridSize, pitch: (v) => pitchOf(v, m), step: (n, k) => stepOf(n, k, m.scale, m.root), snap: (n) => snapOf(n, m.scale, m.root) };
+  return { pointsOf: shownPath, paramsOf, note: playNote, hold: holdNote, cc: (n, v, ch = 1) => midiOut.send([0xb0 | ((ch - 1) & 15), n & 127, Math.max(0, Math.min(127, Math.round(v)))]), spb: secPerBeat(m), grid: settings.gridSize, pitch: (v) => pitchOf(v, m), step: (n, k) => stepOf(n, k, m.scale, m.root), snap: (n) => snapOf(n, m.scale, m.root) };
 }
-function playNote(midi, vel = 100, seconds = 0.3) {
+// The instrument a channel plays (the timeline's choice, else the default).
+const instrumentOf = (ch = 1) => state.music.channels?.[ch] ?? DEFAULT_CHANNELS[ch] ?? 'triangle';
+function playNote(midi, vel = 100, seconds = 0.3, ch = 1) {
   if (!Number.isFinite(midi)) return;
-  sound.note(midi, vel, seconds); midiOut.note(midi, vel, seconds);
-  if (transport.recording && transport.playing) recNotes.push({ beat: transport.beat, midi, vel, len: seconds / transport.spb });
+  sound.note(midi, vel, seconds, instrumentOf(ch)); midiOut.note(midi, vel, seconds, ch);
+  if (transport.recording && transport.playing) recNotes.push({ beat: transport.beat, midi, vel, len: seconds / transport.spb, ch });
 }
 // A note held until it is let go (an event's gate): heard, sent, and recorded with its length.
-function holdNote(midi, vel = 100) {
+function holdNote(midi, vel = 100, ch = 1) {
   if (!Number.isFinite(midi)) return { stop() {} };
-  const a = sound.hold(midi, vel), b = midiOut.hold(midi, vel), beat = transport.beat, rec = transport.recording && transport.playing;
-  return { stop() { a.stop(); b.stop(); if (rec) recNotes.push({ beat, midi, vel, len: Math.max(1 / 16, transport.beat - beat) }); } };
+  const a = sound.hold(midi, vel, instrumentOf(ch)), b = midiOut.hold(midi, vel, ch), beat = transport.beat, rec = transport.recording && transport.playing;
+  return { stop() { a.stop(); b.stop(); if (rec) recNotes.push({ beat, midi, vel, len: Math.max(1 / 16, transport.beat - beat), ch }); } };
 }
 // What was recorded becomes a clip on the timeline, starting on the beat it began.
 function endRecording() {
@@ -286,7 +289,7 @@ function playClips() {
   for (const c of state.clips.values()) {
     if (c.muted) continue;
     const at = clipDrag?.id === c.id ? clipDrag.at : c.at;
-    for (const n of c.notes) { const nb = at + n.beat; if (nb > lastBeat && nb <= b) { sound.note(n.midi, n.vel, n.len * transport.spb); midiOut.note(n.midi, n.vel, n.len * transport.spb); } }
+    for (const n of c.notes) { const nb = at + n.beat; if (nb > lastBeat && nb <= b) { sound.note(n.midi, n.vel, n.len * transport.spb, instrumentOf(n.ch)); midiOut.note(n.midi, n.vel, n.len * transport.spb, n.ch ?? 1); } }
   }
   lastBeat = b;
 }
@@ -1606,6 +1609,11 @@ timeline = createTimeline($('timeline'), {
   },
   seek,
   preview(id, at) { clipDrag = id ? { id, at } : null; },
+  // channels and the instruments they play: a menu from the timeline's head
+  instruments(x, y) {
+    const chans = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    showMenu(chans.map((c) => ({ title: `${c} · ${instrumentOf(c)}`, items: INSTRUMENTS.map((inst) => ({ title: inst, on: instrumentOf(c) === inst, run: () => { call('music.set', { channels: { [c]: inst } }); sound.note(c === 10 ? 38 : 60, 100, 0.4, inst); } })) })), x, y);
+  },
   actions: { play: () => togglePlay(), stop: () => rewind(), record: () => runAction('transport.record'), loop: () => runAction('transport.loop') },
   clipMenu(id, x, y) {
     const c = state.clips.get(id);

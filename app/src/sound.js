@@ -1,3 +1,5 @@
+import { voice } from './instruments.js';
+
 // Transport for scores. Sound is scheduled ahead on the audio clock, one
 // pass of the frame at a time. Each pass asks for the score afresh, so what
 // is drawn or changed while it plays is heard from the next pass on: the
@@ -25,32 +27,17 @@ export function compileBrush(source) {
   return f;
 }
 
-// One plucked note, now. What an event plays.
-export function note(midi, velocity = 100, seconds = 0.3) {
+// A note now, on an instrument (instruments.js). What an event plays.
+export function note(midi, velocity = 100, seconds = 0.3, instrument = 'triangle') {
   const ac = ensureAudio();
   if (ac.state === 'suspended') ac.resume();
-  const osc = ac.createOscillator(), amp = ac.createGain(), t = ac.currentTime + 0.005, level = 0.3 * Math.max(0, Math.min(127, velocity)) / 127;
-  osc.type = 'triangle'; osc.frequency.value = 440 * Math.pow(2, (midi - 69) / 12);
-  osc.connect(amp).connect(master);
-  amp.gain.setValueAtTime(0, t);
-  amp.gain.linearRampToValueAtTime(level, t + 0.005);
-  amp.gain.exponentialRampToValueAtTime(0.0005, t + Math.max(0.05, seconds));
-  osc.start(t); osc.stop(t + Math.max(0.05, seconds) + 0.05);
+  voice(ac, master, instrument, midi, velocity, ac.currentTime + 0.005, Math.max(0.05, seconds));
 }
-
 // A note held until stop() is called (an event's 'gate': as long as a traveler stays inside).
-export function hold(midi, velocity = 100) {
+export function hold(midi, velocity = 100, instrument = 'triangle') {
   const ac = ensureAudio();
   if (ac.state === 'suspended') ac.resume();
-  const osc = ac.createOscillator(), amp = ac.createGain(), t = ac.currentTime + 0.005, level = 0.25 * Math.max(0, Math.min(127, velocity)) / 127;
-  osc.type = 'triangle'; osc.frequency.value = 440 * Math.pow(2, (midi - 69) / 12);
-  osc.connect(amp).connect(master);
-  amp.gain.setValueAtTime(0, t);
-  amp.gain.linearRampToValueAtTime(level, t + 0.01);
-  amp.gain.setTargetAtTime(level * 0.6, t + 0.01, 0.3);
-  osc.start(t);
-  let done = false;
-  return { stop() { if (done) return; done = true; const e = ac.currentTime; amp.gain.cancelScheduledValues(e); amp.gain.setValueAtTime(amp.gain.value, e); amp.gain.exponentialRampToValueAtTime(0.0005, e + 0.12); osc.stop(e + 0.15); } };
+  return voice(ac, master, instrument, midi, velocity, ac.currentTime + 0.005, null);
 }
 
 const sessions = new Map(); // id -> { bus, timer, passes: [{ t0, duration }], next }

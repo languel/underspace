@@ -59,7 +59,8 @@ export function createTimeline(el, host) {
   root.sync = () => { if (document.activeElement !== root) root.value = String(Math.round(m().root)); };
   const low = num('Lowest note (MIDI)', '38px', () => m().low, (v) => host.call('music.set', { low: v })), high = num('Highest note (MIDI)', '38px', () => m().high, (v) => host.call('music.set', { high: v }));
   const range = h('span', 'tl-range'); range.append(low, h('span', '', '–'), high);
-  head.append(rewind, play, rec, loop, pos, bpm, meter, scale, root, range);
+  const inst = button('instrument', 'Instruments on each channel', (e) => { const r = inst.getBoundingClientRect(); host.instruments(r.left, r.top - 4); });
+  head.append(rewind, play, rec, loop, pos, bpm, meter, scale, root, range, inst);
   const fields = [bpm, meter, scale, root, low, high];
 
   // Where each step of the making sits across the lane: its time, pauses over 1.5 s shortened.

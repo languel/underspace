@@ -664,6 +664,13 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   `rng()` is seeded (mulberry32), so a performance from the start is the
   same each time; the junction presets use it. `cc(n, v, ch)` and
   `note(m, v, d, channel)` are available to event and junction code.
+- **Instruments** (`src/instruments.js`, an eighteenth pass): small Web
+  Audio voices (triangle, sine, square, saw, pluck, bell, pad, drums), one
+  per MIDI channel. Channel 10 is drums (the note picks kick, snare, hat or
+  tom). They are set with `music.set { channels }` or the instrument glyph
+  on the timeline's head. Defaults: 1 triangle, 2 pluck, 3 bell, 4 pad, 10
+  drums. Notes keep their channel through recording, clips and MIDI export.
+  Score brushes still make their own sound.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); audio recording; note-off at exit (IanniX's gate); scores on
   the shared transport (they still schedule their own passes); MIDI clock;

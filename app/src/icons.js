@@ -50,6 +50,7 @@ const PATHS = {
   straighten: 'M2 12h12 M2 7c2-3 4 2 6-1s4 1 6-2 M2 12v.1 M14 12v.1',
   simplify: 'M2 12l4-7 4 5 4-7 M6 5v.1 M10 10v.1',
   timeline: 'M2 4h12 M2 8h12 M2 12h12 M6 2.500v3 M10 6.500v3 M5 10.500v3',
+  instrument: 'M6 12.500V3l7-1.500v9 M6 12.500a2 2 0 11-4 0 2 2 0 014 0z M13 10.500a2 2 0 11-4 0 2 2 0 014 0z',
   rewind: 'M3 3v10 M13 3L6 8l7 5z',
   pause: 'M5 3v10 M11 3v10',
   record: 'M8 12.500a4.500 4.500 0 100-9 4.500 4.500 0 000 9z',

@@ -170,3 +170,12 @@ test('events: crossing direction, exit, lockout, launch; rng repeats from the st
   run();
   assert.equal(notes.find((m) => m !== 60 && m !== 70 && m !== 50), randomNote, 'the same random each time from the start');
 });
+
+test('channels pick instruments; recorded notes keep their channel', () => {
+  call('space.clear');
+  call('music.set', { channels: { 2: 'bell', 3: 'nonsense' } });
+  assert.equal(state.music.channels[2], 'bell');
+  assert.equal(state.music.channels[3], undefined);
+  const id = call('clip.add', { notes: [{ beat: 0, midi: 36, vel: 100, len: 0.25, ch: 10 }] });
+  assert.equal(state.clips.get(id).notes[0].ch, 10);
+});
