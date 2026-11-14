@@ -64,6 +64,7 @@ const ink = createInk($('ink'));
 const playEngine = createPlay();
 // One clock for everything that plays (transport.js); notes played while recording become a clip.
 const transport = createTransport(), midiOut = createMidiOut();
+let movedNow = new Map(); // where travelers are now (play.js), [x, y] or [x, y, z]
 let litNow = new Set(); // the nodes and events lit now (their lights: play.js)
 let recNotes = [], lastBeat = 0, lastWrap = 0, clipDrag = null, timeline = null;
 // Performance and errors (debug.js): created before the first frame, so it can catch that frame's errors.
@@ -182,6 +183,18 @@ function walk(space, xf) {
         const c = jointAt(j), d = 0.12, sel = state.selection.has(j.id), color = sel ? 'accent' : j.fix ? 'hot' : 'ink';
         for (let k = 0; k < 3; k++) { const a = [c[0], c[1], c[2] ?? 0], b = a.slice(); a[k] -= d; b[k] += d; marks.push({ pts: [a, b], color }); ink3d.push({ id: j.id, scene: o.id, pts: [a, b] }); }
         vis.set(j.id, { o: j, face: 'joint', scene: o.id });
+      }
+      // travelers on its lines: a small star where each is
+      for (const tr of state.objects.values()) {
+        if (tr.role !== 'traveler' || tr.space !== o.id || tr.kind !== 'shape') continue;
+        const c = movedNow.get(tr.id) ?? (() => { const l = get(tr.on); return l ? atU(measure(curveOf(l, ptsOf(l))), paramsOf(tr).start ?? 0) : null; })();
+        if (!c) continue;
+        const d = 0.22, sel = state.selection.has(tr.id), color = sel ? 'accent' : tr.style?.stroke ?? 'hot';
+        for (const [a, b] of [[[d, 0, 0], [-d, 0, 0]], [[0, d, 0], [0, -d, 0]], [[0, 0, d], [0, 0, -d]], [[d * 0.6, d * 0.6, 0], [-d * 0.6, -d * 0.6, 0]], [[d * 0.6, -d * 0.6, 0], [-d * 0.6, d * 0.6, 0]]]) {
+          const pts = [[c[0] + a[0], c[1] + a[1], (c[2] ?? 0) + a[2]], [c[0] + b[0], c[1] + b[1], (c[2] ?? 0) + b[2]]];
+          marks.push({ pts, color }); ink3d.push({ id: tr.id, scene: o.id, pts });
+        }
+        vis.set(tr.id, { o: tr, face: 'joint', scene: o.id });
       }
       if (guide?.scene === o.id) marks.push({ pts: [-1, 1].map((k) => guide.pivot.map((v, i) => v + guide.axis[i] * 60 * k)), color: 'hot' });
       // its 3D cursor, when the drawing plane hangs from it
@@ -411,6 +424,7 @@ function frameInner() {
   const played = dbg.time('play', () => playEngine.step(state.objects, t, transport.playing, musicHooks()));
   playClips();
   setMoved(played.moved);
+  movedNow = played.moved;
   litNow = played.lit ?? new Set();
   let playSig = 0;
   for (const [id, out] of played.out) { step.report(id, { out, error: played.errors.get(id) ?? '' }); if (out.u != null) playSig += out.x * 3 + out.y * 7; }
@@ -1297,6 +1311,7 @@ function addShape(s, make, start, end, extra = {}) {
   return batch(() => {
     const id = call('shape.add', { space: s.id, rect, shape: make.shape, role: make.role, ...(make.role === 'code' ? { preset: settings.codePreset } : make.role === 'score' ? { preset: settings.scoreBrush } : {}), ...(make.role === 'visual' ? { ...newStyle(true), ...(settings.planeBrush ? { brush: { id: settings.planeBrush, params: settings.brushParams[settings.planeBrush] ?? {} } } : {}) } : {}), ...extra });
     if (make.role === 'target' && settings.targetPlane !== 'view') call('target.set', { id, plane: settings.targetPlane });
+    if (make.role === 'target') takeInto(id); // drawn over marks, it takes them into its 3D scene
     call('select.set', { ids: [id] });
     return id;
   });
@@ -1445,7 +1460,15 @@ function context(hitId) {
   return { sel, one: sel.length === 1 ? sel[0] : null, hit, p, here, target, lines: sel.filter(isLine), shapes: sel.filter((o) => o.kind === 'shape'), groups: sel.filter((o) => o.kind === 'group') };
 }
 const ids = (list) => list.map((o) => o.id);
-const setRole = (list, role) => batch(() => { for (const o of list) call('object.role', { id: o.id, role, ...(role === 'connector' ? { tol: round(40 * view.unitsPerPx()) } : {}) }); });
+const setRole = (list, role) => batch(() => { for (const o of list) { call('object.role', { id: o.id, role, ...(role === 'connector' ? { tol: round(40 * view.unitsPerPx()) } : {}) }); if (role === 'target' && o.kind === 'shape') takeInto(o.id); } });
+// A render target over marks takes them in: the lines of its space that lie wholly inside its frame.
+function takeInto(id) {
+  const t = get(id);
+  if (!t || !isTarget(t)) return;
+  const r = t.rect, inside = (p) => Math.abs(p[0] - r.cx) <= r.w / 2 && Math.abs(p[1] - r.cy) <= r.h / 2;
+  const ids = [...state.objects.values()].filter((o) => o.kind === 'line' && !o.bind && o.space === t.space && o.points.length > 1 && ptsOf(o).every(inside)).map((o) => o.id);
+  if (ids.length) call('target.take', { id, ids });
+}
 const nudge = (c, dx, dy, e) => {
   const u = (e?.shiftKey ? 40 : 8) * view.unitsPerPx();
   if (c.sel.length) call('object.move', { ids: ids(c.sel), dx: round(dx * u), dy: round(dy * u) });
@@ -1520,7 +1543,8 @@ const ACTIONS = [
   { id: 'line.toTarget', title: 'Turn into a render target', icon: 'target', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some(flatLine), run: (c) => linesTo(c, () => ({ role: 'target' })) },
   { id: 'line.toCode', title: 'Turn into a code container', icon: 'box', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some(flatLine), run: (c) => linesTo(c, () => ({ role: 'code' })) },
   { id: 'line.straighten', title: 'Straighten', icon: 'straighten', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some((o) => !o.bind && o.points.length > 2), run: (c) => batch(() => { for (const l of c.lines.filter((o) => !o.bind && o.points.length > 2)) { const pts = ptsOf(l); call('line.set', { id: l.id, points: [pts[0], pts[pts.length - 1]].map((p) => p.map(round)), ...(l.pen?.length === pts.length ? { pen: [l.pen[0], l.pen[l.pen.length - 1]] } : {}) }); } }) },
-  { id: 'attach.traveler', title: 'Attach a traveler here', icon: 'traveler', keys: 'a', group: 'attach', menu: true, when: (c) => c.lines.length === 1 && !c.lines[0].bind && get(c.lines[0].space)?.role !== 'target', // not inside a 3D space, for now
+  { id: 'target.out', title: 'Take out of the 3D scene', icon: 'up', group: 'attach', menu: true, when: (c) => c.lines.some((l) => get(l.space)?.role === 'target'), run: (c) => { const l = c.lines.find((x) => get(x.space)?.role === 'target'); call('target.take', { id: l.space, ids: ids(c.lines.filter((x) => x.space === l.space)), out: true }); } },
+  { id: 'attach.traveler', title: 'Attach a traveler here', icon: 'traveler', keys: 'a', group: 'attach', menu: true, when: (c) => c.lines.length === 1 && !c.lines[0].bind,
     run: (c) => { const l = c.lines[0], s = spaces.find((x) => x.id === l.space) ?? spaces[0], q = toSpace(s, c.p[0], c.p[1]); const path = shownPath(l), g = gridHere(l.space, path[path.length >> 1]); const id = call('traveler.add', { on: l.id, u: round(nearestU(path, q[0], q[1])), size: round(22 * unitsPerPx(s)), ...(g.beats > 0 ? { dur: 0 } : {}) }); if (id) call('select.set', { ids: [id] }); } },
   { id: 'role.code', title: 'Make code container', icon: 'code', keys: 'c', group: 'role', menu: 'Convert to', when: (c) => c.shapes.length && can(c.shapes, 'code'), run: (c) => setRole(c.shapes, 'code') },
   { id: 'role.path', title: 'Make path', icon: 'path', keys: 'c', group: 'role', menu: 'Convert to', when: (c) => c.lines.length && can(c.lines, 'path'), run: (c) => setRole(c.lines, 'path') },

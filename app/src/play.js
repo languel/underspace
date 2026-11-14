@@ -157,6 +157,7 @@ function drawnSpeed(line, m, s) {
 const MAX_RIDERS = 64; // a traveler that splits is at most this many
 // A seeded random (mulberry32): a performance plays the same each time from the start.
 function seeded(seed = 1) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const lineNowIs3d = (objects, id) => (objects.get(id)?.points?.[0]?.length ?? 0) > 2; // a line in a render target
 let paramsHook = () => ({});
 const plain = { note() {}, cc() {}, pitch: (v) => 48 + v * 36, step: (n, k) => n + k, snap: (n) => n };
 let hooksNow = plain;
@@ -295,7 +296,7 @@ export function createPlay() {
           const trail = ride(o, rider, all, left, p, objects, measureOf, out, errors, gridSpeed);
           if (!trail.length) continue;
           const m = measureOf(rider.line), pos = atS(m, rider.s), u = m.total ? rider.s / m.total : 0;
-          if (i === 0) { moved.set(o.id, [pos[0], pos[1]]); out.set(o.id, { x: pos[0], y: pos[1], u }); } else if (!rider.gone) ghosts.push({ of: o.id, pos: [pos[0], pos[1]] });
+          if (i === 0) { moved.set(o.id, lineNowIs3d(objects, rider.line) ? [pos[0], pos[1], pos[2]] : [pos[0], pos[1]]); out.set(o.id, { x: pos[0], y: pos[1], u, ...(lineNowIs3d(objects, rider.line) ? { z: pos[2] } : {}) }); } else if (!rider.gone) ghosts.push({ of: o.id, pos: [pos[0], pos[1]] });
           if (!playing) continue;
           const lineNow = objects.get(rider.line);
           let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;

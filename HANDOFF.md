@@ -836,6 +836,15 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   with quantizing on. The point tool's nodes land on the divisions too.
   Fixed: a selected joint's centre counted as the resize corner, so
   dragging it resized it.
+- **3D, first pass:** a render target drawn (or made) over marks takes them
+  into its 3D scene (`target.take`, `takeInto`). These are the lines lying
+  wholly inside its frame; they go onto its front plane, the frame's
+  longer side `TARGET_SPAN` (8) units wide, keeping their joints and
+  travelers. Right-click › Take out of the 3D scene puts them back flat.
+  Travelers run on 3D lines (the engine already measured in 3D; `moved`
+  now carries z) and are drawn as small stars in the target. Nodes on 3D
+  lines play, as on the canvas. Brushes are dropped from lines taken in,
+  because brushes paint only the flat canvas.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a
@@ -886,6 +895,17 @@ Known gaps and shortcuts:
   stay JS, and the registry's schemas are the contract for now.
 
 ## 6. Next steps
+
+**The 3D phase, in passes** (begun 14 Nov 2026, after the score and
+timeline): (1) done: targets take marks in, travelers and nodes in 3D;
+(2) placement and the magnet from threegrease `src/tools/snapping.ts` and
+`projection.ts`: snapping drawing, points and the 3D cursor to stroke
+points and segments in 3D, guides; (3) grease pencil strokes: pressure as
+radius in a screen-space ribbon, fills of closed strokes (earcut), from
+threegrease's renderer; (4) Poly Build (`src/tools/polytool.ts`): a mesh
+kind in targets, built by clicking, with faces, extrude and welds, joined
+to strokes; (5) then events and points in 3D, and the rest of
+threegrease's edit and sculpt modes as they are asked for.
 
 **The owner's order (14 Nov 2026):** first a comprehensive score and
 timeline like AMS's, worked on autonomously with commits at natural

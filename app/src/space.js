@@ -515,6 +515,32 @@ define({
   },
 });
 
+// How wide a target's 3D scene is, in its own units, across the longer side of its frame
+// (its camera starts 13 away, with a 12-unit floor).
+export const TARGET_SPAN = 8;
+define({
+  name: 'target.take', doc: 'Put lines into a render target\'s 3D scene, on its front plane where they lie in its frame (as drawing a target over marks does); with out: true, back onto the canvas, flat, where they would show. Joints and travelers on them go with them.',
+  args: { id: T.id, ids: T.ids, out: { type: 'boolean' } }, required: ['id', 'ids'], hold: () => [],
+  run(a) {
+    const t = state.objects.get(a.id);
+    if (!t || !isTarget(t)) return [];
+    const r = t.rect, k = TARGET_SPAN / Math.max(r.w, r.h), moved = new Set();
+    for (const id of a.ids) {
+      const o = state.objects.get(id);
+      if (!isCurve(o) && !(o?.kind === 'line' && o.role === 'traveler')) continue;
+      if (!a.out && o.space === t.space) { o.points = ptsOf(o).map((p) => [round((p[0] - r.cx) * k), round((p[1] - r.cy) * k), 0]); o.space = t.id; }
+      else if (a.out && o.space === t.id) { o.points = ptsOf(o).map((p) => [round(r.cx + p[0] / k), round(r.cy + p[1] / k)]); o.space = t.space; }
+      else continue;
+      o.off = [0, 0]; delete o.brush; // brushes paint the flat canvas only
+      moved.add(id);
+    }
+    for (const o of state.objects.values()) {
+      if ((o.kind === 'joint' && o.at.every((q) => moved.has(q.id))) || (o.role === 'traveler' && moved.has(o.on))) o.space = a.out ? t.space : t.id;
+    }
+    return [...moved];
+  },
+});
+
 define({
   name: 'select.set', doc: 'Replace the selection.', args: { ids: T.ids }, required: ['ids'],
   run(a) { state.selection = new Set(a.ids.filter((id) => state.objects.has(id))); },

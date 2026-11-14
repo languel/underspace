@@ -226,6 +226,14 @@ in a frame with rows plays the row's degree of the scale; `ev.col` and
 `ev.row` say which cell. Constrain › Fit its length to the bars scales a
 curve to whole bars. The Examples panel has a Music › Grids collection.
 
+## 3D
+
+A render target is a 3D scene in a frame. Drawn over marks (or made from a
+shape over them), it takes them in: they go onto its front plane, with
+their joints and travelers, and can be orbited (Alt-drag) and drawn into in
+3D. Travelers and nodes play there as on the canvas. Right-click › Take out
+of the 3D scene puts lines back, flat.
+
 ## Scores
 
 Draw a score frame (S) and draw lines in it: across is time, up is pitch.
