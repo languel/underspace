@@ -166,8 +166,11 @@ instruments.
 
 Draw a score frame (S) and draw lines in it: across is time, up is pitch.
 Its code is a brush, chosen in the sidebar; `bpm`, `beats`, `low`, `high`,
-`scale` and `grid` are its parameters. It loops without restarting, so
-lines drawn while it plays join in on the next pass.
+`scale` and `grid` are its parameters. By default it follows the timeline:
+bpm 0 takes the timeline's tempo, low and high 0 its range, and scale -1
+its scale and root. A score plays on the transport, one pass after another
+from the start of the timeline, so pause, seek and the loop cut it and pick
+it up partway. Lines drawn while it plays join in on the next pass.
 
 ## For agents
 

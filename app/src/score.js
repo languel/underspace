@@ -31,7 +31,8 @@ function thin(points, max) {
 // -> { voices: [{ id, events: [{ time (seconds), midi, hz, gain }] }], duration }
 export function read(lines, rect, params = {}, maxEvents = 48) {
   const p = { ...DEFAULTS, ...params }, secPerBeat = 60 / Math.max(1, p.bpm), beats = Math.max(0.25, p.beats);
-  const left = rect.cx - rect.w / 2, bottom = rect.cy - rect.h / 2, steps = SCALES[Math.round(p.scale)] ?? null;
+  // steps and root, when given, are the scale (the timeline's); otherwise the scale numbered `scale`
+  const left = rect.cx - rect.w / 2, bottom = rect.cy - rect.h / 2, steps = p.steps ?? SCALES[Math.round(p.scale)] ?? null;
   const voices = [];
   for (const l of lines) {
     // only the part of the line that is inside the frame is heard
@@ -40,7 +41,7 @@ export function read(lines, rect, params = {}, maxEvents = 48) {
     const events = thin(inside, maxEvents).map((pt) => {
       let beat = ((pt[0] - left) / rect.w) * beats;
       if (p.grid > 0) beat = Math.round(beat / p.grid) * p.grid;
-      const midi = snapToScale(p.low + ((pt[1] - bottom) / rect.h) * (p.high - p.low), steps);
+      const midi = snapToScale(p.low + ((pt[1] - bottom) / rect.h) * (p.high - p.low), steps, p.root ?? 0);
       return { time: beat * secPerBeat, midi, hz: midiToHz(midi), gain: 0.7 };
     });
     // Time only runs forward: a line drawn right to left is read left to right.

@@ -120,3 +120,13 @@ test('a gate note sounds while the traveler is inside, and a traveler can go at 
   for (let t = 0.21; t <= 1.2001; t += 0.01) r = p2.step(state.objects, t, true, hooks);
   assert.ok(Math.abs(r.moved.get(tr)[0] - 7.5) < 0.4, `then slow: ${r.moved.get(tr)}`);
 });
+
+test('a score reads its lines on the timeline\'s scale and root when told to', async () => {
+  const { read } = await import('../src/score.js');
+  const rect = { cx: 0.5, cy: 0.5, w: 1, h: 1 };
+  const lines = [{ id: 'a', points: [[0, 0.52], [0.5, 0.52]] }];
+  const s = read(lines, rect, { bpm: 120, beats: 4, low: 60, high: 72, steps: degrees('Pentatonic Major'), root: 62 });
+  // 60 + 0.52 * 12 = 66.24, nearest in D pentatonic major (62 64 66 69 71): 66
+  assert.deepEqual(s.voices[0].events.map((e) => e.midi), [66, 66]);
+  assert.equal(s.duration, 2);
+});

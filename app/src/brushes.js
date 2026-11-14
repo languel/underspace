@@ -1,10 +1,12 @@
 // Brushes: the code of a score. A brush receives every line in the frame at
 // once, already read into time and pitch, and schedules sound on the audio
 // clock. The header declares the reading as parameters:
-//   bpm, beats   tempo and the length of the frame
-//   low, high    the pitch range of the frame, as MIDI notes
-//   scale        0 continuous, 1 chromatic, 2 major, 3 minor, 4 pentatonic, 5 whole tone, 6 quarter tone
+//   bpm, beats   tempo and the length of the frame; bpm 0 follows the timeline's tempo
+//   low, high    the pitch range of the frame, as MIDI notes; 0 follows the timeline's range
+//   scale        -1 the timeline's scale and root, 0 continuous, 1 chromatic, 2 major, 3 minor,
+//                4 pentatonic, 5 whole tone, 6 quarter tone
 //   grid         snap time to this many beats (0: off)
+// A score plays on the transport: pass after pass from the start of the timeline.
 //
 //   voices: [{ id, events: [{ time, midi, hz, gain }] }]   time in seconds from the start of the frame
 //   ctx:    { audio, out, t0, duration, bpm }               connect to ctx.out, schedule at ctx.t0 + time
@@ -12,11 +14,11 @@
 export const BRUSHES = {
   glissando: `// glissando
 // out: pos
-// param: bpm 90
+// param: bpm 0
 // param: beats 8
-// param: low 48
-// param: high 84
-// param: scale 0
+// param: low 0
+// param: high 0
+// param: scale -1
 // param: grid 0
 // each line is one bowed voice that follows its own shape.
 const MAX = 64;                       // voices the browser can carry comfortably
@@ -51,11 +53,11 @@ for (const v of voices.slice(0, MAX)) {
 
   pizzicato: `// pizzicato
 // out: pos
-// param: bpm 90
+// param: bpm 0
 // param: beats 8
-// param: low 48
-// param: high 84
-// param: scale 0
+// param: low 0
+// param: high 0
+// param: scale -1
 // param: grid 0
 // each mark is one plucked note, where the mark begins.
 for (const v of voices.slice(0, 200)) {
@@ -77,11 +79,11 @@ for (const v of voices.slice(0, 200)) {
 
   clusters: `// clusters
 // out: pos
-// param: bpm 90
+// param: bpm 0
 // param: beats 8
-// param: low 48
-// param: high 84
-// param: scale 0
+// param: low 0
+// param: high 0
+// param: scale -1
 // param: grid 0
 // every point of every mark is a short grain. Dense drawings become clouds.
 let n = 0;

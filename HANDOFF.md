@@ -640,6 +640,15 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   there it is a short note. Pausing lets go of every held note
   (`playEngine.quiet()`), and a held note is recorded with the length it
   sounded. Event preset: gate.
+- **Scores on the transport** (a fifteenth pass): a score no longer runs
+  its own clock. Pass k begins at k times its length on the timeline.
+  `scoreTick` (`main.js`, every 40 ms and on play) schedules passes 0.25 s
+  ahead with `sound.schedulePass`. A pass joined partway (after a pause, a
+  seek or the loop coming round) plays only what is still to come, and a
+  change of tempo or length reschedules. `sound.silence` cuts a score.
+  Brush headers default to following the timeline (bpm 0, low and high 0,
+  scale -1 for its scale and root, read through `score.js`'s new `steps`
+  and `root`). Scores keep their own values where set.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); audio recording; note-off at exit (IanniX's gate); scores on
   the shared transport (they still schedule their own passes); MIDI clock;

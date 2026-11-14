@@ -35,7 +35,7 @@ import { snapPoints, snapBox, toSVG, toP5 } from './selection.js';
 import { showPie, recognize } from './pie.js';
 import { createTransport } from './transport.js';
 import { createTimeline } from './timeline.js';
-import { pitch as pitchOf, step as stepOf, snap as snapOf, secPerBeat } from './music.js';
+import { pitch as pitchOf, step as stepOf, snap as snapOf, secPerBeat, degrees } from './music.js';
 import { midiFile, createMidiOut } from './midi.js';
 import { solve, crossings, measure, atU, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
@@ -125,7 +125,7 @@ function walk(space, xf) {
     }
     const face = Math.max(px.w, px.h) < FAR ? 'far' : (px.w > view.size.w * 0.42 || px.h > view.size.h * 0.5) ? 'near' : 'mid';
     vis.set(o.id, { o, face, px, xf, blanket });
-    if (o.role === 'score') { const pos = sound.position(o.id); if (pos >= 0 && face !== 'far') dots.push([px.l + px.w * pos, px.t, px.h]); }
+    if (o.role === 'score') { const pos = scorePos(o); if (pos >= 0 && face !== 'far') dots.push([px.l + px.w * pos, px.t, px.h]); }
     if (o.kind === 'group' && face === 'near') {
       const i = innerXf(o), inner = { k: xf.k * i.k, ox: xf.ox + i.ox * xf.k, oy: xf.oy + i.oy * xf.k };
       spaces.push({ id: o.id, kind: 'group', xf: inner, px });
@@ -185,33 +185,72 @@ function ghostsOf(list) {
 
 // ---- scores ----------------------------------------------------------------
 
+// A score's reading: its parameters, with what it leaves to the timeline (bpm 0, low or high 0, scale -1) filled in.
+function scoreParams(o) {
+  const b = blanketOf(o), p = {}, m = state.music;
+  for (const q of b.params) p[q.name] = o.params?.[q.name] ?? q.value;
+  if (!(p.bpm > 0)) p.bpm = m.bpm;
+  if (!(p.low > 0)) p.low = m.low;
+  if (!(p.high > 0)) p.high = m.high;
+  if ((p.scale ?? -1) < 0) { p.steps = degrees(m.scale); p.root = m.root; }
+  p.beats = Math.max(0.25, p.beats ?? 8);
+  return p;
+}
 // What a score will play on its next pass: the lines in its frame, read now.
 function scoreOf(id) {
   const o = get(id);
   if (!o || o.role !== 'score') return null;
-  const b = blanketOf(o), params = {};
-  for (const q of b.params) params[q.name] = o.params?.[q.name] ?? q.value;
   const lines = [...state.objects.values()].filter((l) => isLine(l) && !l.bind && l.space === o.space).map((l) => ({ id: l.id, points: run?.shown.get(l.id) ?? ptsOf(l) }));
-  return { ...readScore(lines, rectOf(o), params), source: o.code };
+  return { ...readScore(lines, rectOf(o), scoreParams(o)), source: o.code };
 }
 const scores = () => [...state.objects.values()].filter((o) => o.role === 'score');
-const play = (id) => sound.start(id, () => scoreOf(id), (error) => step.report(id, { error: error ?? '' }));
+
+// Scores play on the transport: pass k of a score begins at k times its length on the timeline,
+// so pause, seek and the loop cut it and pick it up partway. Passes are scheduled a little ahead.
+const scorePlan = new Map(); // id -> { k: the next pass to schedule, L: its length (s) }
+let scoreSet = null;         // the scores that play: ids, or null for all
+const passLen = (o) => { const p = scoreParams(o); return Math.max(0.25, (p.beats * 60) / p.bpm); };
+const scorePlaying = (o) => !o.hidden && (!scoreSet || scoreSet.has(o.id));
+function scoreTick() {
+  if (!transport.playing) return;
+  const now = transport.t, aNow = sound.audioNow();
+  for (const [id] of scorePlan) if (get(id)?.role !== 'score' || !scorePlaying(get(id))) { sound.silence(id); scorePlan.delete(id); }
+  for (const o of scores()) {
+    if (!scorePlaying(o)) continue;
+    const L = passLen(o), report = (error) => step.report(o.id, { error: error ?? '' });
+    let plan = scorePlan.get(o.id);
+    if (plan && Math.abs(plan.L - L) > 1e-6) { sound.silence(o.id); plan = null; } // its tempo or length changed
+    if (!plan) {
+      const k = Math.floor(now / L), into = now - k * L, sc = scoreOf(o.id);
+      if (sc) sound.schedulePass(o.id, sc, aNow - into, into, report);
+      plan = { k: k + 1, L };
+    }
+    while (plan.k * L - now < 0.25) { const sc = scoreOf(o.id); if (sc) sound.schedulePass(o.id, sc, aNow + (plan.k * L - now), 0, report); plan.k++; }
+    scorePlan.set(o.id, plan);
+  }
+}
+setInterval(scoreTick, 40);
+function resetScores() { sound.silenceAll(); scorePlan.clear(); }
+// How far through its pass a score is, 0..1, or -1 when it is not playing.
+const scorePos = (o) => (transport.playing && scorePlaying(o) && scorePlan.has(o.id) ? (transport.t % passLen(o)) / passLen(o) : -1);
 // Space: pause what is playing; otherwise play from where the transport is: the selected scores
 // (or all of them), the travelers and the recorded clips.
 const travelers = () => [...state.objects.values()].filter((o) => o.role === 'traveler');
 const canPlay = () => scores().length || travelers().length || state.clips.size;
 function togglePlay(c = context()) {
-  if (transport.playing) { transport.pause(); sound.stopAll(); playEngine.quiet(); endRecording(); return; }
+  if (transport.playing) { transport.pause(); resetScores(); playEngine.quiet(); endRecording(); return; }
   const chosen = c.sel.filter((o) => o.role === 'score');
-  for (const o of chosen.length ? chosen : scores()) play(o.id);
+  scoreSet = chosen.length ? new Set(chosen.map((o) => o.id)) : null;
   lastBeat = transport.beat;
   transport.play();
+  scoreTick();
 }
 // Back to the start (or the loop's start), everything at rest.
-function rewind() { sound.stopAll(); endRecording(); transport.stop(); playEngine.reset(); catchUp(); }
+function rewind() { resetScores(); endRecording(); transport.stop(); playEngine.reset(); catchUp(); }
 // Move the playhead: travelers are run there from the start, silently, so they are where they would be.
 function seek(sec) { transport.seek(sec); catchUp(); }
 function catchUp() {
+  resetScores();
   playEngine.reset();
   const t = transport.t, h = { ...musicHooks(), note() {} }, dt = Math.max(1 / 30, t / 3000);
   if (t > 0) for (let x = 0; x <= t + 1e-9; x += dt) playEngine.step(state.objects, Math.min(x, t), true, h);
@@ -258,7 +297,7 @@ const paramsOf = (o) => { const p = {}; for (const q of blanketOf(o)?.params ?? 
 let laidOut = -1; // the state version the last layout was made from
 function frame() {
   laidOut = state.version;
-  for (const id of sound.playing()) { if (get(id)?.role === 'score') step.report(id, { out: { pos: sound.position(id) } }); else sound.stop(id); }
+  for (const o of scores()) { const pos = scorePos(o); if (pos >= 0) step.report(o.id, { out: { pos } }); }
   // Travelers move and events fire before the code objects run, so their outputs are this frame's.
   transport.spb = secPerBeat(state.music);
   const t = transport.t;
@@ -1561,7 +1600,7 @@ timeline = createTimeline($('timeline'), {
   lanes() {
     const m = state.music, spb = secPerBeat(m), out = [];
     for (const o of travelers()) { const p = paramsOf(o), line = get(o.on), len = p.speed > 0 && line ? measure(shownPath(line)).total / (p.speed * settings.gridSize) : p.dur; out.push({ id: o.id, kind: 'traveler', name: o.name || 'traveler ' + o.id, at: p.at ?? 0, len: Math.max(0.25, len), repeat: p.loop !== 0 }); }
-    for (const o of scores()) { const p = paramsOf(o); out.push({ id: o.id, kind: 'score', name: o.name || 'score ' + o.id, at: 0, len: Math.max(0.25, (p.beats ?? 8) * (60 / (p.bpm ?? 90)) / spb), repeat: true }); }
+    for (const o of scores()) out.push({ id: o.id, kind: 'score', name: o.name || 'score ' + o.id, at: 0, len: passLen(o) / spb, repeat: true, muted: !scorePlaying(o) });
     for (const c of state.clips.values()) { const len = Math.max(1, ...c.notes.map((n) => n.beat + n.len)); out.push({ id: c.id, kind: 'clip', name: c.name, at: clipDrag?.id === c.id ? clipDrag.at : c.at, len, notes: c.notes, muted: c.muted }); }
     return out;
   },
@@ -1686,9 +1725,9 @@ define({ name: 'view.frame', doc: 'Show these objects; a single object is opened
 define({ name: 'view.zoom', doc: 'Zoom by a factor about the middle of the view.', args: { factor: T.num }, required: ['factor'], record: false, run: (a) => view.zoomAt(...centre(), a.factor) });
 define({ name: 'tool.set', doc: 'Choose the pointer tool.', args: { name: { enum: ['select', 'pan', 'draw', 'line', 'rect', 'ellipse', 'sculpt', 'note', 'code', 'target', 'score', 'event'] } }, required: ['name'], record: false, run: (a) => setTool(a.name) });
 define({ name: 'space.read', doc: 'Read the document: every object with its role, space, rectangle, ports and code.', record: false, run: () => [...state.objects.values()].map((o) => ({ id: o.id, kind: o.kind, role: o.role, space: o.space, rect: o.rect, name: blanketOf(o)?.name, ins: blanketOf(o)?.ins, outs: blanketOf(o)?.outs, params: o.params, code: hasCode(o) ? o.code : undefined, bind: o.bind, points: o.points?.length })) });
-define({ name: 'score.play', doc: 'Start a score looping. What is drawn or changed while it plays is heard from the next pass.', args: { id: T.id }, required: ['id'], record: false, run: (a) => play(a.id) });
+define({ name: 'score.play', doc: 'Play a score on the transport, pass after pass. What is drawn or changed while it plays is heard from the next pass.', args: { id: T.id }, required: ['id'], record: false, run: (a) => { if (get(a.id)?.role !== 'score') return; if (scoreSet) scoreSet.add(a.id); if (!transport.playing) { lastBeat = transport.beat; transport.play(); } scoreTick(); } });
 define({ name: 'play.toggle', doc: 'Start or stop playing: scores loop and travelers set off along their lines.', record: false, run: () => togglePlay() });
-define({ name: 'score.stop', doc: 'Stop one score, or every score when no id is given.', args: { id: T.id }, record: false, run: (a) => (a.id ? sound.stop(a.id) : sound.stopAll()) });
+define({ name: 'score.stop', doc: 'Stop one score (the others play on), or pause everything when no id is given.', args: { id: T.id }, record: false, run: (a) => { if (!a.id) { if (transport.playing) togglePlay(); return; } scoreSet = new Set(scores().filter((o) => o.id !== a.id && scorePlaying(o)).map((o) => o.id)); sound.silence(a.id); scorePlan.delete(a.id); } });
 define({ name: 'assistant.ask', doc: 'Ask the built-in assistant to build something from a sentence.', args: { text: T.str }, required: ['text'], record: false, run: (a) => ask(a.text) });
 
 window.underspace = { call, batch, tools, commands: tools, state, take, undo, redo, view, ask, actions: ACTIONS, backend: view.backend };

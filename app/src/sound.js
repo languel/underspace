@@ -95,6 +95,37 @@ export const stopAll = () => [...sessions.keys()].forEach(stop);
 export const isPlaying = (id) => sessions.has(id);
 export const playing = () => [...sessions.keys()];
 
+// ---- passes on the transport ---------------------------------------------------
+// The transport (main.js) decides when each pass of a score begins; this runs the
+// score's brush for one pass, starting at audio time `at`. skip (seconds): a pass
+// joined partway, from a seek or a pause, plays only what is still to come.
+const buses = new Map();
+export const audioNow = () => ensureAudio().currentTime;
+export function schedulePass(id, score, at, skip = 0, onError) {
+  const ac = ensureAudio();
+  if (ac.state === 'suspended') ac.resume();
+  let bus = buses.get(id);
+  if (!bus) { bus = ac.createGain(); bus.connect(master); buses.set(id, bus); }
+  const duration = Math.max(0.25, score.duration), brush = compileBrush(score.source);
+  const voices = skip > 0 ? score.voices.map((v) => ({ ...v, events: v.events.filter((e) => e.time >= skip) })).filter((v) => v.events.length) : score.voices;
+  try {
+    if (brush.error) throw new Error(brush.error);
+    brush.run(voices, { audio: ac, out: bus, t0: at, duration, bpm: score.bpm });
+    onError?.(null);
+  } catch (e) { onError?.(e.message); }
+}
+// Cut a score short (a pause, a seek, the loop coming round): what it scheduled fades and goes.
+export function silence(id) {
+  const bus = buses.get(id);
+  if (!bus) return;
+  buses.delete(id);
+  const t = audio.currentTime;
+  bus.gain.setValueAtTime(bus.gain.value, t);
+  bus.gain.linearRampToValueAtTime(0, t + 0.04);
+  setTimeout(() => bus.disconnect(), 120);
+}
+export const silenceAll = () => [...buses.keys()].forEach(silence);
+
 // How far through its frame a score is, 0..1, or -1 when stopped.
 export function position(id) {
   const s = sessions.get(id);
