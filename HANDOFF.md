@@ -656,6 +656,14 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   `clip.set { notes }`. The keys work only while the pointer is over the
   timeline. The pure helpers `transpose`, `quantize` and `shift` are
   tested.
+- **Event semantics after AMS** (a seventeenth pass): `ev.type` is
+  'enter', 'cross' (an open line, with `ev.dir` for which way) or 'exit'
+  (when the event has the parameter `exit 1`). A `lockout` parameter
+  (seconds) holds an event off after it fires. `ev.launch(line, dir)` sets
+  a new rider off on a line, by id or name: Midinous's emitting nodes.
+  `rng()` is seeded (mulberry32), so a performance from the start is the
+  same each time; the junction presets use it. `cc(n, v, ch)` and
+  `note(m, v, d, channel)` are available to event and junction code.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); audio recording; note-off at exit (IanniX's gate); scores on
   the shared transport (they still schedule their own passes); MIDI clock;
@@ -711,7 +719,9 @@ timeline like AMS's, worked on autonomously with commits at natural
 stopping points. Then extend drawing into 3D and consolidate it with
 threegrease's grease pencil and mesh builder tools (Poly Build,
 PolyQuilt-style editing, placement and snapping: see `~/dev/threegrease`,
-`src/tools/polytool.ts`, `snapping.ts` and `projection.ts`).
+`src/tools/polytool.ts`, `snapping.ts` and `projection.ts`). The owner also wants a render target to
+work as a score frame does: drawing a target (a 3D rectangle) over marks
+places them in its 3D scene.
 
 In this order, unless the owner says otherwise.
 

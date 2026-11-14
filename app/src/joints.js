@@ -47,12 +47,12 @@ return mem.n % ways.length;`,
 // each way is taken in proportion to its weight
 const kind = (w) => (Math.abs(w.turn) < 0.5 ? 'straight' : Math.abs(w.turn) > 2.6 ? 'back' : w.turn > 0 ? 'left' : 'right');
 const weights = ways.map((w) => p[kind(w)]).concat(p.back);
-let r = Math.random() * weights.reduce((a, b) => a + b, 0);
+let r = rng() * weights.reduce((a, b) => a + b, 0);
 for (let i = 0; i < ways.length; i++) if ((r -= weights[i]) < 0) return i;
 return p.back > 0 ? 'back' : 'stop';`,
   random: `// random
 // out: count
-return Math.floor(Math.random() * ways.length);`,
+return Math.floor(rng() * ways.length);`,
   straight: `// straight
 // out: count
 // straight on where it can, otherwise the gentlest turn

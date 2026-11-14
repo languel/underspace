@@ -146,3 +146,27 @@ test('piano roll: transpose by degrees, quantize, shift; clip.set takes notes', 
   undo();
   assert.equal(state.clips.get(id).notes[0].beat, 0.13);
 });
+
+test('events: crossing direction, exit, lockout, launch; rng repeats from the start', async () => {
+  const { createPlay } = await import('../src/play.js');
+  call('space.clear');
+  const line = call('line.add', { points: [[0, 0], [10, 0]], style: { path: 'straight' } });
+  const other = call('line.add', { points: [[0, 5], [10, 5]], style: { path: 'straight' } });
+  call('object.name', { id: other, name: 'upper' });
+  call('traveler.add', { on: line, dur: 10, loop: 0 });
+  const wall = call('line.add', { points: [[2, -1], [2, 1]] });
+  call('object.role', { id: wall, role: 'event' });
+  call('object.code', { id: wall, code: '// w\n// param: lockout 0\nmem.seen = (mem.seen ?? []); mem.seen.push([ev.type, ev.dir]); note(60, 100, 0.1, 2); ev.launch("upper");' });
+  const box = call('shape.add', { role: 'event', rect: { cx: 5, cy: 0, w: 2, h: 2 } });
+  call('object.code', { id: box, code: '// b\n// param: exit 1\nnote(ev.type === "exit" ? 50 : 70, 100, 0.1); note(Math.round(rng() * 1000), 1, 0.1);' });
+  const notes = [], ch = [], hooks = { spb: 1, pointsOf: (l) => l.points, paramsOf: (o) => { const p = { dur: 10, loop: 0, start: 0, at: 0, speed: 0, drawn: 0 }; for (const m of (o.code ?? '').matchAll(/\/\/ param: (\w+) ([\d.]+)/g)) p[m[1]] = +m[2]; return { ...p, ...o.params }; }, note: (m, v, d, c) => { notes.push(m); ch.push(c); } };
+  const run = () => { const play = createPlay(); notes.length = 0; let r; for (let t = 0; t <= 8; t += 0.05) r = play.step(state.objects, t, true, hooks); return r; };
+  const r = run();
+  assert.deepEqual(notes.filter((m) => m === 60 || m === 70 || m === 50), [60, 70, 50], 'cross, enter, exit');
+  assert.equal(ch[0], 2, 'on channel 2');
+  assert.equal(r.ghosts.length, 1, 'a rider launched on the upper line');
+  assert.ok(Math.abs(r.ghosts[0].pos[1] - 5) < 1e-9);
+  const randomNote = notes.find((m) => m !== 60 && m !== 70 && m !== 50);
+  run();
+  assert.equal(notes.find((m) => m !== 60 && m !== 70 && m !== 50), randomNote, 'the same random each time from the start');
+});
