@@ -824,6 +824,18 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   range say how much is used), and what is not drawn this frame is hidden.
   Memory now stays near 20 MB while playing. If many objects are ever made
   per frame somewhere else, the same rule applies: reuse, do not remake.
+- **Sliding along a line, quantized** (after AMS's Play tool `snapU`):
+  dragging a node (a one-place joint) or a traveler slides it along its
+  line (`joint.slide`, or the traveler's `start`). With quantizing on (Q,
+  or right-click › Quantize to choose 1/16 … a bar), it lands on divisions
+  of the time it takes to get there along the line. That time is the line's
+  lap: from a traveler on it, else its grid, else a grid cell a beat
+  (`lapBeatsOf`, `quantU`). Ctrl while dragging does the opposite of the
+  toggle. Ticks across the line show the divisions (taller on beats,
+  tallest on bars) while sliding, and while a node or traveler is selected
+  with quantizing on. The point tool's nodes land on the divisions too.
+  Fixed: a selected joint's centre counted as the resize corner, so
+  dragging it resized it.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a

@@ -1019,7 +1019,7 @@ pad.addEventListener('pointerdown', (e) => {
   if (port) { const s = spaces.find((x) => x.id === port.v.o.space) ?? spaces[0]; startDraw(s, p, true); return; }
   // The corner of the selected shape resizes it.
   const one = state.selection.size === 1 ? vis.get([...state.selection][0]) : null;
-  if (one?.px && one.o.rect && Math.hypot(p[0] - (one.px.l + one.px.w), p[1] - (one.px.t + one.px.h)) < 10) {
+  if (one?.px && one.o.rect && one.o.kind !== 'joint' && one.o.kind !== 'point' && Math.hypot(p[0] - (one.px.l + one.px.w), p[1] - (one.px.t + one.px.h)) < 10) {
     gesture = { kind: 'resize', id: one.o.id, k: one.xf.k, rect: { ...one.o.rect }, start: p, next: null }; return;
   }
   if (tool === 'sculpt') {

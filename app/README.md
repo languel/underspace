@@ -119,6 +119,11 @@ lets one on only while its inputs (the nodes named in its code) are lit
 past switches, counters and gates (only a terminator stops it); what
 Midinous start nodes send out are signals, which they do stop.
 
+Drag a node or a traveler to slide it along its line. Q turns quantizing
+on: it then lands on divisions of the beat (right-click › Quantize: 1/16,
+1/8, 1/4, triplets, 1/2, a beat, a bar) of the time along the line, shown
+as ticks across it; Ctrl while dragging does the opposite.
+
 ## Joints
 
 Lines that touch connect. When the end of a stroke lands on another line,
