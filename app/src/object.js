@@ -2,7 +2,8 @@
 //
 //   { id, space, kind, role, ... }
 //
-//   kind 'line'    points [[x, y] or [x, y, z], ...], off, closed?
+//   kind 'line'    points [[x, y] or [x, y, z], ...], off, closed?,
+//                  pen? [[ms, pressure], ...] the hand that drew each point
 //        role 'ink'        just a drawing
 //             'connector'  bind { from: { id, port }, to: { id, port } }
 //             'path'       code that reads its own geometry
@@ -17,7 +18,8 @@
 // Any object may carry `name`, `style` { stroke, fill, width, opacity, path }
 // (path 'straight' draws a line through its points as they are; otherwise
 // it is drawn as a smooth curve),
-// `hidden` and `locked`.
+// `hidden` and `locked`, and `brush` { id, params }: an ink brush that draws
+// it (ink/brushes.js) instead of a plain line.
 // Code objects (path, code) carry `code` and `params`; the blanket is declared
 // in the code's header. Coordinates are local to the object's space (y up);
 // `space` is the id of the group or target it lives in, or null for the canvas.
@@ -70,7 +72,14 @@ let drag = null;
 export function setDrag(d) { drag = d; }
 const dragOf = (o) => (drag && drag.ids.has(o.id) ? drag : null);
 
+// A sculpt stroke in progress: id -> { points, pen }, shown until it is committed.
+let live = null;
+export function setLive(map) { live = map; }
+export const penOf = (o) => live?.get(o.id)?.pen ?? o.pen;
+
 export function ptsOf(o) {
+  const now = live?.get(o.id);
+  if (now) return now.points;
   const d = dragOf(o), ox = (o.off?.[0] ?? 0) + (d?.dx ?? 0), oy = (o.off?.[1] ?? 0) + (d?.dy ?? 0);
   // A line drawn inside a target carries a third coordinate.
   return o.points.map((p) => (p.length > 2 ? [p[0] + ox, p[1] + oy, p[2]] : [p[0] + ox, p[1] + oy]));
@@ -144,8 +153,10 @@ export function smooth(points, steps = 6) {
 
 // Fewer points, same shape (Ramer-Douglas-Peucker): drops what lies within
 // `tol` of the line between its neighbours.
-export function simplify(points, tol) {
-  if (points.length < 3 || !(tol > 0)) return points;
+export const simplify = (points, tol) => simplifyIndex(points, tol).map((i) => points[i]);
+// The same, as the indices of the points that stay.
+export function simplifyIndex(points, tol) {
+  if (points.length < 3 || !(tol > 0)) return points.map((_, i) => i);
   const keep = new Uint8Array(points.length), stack = [[0, points.length - 1]];
   keep[0] = keep[points.length - 1] = 1;
   while (stack.length) {
@@ -154,7 +165,7 @@ export function simplify(points, tol) {
     for (let i = a + 1; i < b; i++) { const d = Math.abs((points[i][0] - pa[0]) * dy - (points[i][1] - pa[1]) * dx) / len; if (d > most) { most = d; far = i; } }
     if (far > 0) { keep[far] = 1; stack.push([a, far], [far, b]); }
   }
-  return points.filter((_, i) => keep[i]);
+  return points.map((_, i) => i).filter((i) => keep[i]);
 }
 
 // A point u (0..1) along a path, by arc length.

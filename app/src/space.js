@@ -10,6 +10,7 @@ import { bindFor, wirePoints } from './bind.js';
 import { collapse, expand } from './collapse.js';
 import { PRESETS } from './presets.js';
 import { BRUSHES } from './brushes.js';
+import { BRUSHES as INK } from './ink/brushes.js';
 
 export const state = {
   objects: new Map(),   // id -> object, see object.js
@@ -36,6 +37,7 @@ const T = {
   space: { type: ['string', 'null'], description: 'id of the group or target to work in; null or omitted for the canvas' },
   rect: { type: 'object', description: '{ cx, cy, w, h } in the space\'s units (y up)', properties: { cx: { type: 'number' }, cy: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' } } },
   num: { type: 'number' }, str: { type: 'string' },
+  brush: { type: 'object', description: '{ id, params }: an ink brush. ids: ' + Object.keys(INK).join(', '), properties: { id: { type: ['string', 'null'] }, params: { type: 'object' } } },
   style: { type: 'object', description: '{ stroke, fill, width, opacity, path }: colours as CSS hex, null for the default', properties: { stroke: { type: ['string', 'null'] }, fill: { type: ['string', 'null'] }, width: { type: 'number' }, opacity: { type: 'number' }, path: { enum: ['smooth', 'straight', null], description: 'how a line is drawn through its points; smooth is the default' } } },
 };
 export { T as argTypes };
@@ -63,13 +65,15 @@ function bindInto(o, b) {
 define({
   name: 'line.add',
   doc: 'Draw a line. With tol > 0, a line whose ends land on an output and an input port becomes a connector. role "path" attaches code that reads the line.',
-  args: { space: T.space, points: { type: 'array', description: '[[x, y], ...]; [x, y, z] inside a target' }, tol: T.num, role: { enum: ROLES.line }, closed: { type: 'boolean' }, style: T.style },
+  args: { space: T.space, points: { type: 'array', description: '[[x, y], ...]; [x, y, z] inside a target' }, tol: T.num, role: { enum: ROLES.line }, closed: { type: 'boolean' }, style: T.style, brush: T.brush, pen: { type: 'array', description: '[[ms, pressure 0..1], ...], one per point: the hand that drew it' } },
   required: ['points'],
   run(a) {
     const space = a.space ?? null;
     const o = { id: newId(), kind: 'line', role: 'ink', space, points: a.points.map((p) => p.slice(0, 3)), off: [0, 0] };
     if (a.closed) o.closed = true;
     if (a.style) o.style = { ...a.style };
+    if (a.brush?.id && INK[a.brush.id]) o.brush = { id: a.brush.id, params: { ...a.brush.params } };
+    if (Array.isArray(a.pen) && a.pen.length === o.points.length) o.pen = a.pen.map((q) => [q[0], q[1]]);
     const b = a.tol > 0 && o.points.length > 1 ? bindFor(inSpace(space), o.points, a.tol) : null;
     if (b) bindInto(o, b);
     else if (a.role === 'path') { o.role = 'path'; o.code = PRESETS.path; o.params = {}; }
@@ -81,7 +85,7 @@ define({
 define({
   name: 'shape.add',
   doc: 'Add a shape. role: "visual" (something to look at), "code" (a code container; give code, or a preset name), "target" (a render target with a 3D interior), "score" (a frame that plays the lines drawn in it; its code is a brush), "note" (text).',
-  args: { space: T.space, rect: T.rect, shape: { enum: ['rect', 'ellipse'] }, role: { enum: ROLES.shape }, code: T.str, text: T.str, style: T.style, preset: { enum: [...Object.keys(PRESETS), ...Object.keys(BRUSHES)] } },
+  args: { space: T.space, rect: T.rect, shape: { enum: ['rect', 'ellipse'] }, role: { enum: ROLES.shape }, code: T.str, text: T.str, style: T.style, brush: T.brush, preset: { enum: [...Object.keys(PRESETS), ...Object.keys(BRUSHES)] } },
   required: ['rect'],
   run(a) {
     const o = { id: newId(), kind: 'shape', role: a.role ?? 'visual', shape: a.shape ?? 'rect', space: a.space ?? null, rect: { ...a.rect } };
@@ -89,6 +93,7 @@ define({
     if (o.role === 'score') { o.code = a.code ?? BRUSHES[a.preset] ?? BRUSHES.glissando; o.params = {}; }
     if (o.role === 'note') o.text = a.text ?? '';
     if (a.style) o.style = { ...a.style };
+    if (a.brush?.id && INK[a.brush.id]) o.brush = { id: a.brush.id, params: { ...a.brush.params } };
     state.objects.set(o.id, o);
     return o.id;
   },
@@ -166,6 +171,33 @@ define({
       const next = { ...o.style };
       for (const [k, v] of Object.entries(a.style)) { if (v == null || v === '') delete next[k]; else next[k] = v; }
       if (Object.keys(next).length) o.style = next; else delete o.style;
+    }
+  },
+});
+
+define({
+  name: 'line.set', doc: 'Replace a line\'s points (what a sculpt stroke does). pen, when given, has one [ms, pressure] per point.',
+  args: { id: T.id, points: { type: 'array' }, pen: { type: 'array' } }, required: ['id', 'points'],
+  run(a) {
+    const o = state.objects.get(a.id);
+    if (!o || o.kind !== 'line' || o.bind || a.points.length < 2) return false;
+    o.points = a.points.map((p) => p.slice(0, 3)); o.off = [0, 0];
+    if (Array.isArray(a.pen) && a.pen.length === o.points.length) o.pen = a.pen.map((q) => [q[0], q[1]]); else delete o.pen;
+    return true;
+  },
+});
+
+define({
+  name: 'object.brush', doc: 'Draw lines or visual shapes with an ink brush. id null goes back to a plain line. params are merged into the brush\'s own.',
+  args: { ids: T.ids, id: { type: ['string', 'null'], description: 'brush id, or null' }, params: { type: 'object' } }, required: ['ids'],
+  run(a) {
+    for (const oid of a.ids) {
+      const o = state.objects.get(oid);
+      if (!o || o.bind || o.kind === 'group') continue;
+      if (a.id === null) { delete o.brush; continue; }
+      const id = a.id ?? o.brush?.id;
+      if (!INK[id]) continue;
+      o.brush = { id, params: { ...(id === o.brush?.id ? o.brush.params : {}), ...a.params } };
     }
   },
 });

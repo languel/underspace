@@ -15,7 +15,7 @@ body { display: flex; background: var(--bg); color: var(--ink);
   font: 12px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow: hidden; }
 
 #stage { position: relative; flex: 1; min-width: 0; overflow: hidden; }
-#gl, #pad, #faces, #dots { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#ink, #gl, #pad, #faces, #dots { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #pad { touch-action: none; cursor: default; }
 #pad[data-tool=draw], #pad[data-tool=box], #pad[data-tool=scene] { cursor: crosshair; }
 #pad[data-pan] { cursor: grab; }
@@ -23,6 +23,8 @@ body { display: flex; background: var(--bg); color: var(--ink);
 #pad[data-over=port] { cursor: crosshair; }
 #dots i.bar { left: 0; top: 0; width: 1.5px; border-radius: 0; }
 #dots i { position: absolute; left: -4px; top: -4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+#ring { position: absolute; margin: 0; transform: translate(-50%, -50%); border: 1px solid var(--accent); border-radius: 50%; pointer-events: none; opacity: 0.7; }
+#pad[data-tool=sculpt] { cursor: none; }
 #marquee { position: absolute; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); pointer-events: none; }
 
 button, select, input, textarea { font: inherit; color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 5px; }

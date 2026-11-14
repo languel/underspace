@@ -134,3 +134,28 @@ test('style, flags and order are commands like any other', () => {
   call('object.name', { id: n, name: 'label' });
   assert.deepEqual([state.objects.get(n).text, state.objects.get(n).name], ['there', 'label']);
 });
+
+test('a line carries a brush and the hand that drew it; sculpting replaces its points', async () => {
+  fresh();
+  const pts = Array.from({ length: 10 }, (_, i) => [i, 0]), pen = pts.map((_, i) => [i * 16, 0.5]);
+  const id = call('line.add', { points: pts, pen, brush: { id: 'charcoal', params: { width: 9 } } });
+  assert.deepEqual(state.objects.get(id).brush, { id: 'charcoal', params: { width: 9 } });
+  assert.equal(state.objects.get(id).pen.length, 10);
+  call('object.brush', { ids: [id], params: { opacity: 0.5 } });
+  assert.deepEqual(state.objects.get(id).brush.params, { width: 9, opacity: 0.5 }, 'parameters merge');
+  call('object.brush', { ids: [id], id: 'nonsense' });
+  assert.equal(state.objects.get(id).brush.id, 'charcoal', 'an unknown brush is ignored');
+
+  const { sculptMark } = await import('../src/ink/sculpt.js');
+  const { element, UNIT } = await import('../src/ink/layer.js');
+  const e = element(pts, pen), out = sculptMark('push', e, { x: 4.5 * UNIT, y: 0, dx: 0, dy: -UNIT, radius: 2 * UNIT, strength: 1, first: true, start: [4.5 * UNIT, 0] }, {});
+  assert.ok(out.length > 10, 'push adds points where it bends the line');
+  call('line.set', { id, points: out.map((q) => [q[0] / UNIT, -q[1] / UNIT]), pen: out.map((q) => [q[2], q[3]]) });
+  const moved = state.objects.get(id).points;
+  assert.ok(Math.max(...moved.map((p) => p[1])) > 0.5, 'the middle of the line went up');
+  assert.equal(moved[0][1], 0, 'the far end stayed');
+  call('object.brush', { ids: [id], id: null });
+  assert.equal(state.objects.get(id).brush, undefined);
+  undo(); undo();
+  assert.equal(state.objects.get(id).points.length, 10);
+});

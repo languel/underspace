@@ -6,6 +6,9 @@ export const DEFAULTS = {
   theme: 'auto',        // 'auto' | 'light' | 'dark'
   grid: true, gridSize: 1, snap: false,
   stroke: null, fill: null, width: 2.2, // the look new lines and shapes take; null is the default ink
+  brush: '', planeBrush: '',            // the ink brush new lines and new shapes take ('' is a plain line)
+  brushParams: {},                      // brush id -> the parameters last set for it
+  sculpt: 'push', sculptRadius: 40, sculptStrength: 0.6, sculptParams: {}, // radius in pixels
   smooth: true, simplify: 1.5,          // new lines: drawn smooth; points within this many pixels of the line are dropped
   codePreset: 'osc', scoreBrush: 'glissando', targetPlane: 'view', // what the object tools make
   islands: {},          // where toolbars were dragged to: id -> [x, y]

@@ -8,9 +8,20 @@ import { settings, setSetting } from '../settings.js';
 
 const ROLE_ICON = { ink: 'ink', connector: 'connector', path: 'path', visual: 'visual', target: 'target', code: 'box', score: 'score', note: 'note' };
 const ROLE_TITLE = { ink: 'Ink', connector: 'Connector', path: 'Path', visual: 'Visual', target: 'Render target', code: 'Code container', score: 'Score', note: 'Note' };
+// Choose an ink brush and set its parameters. `role` is 'line' or 'plane'.
+function brushSection(app, role, id, params, onBrush, onParam) {
+  const rows = [row('brush', choice([['', 'plain'], ...app.brushesFor(role).map((b) => [b, app.INK[b].label])], id ?? '', (v) => onBrush(v || null)))];
+  for (const s of app.INK[id]?.params ?? []) {
+    const r = row(s.label.toLowerCase(), numberField(params?.[s.key] ?? s.default, (v) => onParam(s.key, Math.min(s.max, Math.max(s.min, v))), { step: s.step, min: s.min, max: s.max }));
+    r.title = s.doc;
+    rows.push(r);
+  }
+  return section('Brush', ...rows);
+}
+
 const shared = (list, get) => { const v = get(list[0]); return list.every((o) => get(o) === v) ? v : undefined; };
 
-const TOOL_TITLE = { select: 'Select', pan: 'Pan', draw: 'Draw', line: 'Straight line', rect: 'Rectangle', ellipse: 'Ellipse', note: 'Note', code: 'Code container', target: 'Render target', score: 'Score' };
+const TOOL_TITLE = { sculpt: 'Sculpt', select: 'Select', pan: 'Pan', draw: 'Draw', line: 'Straight line', rect: 'Rectangle', ellipse: 'Ellipse', note: 'Note', code: 'Code container', target: 'Render target', score: 'Score' };
 
 // What the active tool will make, and how.
 export function toolProps(app, tool) {
@@ -23,7 +34,19 @@ export function toolProps(app, tool) {
   if (tool === 'code') look.push(row('preset', choice(Object.keys(app.PRESETS).filter((k) => !['path', 'wave'].includes(k)), settings.codePreset, (v) => setSetting('codePreset', v))));
   if (tool === 'score') look.push(row('brush', choice(Object.keys(app.BRUSHES), settings.scoreBrush, (v) => setSetting('scoreBrush', v))));
   if (tool === 'target') look.push(row('plane', choice(['view', 'front', 'top', 'side'], settings.targetPlane, (v) => setSetting('targetPlane', v))));
+  if (tool === 'sculpt') {
+    const id = settings.sculpt, t = app.SCULPTS[id], vals = settings.sculptParams[id] ?? {};
+    look.push(row('tool', choice(Object.entries(app.SCULPTS).map(([k, v]) => [k, v.label]), id, (v) => setSetting('sculpt', v))),
+      row('radius', numberField(settings.sculptRadius, (v) => setSetting('sculptRadius', Math.max(6, Math.min(400, v))), { step: 2, min: 6, max: 400 })),
+      row('strength', numberField(settings.sculptStrength, (v) => setSetting('sculptStrength', Math.max(0.05, Math.min(1, v))), { step: 0.05, min: 0.05, max: 1 })));
+    for (const s of t?.params ?? []) { const r = row(s.label.toLowerCase(), numberField(vals[s.key] ?? s.default, (v) => setSetting('sculptParams', { ...settings.sculptParams, [id]: { ...vals, [s.key]: Math.min(s.max, Math.max(s.min, v)) } }), { step: s.step, min: s.min, max: s.max })); r.title = s.doc; look.push(r); }
+  }
+  const brushKey = tool === 'draw' ? 'brush' : ['rect', 'ellipse'].includes(tool) ? 'planeBrush' : null;
   if (look.length) out.push(section(TOOL_TITLE[tool] ?? tool, ...look));
+  if (brushKey) {
+    const id = settings[brushKey] || null;
+    out.push(brushSection(app, brushKey === 'brush' ? 'line' : 'plane', id, settings.brushParams[id], (v) => setSetting(brushKey, v ?? ''), (k, v) => setSetting('brushParams', { ...settings.brushParams, [id]: { ...settings.brushParams[id], [k]: v } })));
+  }
   else out.push(section(TOOL_TITLE[tool] ?? tool));
   out.push(section('Grid', row('show', check('grid')), row('snap', check('snap')), row('size', numberField(settings.gridSize, (v) => setSetting('gridSize', Math.max(0.05, v)), { step: 0.25, min: 0.05 }))));
   return out;
@@ -52,6 +75,11 @@ export function selectionProps(app, sel, live = null) {
         row('width', numberField(shared(sel, (o) => o.style?.width ?? 2.2), (v) => style({ width: Math.max(0, v) }), { step: 0.2, min: 0 })),
         ...(sel.some((o) => o.kind === 'line' && !o.closed) ? [row('strokes', (() => { const bar = h('span', 'glyph-row'), straight = shared(sel, (o) => o.style?.path === 'straight'); bar.append(glyphButton('draw', 'Smooth', () => style({ path: null }), straight === false), glyphButton('line', 'Straight', () => style({ path: 'straight' }), straight === true)); return bar; })())] : []),
         row('opacity', numberField(shared(sel, (o) => o.style?.opacity ?? 1), (v) => style({ opacity: Math.max(0, Math.min(1, v)) }), { step: 0.1, min: 0, max: 1 }))));
+    }
+    const brushable = sel.filter((o) => (o.kind === 'line' && !o.bind) || (o.kind === 'shape' && o.role === 'visual'));
+    if (brushable.length && brushable.length === sel.length) {
+      const role = shared(sel, (o) => (o.kind === 'line' ? 'line' : 'plane')), id = shared(sel, (o) => o.brush?.id ?? null);
+      if (role) out.push(brushSection(app, role, id, one?.brush?.params ?? sel[0].brush?.params, (v) => app.call('object.brush', { ids, id: v }), (k, v) => app.call('object.brush', { ids, params: { [k]: v } })));
     }
     if (one?.rect) {
       const r = one.rect, set = (k) => (v) => app.call('object.resize', { id: one.id, rect: { ...one.rect, [k]: v } });

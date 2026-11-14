@@ -339,9 +339,33 @@ Added in a fourth pass (toolbars after AMS):
   Catmull-Rom curve through them (`smooth`). The stored points are not
   changed. `style.path: 'straight'` shows them as they are; ⇧S toggles.
 
+Added in a fifth pass (AMS brushes and sculpt, on a 2D ink layer):
+
+- **Decision (owner, 13 Nov 2026):** brushed marks are painted on a 2D
+  canvas under the three.js one, not as textures in the scene. So they
+  exist on the flat canvas and in groups, not inside render targets, and
+  ink has two renderers: plain lines in three.js, brushed ones in 2D.
+- `src/ink/walk.js` and `src/ink/texture.js` are unchanged copies of AMS's
+  `src/process/` files. `src/ink/brushes.js` is AMS's brush kit with 19
+  brushes (ink, pen, speed, restate, zigzag, inner, dotted, arcs, flat,
+  hatch, stipple, charcoal, chalk, pencil, bristles, oil, marker, wash,
+  dot); `src/ink/sculpt.js` its ten sculpt tools. Left out of both: score
+  markers, images, sources, the brush and sculpt libraries, brushes
+  written in the app.
+- `src/ink/layer.js` maps objects to what a brush sees: 64 brush units per
+  canvas unit, y down, points as `[x, y, ms, pressure]`.
+- A line or a visual shape carries `brush: { id, params }` (`object.brush`).
+  A drawn line also keeps `pen`, the time and pressure of each point: pen
+  pressure, or with a mouse a slower hand presses harder.
+- Sculpt (U) reshapes the selected lines, or all lines in the space when
+  none is selected; one undo step per stroke (`line.set`). `[` `]` set the
+  radius and `{` `}` the strength while the tool is active.
+- A press now lays out first if the frame loop is behind, so commands and
+  gestures in quick succession (an agent, a hidden tab) see current state.
+
 The owner asked to match Poliplan's functionality "for starters" without
-copying it. Not matched yet: textured brushes and the brush kit, sculpt
-tools, rotate and scale of lines, the point and lasso-plane tools,
+copying it. Not matched yet: writing your own brushes and sculpt tools in
+the app, rotate and scale of lines, the point and lasso-plane tools,
 boards and artboard sizes, PNG/SVG/p5 export, image layers and reference
 underlay, the full colour picker (palettes, eyedropper, names), blend
 modes, simplify, stages, key remapping, docking and floating panels.

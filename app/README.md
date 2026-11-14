@@ -46,6 +46,7 @@ or with a shape selected, makes it a render target.
 | --- | --- |
 | V H D L R O N | select, pan, draw, straight line (Shift: 15° steps), rectangle, ellipse, note |
 | B T S | code container, render target, score |
+| U | sculpt: reshape lines under the ring; `[` `]` radius, `{` `}` strength, Alt inverts |
 | Space (tap) | play or stop the selected scores, or all of them; hold and drag to pan |
 | C / T / S / X | selection becomes code (a line: a path) / a render target / a score / plain |
 | W | selected line becomes a connector to the nearest ports |
@@ -68,6 +69,14 @@ or with a shape selected, makes it a render target.
 | Alt+right-click | properties at the pointer: the selection's, or the tool's |
 | ⇧S | selected lines: smooth or straight strokes |
 | right-click a tool | the other tools of its kind, or its settings |
+
+## Brushes
+
+A line or a visual shape can be drawn by an ink brush: charcoal, chalk,
+pencil, bristles, oil, marker, ink with pressure, hatch, stipple, wash and
+more. Choose one in Properties, in the draw tool's settings (right-click
+the tool), or from the palette ("Brush: charcoal"). Brushed marks are
+painted on a 2D layer, so they do not appear inside render targets.
 
 ## Scores
 

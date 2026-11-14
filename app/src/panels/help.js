@@ -17,7 +17,7 @@ const GESTURES = [
   ['Right-click', 'what can be done here'],
   ['Paste code on the canvas', 'a code container; a p5.js or three.js sketch runs'],
 ];
-const GROUPS = { tool: 'Tools', role: 'Roles', play: 'Sound', edit: 'Edit', plane: 'Drawing plane', add: 'Add', nav: 'Navigate', file: 'File', panel: 'Panels' };
+const GROUPS = { brush: 'Brushes', tool2: 'Object tools', history: 'History', tool: 'Tools', role: 'Roles', play: 'Sound', edit: 'Edit', plane: 'Drawing plane', add: 'Add', nav: 'Navigate', file: 'File', panel: 'Panels' };
 
 export function helpPanel(el, app) {
   const search = h('input'), list = h('div', 'list');

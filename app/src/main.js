@@ -3,7 +3,7 @@
 
 import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, argTypes as T } from './space.js';
 import './patch.js';
-import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplify, setDrag, isLine, isTarget, hasCode, isWire } from './object.js';
+import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplifyIndex, setDrag, setLive, penOf, isLine, isTarget, hasCode, isWire } from './object.js';
 import { selectionProps, toolProps } from './panels/properties.js';
 import { wirePoints } from './bind.js';
 import { createRunner } from './run.js';
@@ -28,6 +28,9 @@ import { BRUSHES } from './brushes.js';
 import { read as readScore } from './score.js';
 import * as sound from './sound.js';
 import { icon } from './icons.js';
+import { createInk, element, UNIT } from './ink/layer.js';
+import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
+import { SCULPTS, sculptMark, effectiveSculpt } from './ink/sculpt.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage'), pad = $('pad'), marquee = $('marquee'), dotLayer = $('dots');
@@ -39,6 +42,7 @@ const onParam = (id, name, value) => call('object.set', { id, name, value });
 const onCode = (id, code) => { step.restart(id); call('object.code', { id, code }); };
 const faces = createFaces($('faces'), { onParam, onCode });
 const step = createRunner();
+const ink = createInk($('ink'));
 const view = await createView({ canvas: $('gl'), stage, onFrame: frame });
 addEventListener('message', (e) => { if (e.data?.underspace) step.report(e.data.underspace, e.data); });
 
@@ -54,7 +58,15 @@ let spaces = [];      // open spaces, outermost first: { id, kind, xf, px, plane
 let lines = [];       // ink in canvas coordinates: { id, pts, color, width }
 let ink3d = [];       // lines inside targets: { id, scene, pts }
 let sceneList = [], dots = []; // dots: [x, y] a path's cursor, [x, y, h] a score's playhead
+let inkItems = [];    // brushed marks, for the 2D ink layer
+let inkColor = '#1d1c1a', lastCam = '';
 let lastSig = '', dragSig = '', run = null, orbit = null;
+
+// Where a brushed object goes on the ink layer: brush units to stage pixels.
+function inkItem(o, e, xf, st) {
+  const origin = view.toScreen(at(xf, [0, 0]));
+  return { e, brush: o.brush.id, params: o.brush.params, seed: Number(o.id.slice(1)) || 1, straight: st.path === 'straight', opacity: st.opacity, ox: origin[0], oy: origin[1], scale: xf.k / (UNIT * view.unitsPerPx()) };
+}
 
 function walk(space, xf) {
   const upp = view.unitsPerPx();
@@ -65,14 +77,21 @@ function walk(space, xf) {
       const made = run.shown.get(o.id);
       const raw = isWire(o) ? wirePoints(state.objects, o) : made ?? ptsOf(o);
       const pts = (st.path === 'straight' || o.closed ? raw : smooth(raw)).map((p) => at(xf, p));
-      lines.push({ id: o.id, pts, color: sel ? 'accent' : st.stroke ?? (isWire(o) ? 'hot' : 'ink'), width: st.width ?? (isWire(o) ? 1.6 : 2.2), opacity: st.opacity, fill: o.closed ? st.fill : null });
+      const brushed = o.brush && !isWire(o);
+      // A brushed line is painted on the ink layer; here it is only something to pick, and an outline while selected.
+      if (brushed) inkItems.push(inkItem(o, element(raw, penOf(o), { closed: !!o.closed, color: st.stroke ?? inkColor }), xf, st));
+      lines.push({ id: o.id, pts, color: sel ? 'accent' : st.stroke ?? (isWire(o) ? 'hot' : 'ink'), width: brushed ? (sel ? 1 : 0) : st.width ?? (isWire(o) ? 1.6 : 2.2), opacity: brushed ? 1 : st.opacity, fill: o.closed && !brushed ? st.fill : null });
       const cursor = run.cursors.get(o.id);
       if (cursor) dots.push(view.toScreen(at(xf, cursor)));
       if (!blanket) { vis.set(o.id, { o, face: 'line', xf }); continue; }
     }
     const r = rectOf(o), [l, t] = view.toScreen(at(xf, [r.cx - r.w / 2, r.cy + r.h / 2]));
     const px = { l, t, w: r.w * xf.k / upp, h: r.h * xf.k / upp };
-    if (o.kind === 'shape' && o.role === 'visual') lines.push({ id: o.id, pts: outline(r, o.shape).map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'ink', width: st.width ?? 2.2, opacity: st.opacity, fill: st.fill });
+    if (o.kind === 'shape' && o.role === 'visual') {
+      const edge = outline(r, o.shape);
+      if (o.brush) inkItems.push(inkItem(o, element(edge.slice(0, -1), null, { closed: true, role: 'plane', color: st.fill ?? st.stroke ?? inkColor }), xf, { ...st, path: o.shape === 'rect' ? 'straight' : null }));
+      lines.push({ id: o.id, pts: edge.map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'ink', width: o.brush ? (sel ? 1 : 0) : st.width ?? 2.2, opacity: o.brush ? 1 : st.opacity, fill: o.brush ? null : st.fill });
+    }
     const face = Math.max(px.w, px.h) < FAR ? 'far' : (px.w > view.size.w * 0.42 || px.h > view.size.h * 0.5) ? 'near' : 'mid';
     vis.set(o.id, { o, face, px, xf, blanket });
     if (o.role === 'score') { const pos = sound.position(o.id); if (pos >= 0 && face !== 'far') dots.push([px.l + px.w * pos, px.t, px.h]); }
@@ -127,10 +146,12 @@ function togglePlay(c = context()) {
   for (const o of chosen.length ? chosen : scores()) play(o.id);
 }
 
+let laidOut = -1; // the state version the last layout was made from
 function frame() {
+  laidOut = state.version;
   for (const id of sound.playing()) { if (get(id)?.role === 'score') step.report(id, { out: { pos: sound.position(id) } }); else sound.stop(id); }
   run = step(state.objects, performance.now() / 1000);
-  vis = new Map(); spaces = [{ id: null, kind: 'canvas', xf: ROOT }]; lines = []; ink3d = []; sceneList = []; dots = [];
+  vis = new Map(); spaces = [{ id: null, kind: 'canvas', xf: ROOT }]; lines = []; ink3d = []; sceneList = []; dots = []; inkItems = [];
   walk(null, ROOT);
   // Lines that code makes can change every frame; a cheap fingerprint tells.
   let made = 0;
@@ -139,6 +160,9 @@ function frame() {
   const dirty = sig !== lastSig;
   lastSig = sig;
   if (dirty) view.setLines(lines);
+  // The ink layer is repainted when the drawing or the view changes.
+  const camKey = `${view.cam.cx},${view.cam.cy},${view.cam.zoom},${view.size.w},${view.size.h},${inkColor}`;
+  if (dirty || camKey !== lastCam) { lastCam = camKey; ink.resize(view.size.w, view.size.h); ink.draw(inkItems); }
   view.setScenes(sceneList, dirty);
   faces.update(vis, { run, selection: state.selection, w: view.size.w, h: view.size.h });
   while (dotLayer.children.length < dots.length) dotLayer.append(document.createElement('i'));
@@ -221,6 +245,7 @@ function portAt(x, y) {
 let tool = 'select';
 let gesture = null; // what the pointer is doing between down and up
 let spaceKey = false, spaceUsed = false, spaceAt0 = 0, pointer = null;
+const ring = $('ring'); // the sculpt brush's reach
 const touches = new Map();
 const MAKE = { rect: { role: 'visual', shape: 'rect' }, ellipse: { role: 'visual', shape: 'ellipse' }, code: { role: 'code', shape: 'rect' }, target: { role: 'target', shape: 'rect' }, score: { role: 'score', shape: 'rect' }, note: { role: 'note', shape: 'rect' } };
 // The look new lines and shapes take, from the toolbar swatches.
@@ -237,6 +262,7 @@ function setTool(name) {
     if (m && m !== st.current) { st.current = m; paintStack(st); setSetting('stacks', { ...settings.stacks, [key]: name }); }
   }
   pad.dataset.tool = name;
+  if (name !== 'sculpt') ring.hidden = true;
 }
 function showMarquee(a, b) {
   marquee.hidden = false;
@@ -244,12 +270,13 @@ function showMarquee(a, b) {
 }
 function startDraw(s, p, wire = false) {
   const q = toSpace(s, p[0], p[1]);
-  if (q) gesture = { kind: 'draw', s, pts: [q], last: p, wire };
+  if (q) gesture = { kind: 'draw', s, pts: [q], last: p, wire, pen: [[0, 0.5]], t0: performance.now(), lastT: performance.now() };
 }
 
 pad.addEventListener('pointerdown', (e) => {
   document.activeElement?.blur?.();
   closeMenu();
+  if (laidOut !== state.version) frame(); // a press right after a change, before the next frame: lay out now
   const p = local(e);
   try { pad.setPointerCapture(e.pointerId); } catch {} // a scripted pointer has nothing to capture
   if (e.pointerType === 'touch') {
@@ -268,6 +295,17 @@ pad.addEventListener('pointerdown', (e) => {
   const one = state.selection.size === 1 ? vis.get([...state.selection][0]) : null;
   if (one?.px && one.o.rect && Math.hypot(p[0] - (one.px.l + one.px.w), p[1] - (one.px.t + one.px.h)) < 10) {
     gesture = { kind: 'resize', id: one.o.id, k: one.xf.k, rect: { ...one.o.rect }, start: p, next: null }; return;
+  }
+  if (tool === 'sculpt') {
+    // Sculpt the selected lines, or with none selected, every line in this space.
+    const s = spaceAt(p[0], p[1], true), marks = new Map();
+    for (const l of state.objects.values()) {
+      if (!isLine(l) || l.bind || l.locked || l.hidden || l.space !== s.id || (state.selection.size && !state.selection.has(l.id))) continue;
+      const pts = element(ptsOf(l), l.pen).points;
+      marks.set(l.id, { o: l, pts, orig: pts, state: {}, changed: false });
+    }
+    gesture = { kind: 'sculpt', s, marks, last: p, start: p, first: true, n: 0 };
+    return;
   }
   if (tool === 'draw') startDraw(here, p);
   else if (tool === 'line') { const q = toSpace(here, p[0], p[1]); if (q) gesture = { kind: 'line', s: here, a: q, b: q, start: p }; }
@@ -303,8 +341,25 @@ pad.addEventListener('pointermove', (e) => {
     }
     touches.set(e.pointerId, p);
   }
+  ring.hidden = tool !== 'sculpt';
+  if (tool === 'sculpt') ring.style.cssText = `left:${p[0]}px;top:${p[1]}px;width:${settings.sculptRadius * 2}px;height:${settings.sculptRadius * 2}px`;
   if (!gesture) { pad.dataset.over = portAt(p[0], p[1]) ? 'port' : ''; return; }
   const g = gesture;
+  if (g.kind === 'sculpt') {
+    const a = toSpace(g.s, g.last[0], g.last[1]), b = toSpace(g.s, p[0], p[1]), c = toSpace(g.s, g.start[0], g.start[1]);
+    const boost = e.metaKey || e.ctrlKey, id = effectiveSculpt(settings.sculpt, boost);
+    const stroke = { x: b[0] * UNIT, y: -b[1] * UNIT, dx: (b[0] - a[0]) * UNIT, dy: -(b[1] - a[1]) * UNIT, radius: settings.sculptRadius * unitsPerPx(g.s) * UNIT, strength: settings.sculptStrength,
+      pressure: e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 1, invert: e.altKey, boost, first: g.first, start: [c[0] * UNIT, -c[1] * UNIT] };
+    const shown = new Map();
+    for (const [mid, mk] of g.marks) {
+      const out = sculptMark(id, { points: mk.pts, closed: !!mk.o.closed, path: mk.o.style?.path }, stroke, settings.sculptParams[id], Math.random, mk);
+      if (out) { mk.pts = out; mk.changed = true; }
+      if (mk.changed) shown.set(mid, { points: mk.pts.map((q) => [q[0] / UNIT, -q[1] / UNIT]), pen: mk.pts.map((q) => [q[2] ?? 0, q[3] ?? 0.5]) });
+    }
+    setLive(shown); dragSig = 'sculpt' + (++g.n);
+    g.last = p; g.first = false;
+    return;
+  }
   if (g.kind === 'pan') {
     const u = view.unitsPerPx();
     view.cam.cx -= (p[0] - g.last[0]) * u; view.cam.cy += (p[1] - g.last[1]) * u; g.last = p;
@@ -312,6 +367,10 @@ pad.addEventListener('pointermove', (e) => {
     if (Math.hypot(p[0] - g.last[0], p[1] - g.last[1]) < 1.5) return;
     const q = toSpace(g.s, p[0], p[1]);
     if (!q) return;
+    // Pressure from a pen; with a mouse, a slower hand presses harder.
+    const now = performance.now(), speed = Math.hypot(p[0] - g.last[0], p[1] - g.last[1]) / Math.max(1, now - g.lastT), was = g.pen[g.pen.length - 1][1];
+    const press = e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : was * 0.7 + Math.max(0.15, Math.min(0.9, 0.9 - speed * 0.35)) * 0.3;
+    g.pen.push([Math.round(now - g.t0), +press.toFixed(3)]); g.lastT = now;
     g.pts.push(q); g.last = p;
     if (g.s.kind === 'scene') view.setPreview(g.pts, g.s.id);
     else view.setPreview((settings.smooth ? smooth(g.pts) : g.pts).map((pt) => at(g.s.xf, pt)), null, g.wire ? 'hot' : 'accent');
@@ -343,7 +402,7 @@ pad.addEventListener('pointermove', (e) => {
 });
 
 function cancelGesture() {
-  gesture = null; marquee.hidden = true; view.setPreview(null); setDrag(null); dragSig = ''; orbit = null;
+  gesture = null; marquee.hidden = true; view.setPreview(null); setDrag(null); setLive(null); dragSig = ''; orbit = null;
 }
 
 // A rectangle or ellipse drawn inside a target: a closed line on its plane.
@@ -363,13 +422,20 @@ function endGesture(e) {
   gesture = null;
   marquee.hidden = true;
   if (!g) return;
+  if (g.kind === 'sculpt') {
+    setLive(null); dragSig = '';
+    const changed = [...g.marks.values()].filter((mk) => mk.changed);
+    if (changed.length) batch(() => { for (const mk of changed) call('line.set', { id: mk.o.id, points: mk.pts.map((q) => [round(q[0] / UNIT), round(-q[1] / UNIT)]), pen: mk.pts.map((q) => [Math.round(q[2] ?? 0), +(q[3] ?? 0.5).toFixed(3)]) }); });
+    return;
+  }
   if (g.kind === 'draw') {
     view.setPreview(null);
     // A line begun on a port reaches further for the port at its other end.
     const tol = g.s.kind === 'scene' ? 0 : (g.wire ? 26 : 14) * unitsPerPx(g.s);
     // Keep the points that carry the shape; the curve through them is drawn smooth.
-    const kept = g.s.kind === 'scene' ? g.pts : simplify(g.pts, settings.simplify * unitsPerPx(g.s));
-    if (g.pts.length > 1 || !g.wire) call('line.add', { space: g.s.id, points: kept.map((q) => q.map(round)), tol: round(tol), ...(g.wire ? {} : newStyle(false)) });
+    const keep = g.s.kind === 'scene' ? g.pts.map((_, i) => i) : simplifyIndex(g.pts, settings.simplify * unitsPerPx(g.s));
+    const brush = !g.wire && settings.brush && g.s.kind !== 'scene' ? { brush: { id: settings.brush, params: settings.brushParams[settings.brush] ?? {} } } : {};
+    if (g.pts.length > 1 || !g.wire) call('line.add', { space: g.s.id, points: keep.map((i) => g.pts[i].map(round)), tol: round(tol), ...(g.wire ? {} : { pen: keep.map((i) => g.pen[i]), ...newStyle(false), ...brush }) });
   } else if (g.kind === 'line') {
     view.setPreview(null);
     const flat = g.s.kind !== 'scene', pts = [g.a, g.b].map((q) => q.map((v, i) => round(flat && i < 2 ? snap(v) : v)));
@@ -419,7 +485,7 @@ function addShape(s, make, start, end, extra = {}) {
   if (settings.snap && end) { const x0 = snap(rect.cx - rect.w / 2), x1 = snap(rect.cx + rect.w / 2), y0 = snap(rect.cy - rect.h / 2), y1 = snap(rect.cy + rect.h / 2); rect = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(settings.gridSize, x1 - x0), h: Math.max(settings.gridSize, y1 - y0) }; }
   for (const k in rect) rect[k] = round(rect[k]);
   return batch(() => {
-    const id = call('shape.add', { space: s.id, rect, shape: make.shape, role: make.role, ...(make.role === 'code' ? { preset: settings.codePreset } : make.role === 'score' ? { preset: settings.scoreBrush } : {}), ...(make.role === 'visual' ? newStyle(true) : {}), ...extra });
+    const id = call('shape.add', { space: s.id, rect, shape: make.shape, role: make.role, ...(make.role === 'code' ? { preset: settings.codePreset } : make.role === 'score' ? { preset: settings.scoreBrush } : {}), ...(make.role === 'visual' ? { ...newStyle(true), ...(settings.planeBrush ? { brush: { id: settings.planeBrush, params: settings.brushParams[settings.planeBrush] ?? {} } } : {}) } : {}), ...extra });
     if (make.role === 'target' && settings.targetPlane !== 'view') call('target.set', { id, plane: settings.targetPlane });
     call('select.set', { ids: [id] });
     return id;
@@ -552,6 +618,12 @@ const ACTIONS = [
   { id: 'tool.line', title: 'Straight line', icon: 'line', keys: 'l', group: 'tool', bar: 'tools', tool: 'line', stack: 'line' },
   { id: 'tool.rect', title: 'Rectangle', icon: 'rect', keys: 'r', group: 'tool', bar: 'tools', tool: 'rect', stack: 'shape' },
   { id: 'tool.ellipse', title: 'Ellipse', icon: 'ellipse', keys: 'o', group: 'tool', bar: 'tools', tool: 'ellipse', stack: 'shape' },
+  { id: 'tool.sculpt', title: 'Sculpt', icon: 'sculpt', keys: 'u', group: 'tool', bar: 'tools', tool: 'sculpt' },
+  { id: 'sculpt.smaller', title: 'Sculpt: smaller', keys: '[', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptRadius', Math.max(6, Math.round(settings.sculptRadius / 1.2))) },
+  { id: 'sculpt.larger', title: 'Sculpt: larger', keys: ']', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptRadius', Math.min(400, Math.round(settings.sculptRadius * 1.2))) },
+  { id: 'sculpt.weaker', title: 'Sculpt: weaker', keys: 'shift+{', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptStrength', Math.max(0.05, +(settings.sculptStrength - 0.1).toFixed(2))) },
+  { id: 'sculpt.stronger', title: 'Sculpt: stronger', keys: 'shift+}', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptStrength', Math.min(1, +(settings.sculptStrength + 0.1).toFixed(2))) },
+  ...Object.entries(SCULPTS).map(([id, t]) => ({ id: 'sculpt.' + id, title: `Sculpt: ${t.label}`, icon: 'sculpt', group: 'brush', run: () => { setSetting('sculpt', id); setTool('sculpt'); } })),
   { id: 'tool.note', title: 'Note', icon: 'note', keys: 'n', group: 'tool', bar: 'tools', tool: 'note' },
   { id: 'tool.code', title: 'Code container', icon: 'box', keys: 'b', group: 'tool2', bar: 'tools', tool: 'code', stack: 'object' },
   // roles: the same key means "tool" with nothing selected and "make this one" with a selection
@@ -568,6 +640,15 @@ const ACTIONS = [
   { id: 'role.visual', title: 'Make visual', icon: 'visual', keys: 'x', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'visual'), run: (c) => setRole(c.shapes, 'visual') },
   // sound: a tap of Space plays or stops (holding it and dragging pans)
   { id: 'play', title: 'Play or stop', icon: 'play', keys: 'mod+enter', group: 'play', bar: 'edit', menu: true, when: (c) => scores().length, run: (c) => togglePlay(c) },
+  // ink brushes: on the selection, or with nothing selected, for the lines drawn next
+  ...['', ...brushesFor('line')].map((id) => ({
+    id: 'brush.' + (id || 'none'), title: id ? `Brush: ${INK[id].label}` : 'Brush: plain line', icon: 'brush', group: 'brush',
+    run: (c) => { const on = c.lines.filter((o) => !o.bind); if (on.length) call('object.brush', { ids: ids(on), id: id || null }); else { setSetting('brush', id); setTool('draw'); } },
+  })),
+  ...brushesFor('plane').filter((id) => !brushesFor('line').includes(id)).map((id) => ({
+    id: 'brush.' + id, title: `Fill brush: ${INK[id].label}`, icon: 'brush', group: 'brush',
+    run: (c) => { const on = c.shapes.filter((o) => o.role === 'visual'); if (on.length) call('object.brush', { ids: ids(on), id }); else setSetting('planeBrush', id); },
+  })),
   // structure
   { id: 'collapse', title: 'Collapse into a group', icon: 'collapse', keys: 'g', group: 'edit', menu: true, when: (c) => c.sel.some((o) => !o.bind), run: (c) => call('group.collapse', { ids: ids(c.sel) }) },
   { id: 'expand', title: 'Expand group', icon: 'expand', keys: ['e', 'shift+g'], group: 'edit', menu: true, when: (c) => c.groups.length, run: (c) => batch(() => c.groups.forEach((g) => call('group.expand', { id: g.id }))) },
@@ -757,7 +838,7 @@ $('peek').onclick = () => document.body.classList.toggle('clean');
 let settingsVersion = 0;
 onSettings(() => settingsVersion++);
 const app = {
-  state, call, batch, get, tools, PRESETS, BRUSHES, actions: ACTIONS, onParam, onCode, frameIds, runAction,
+  state, call, batch, get, tools, PRESETS, BRUSHES, INK, SCULPTS, brushesFor, actions: ACTIONS, onParam, onCode, frameIds, runAction,
   run: () => run, setRole, keysShown: (a) => showKey(a), tool: () => tool, settingsVersion: () => settingsVersion,
   presetsFor: (o) => (o.role === 'score' ? BRUSHES : PRESETS),
   addExample(ex) {
@@ -781,12 +862,14 @@ $('tabs').append(document.createElement('hr'), glyph('clean', 'Hide the interfac
 // Settings that change what is on screen.
 function applySettings() {
   document.documentElement.dataset.theme = settings.theme === 'auto' ? '' : settings.theme;
+  inkColor = getComputedStyle(document.documentElement).getPropertyValue('--ink').trim() || inkColor;
   stage.classList.toggle('grid', settings.grid);
   gridButton.setAttribute('aria-pressed', String(settings.grid));
   view.readTheme();
 }
 onSettings(applySettings);
 applySettings();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applySettings);
 for (const id of ['edit', 'tools', 'tabs', 'zoom']) grip($(id));
 placeIslands();
 addEventListener('resize', placeIslands);
@@ -851,7 +934,7 @@ addEventListener('paste', (e) => {
 define({ name: 'view.fit', doc: 'Show everything.', record: false, run: () => fit() });
 define({ name: 'view.frame', doc: 'Show these objects; a single object is opened to its near face.', args: { ids: T.ids }, required: ['ids'], record: false, run: (a) => frameIds(a.ids, a.ids.length === 1 ? 0.82 : 0.6) });
 define({ name: 'view.zoom', doc: 'Zoom by a factor about the middle of the view.', args: { factor: T.num }, required: ['factor'], record: false, run: (a) => view.zoomAt(...centre(), a.factor) });
-define({ name: 'tool.set', doc: 'Choose the pointer tool.', args: { name: { enum: ['select', 'pan', 'draw', 'line', 'rect', 'ellipse', 'note', 'code', 'target', 'score'] } }, required: ['name'], record: false, run: (a) => setTool(a.name) });
+define({ name: 'tool.set', doc: 'Choose the pointer tool.', args: { name: { enum: ['select', 'pan', 'draw', 'line', 'rect', 'ellipse', 'sculpt', 'note', 'code', 'target', 'score'] } }, required: ['name'], record: false, run: (a) => setTool(a.name) });
 define({ name: 'space.read', doc: 'Read the document: every object with its role, space, rectangle, ports and code.', record: false, run: () => [...state.objects.values()].map((o) => ({ id: o.id, kind: o.kind, role: o.role, space: o.space, rect: o.rect, name: blanketOf(o)?.name, ins: blanketOf(o)?.ins, outs: blanketOf(o)?.outs, params: o.params, code: hasCode(o) ? o.code : undefined, bind: o.bind, points: o.points?.length })) });
 define({ name: 'score.play', doc: 'Start a score looping. What is drawn or changed while it plays is heard from the next pass.', args: { id: T.id }, required: ['id'], record: false, run: (a) => play(a.id) });
 define({ name: 'score.stop', doc: 'Stop one score, or every score when no id is given.', args: { id: T.id }, record: false, run: (a) => (a.id ? sound.stop(a.id) : sound.stopAll()) });

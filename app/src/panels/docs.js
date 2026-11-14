@@ -48,7 +48,11 @@ export function docsPanel(el, app) {
     topic('Code', h('p', '', 'Code is plain JavaScript. A function body starts with comments that declare its ports and parameters:'), source(CODE), pairs(CODE_NOTES),
       h('p', '', 'A whole p5.js or three.js sketch also works: paste it on the canvas. In a sketch:'), pairs(SKETCH_NOTES)),
     topic('Presets', ...Object.entries(app.PRESETS).map(([k, code]) => { const d = topic(k, source(code)); if (!['path', 'wave'].includes(k)) d.append(add('add', () => app.runAction('add.' + k))); return d; })),
-    topic('Brushes', h('p', '', 'A brush is the code of a score. It receives every line in the frame, already read into time and pitch.'), ...Object.entries(app.BRUSHES).map(([k, code]) => topic(k, source(code)))),
+    topic('Ink brushes', h('p', '', 'A line or a visual shape can be drawn by an ink brush (Properties, or the palette: "Brush: charcoal"). Each is a small program with a few bounded parameters.'),
+      ...Object.entries(app.INK).map(([k, b]) => topic(b.label, h('p', '', b.doc), pairs(b.params.map((s) => [s.key, `${s.doc} (${s.min} to ${s.max})`]))))),
+    topic('Sculpt tools', h('p', '', 'The sculpt tool (U) reshapes lines under its ring: the selected ones, or every line when none is selected. [ and ] set the radius, { and } the strength; Alt inverts.'),
+      pairs(Object.values(app.SCULPTS).map((t) => [t.label, t.doc]))),
+    topic('Sound brushes', h('p', '', 'A brush is the code of a score. It receives every line in the frame, already read into time and pitch.'), ...Object.entries(app.BRUSHES).map(([k, code]) => topic(k, source(code)))),
     topic('Commands', h('p', '', 'Everything is a command: underspace.call(name, args). The assistant and outside agents use the same ones.'),
       ...app.tools().map((t) => topic(t.name, h('p', '', t.description), pairs(Object.entries(t.inputSchema.properties).map(([k, v]) => [k + (t.inputSchema.required.includes(k) ? '' : '?'), v.description ?? (v.enum ? v.enum.join(' | ') : [v.type].flat().join(' | '))]))))),
   ];
