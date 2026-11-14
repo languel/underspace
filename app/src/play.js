@@ -74,6 +74,7 @@ function crosses(path, p, q) {
   }
   return null;
 }
+const segDist = (c, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, k = l2 ? Math.max(0, Math.min(1, ((c[0] - a[0]) * dx + (c[1] - a[1]) * dy) / l2)) : 0; return Math.hypot(c[0] - a[0] - dx * k, c[1] - a[1] - dy * k); };
 const isClosed = (o, path) => o.closed || (path.length > 3 && Math.hypot(path[0][0] - path[path.length - 1][0], path[0][1] - path[path.length - 1][1]) < 1e-6);
 
 // Event presets: what an event does when a traveler reaches it. Besides
@@ -297,6 +298,11 @@ export function createPlay() {
                 if (at && Math.hypot(pos[0] - at[0], pos[1] - at[1]) > Math.max(1e-3, rider.speed * 0.05)) firedAt.delete(key);
                 if (!firedAt.has(key)) for (let k = 1; k < trail.length && !entered; k++) if (trail[k - 1] && trail[k]) entered = crosses(path, trail[k - 1], trail[k]);
               }
+            } else if (e.kind === 'point') {
+              // a point event: the traveler passes within its half size (swept along each step)
+              const r = rectOf(e), c = [r.cx, r.cy], R = r.w / 2;
+              for (let k = 1; k < trail.length && !entered; k++) if (trail[k - 1] && trail[k] && segDist(c, trail[k - 1], trail[k]) <= R) entered = trail[k];
+              now = Math.hypot(pos[0] - c[0], pos[1] - c[1]) <= R;
             } else {
               const r = rectOf(e);
               for (let k = 1; k < trail.length && !entered; k++) if (trail[k] && inside(e, r, trail[k][0], trail[k][1])) entered = trail[k];

@@ -86,6 +86,9 @@ function edgePoints(a, b, mode) {
 }
 
 // The code of a node: what it plays, then where it sends the traveler.
+// The code of a node of a kind, with Midinous's defaults (a point placed on a line).
+export const nodeCodeFor = (type, note = 60) => nodeCode({ type, note, velocity: 100, channel: type === 'cc' ? 1 : 1, duration: 1, chance: 100, mode: 0, ccNum: 1, ccValue: 64, countMax: 2 });
+
 export function nodeCode(n, ctx = {}) {
   const lines = [`// ${n.type}${n.label ? ' ' + n.label : ''}`, '// out: count'];
   const body = [];
@@ -105,7 +108,8 @@ export function nodeCode(n, ctx = {}) {
     return [...lines, "return 'stop';"].join('\n');
   }
   // where it goes: the paths that leave this node
-  body.push("const out = ways.filter((w) => w.dir === 1 && w.u < 0.001);", "if (!out.length) return 'stop';");
+  // the paths that leave this node; a node in the middle of a line also lets the traveler go on along it
+  body.push("const out = ways.filter((w) => (w.dir === 1 && w.u < 0.001) || w.line === ev.from);", "if (!out.length) return 'stop';");
   const mode = MODES[n.mode] ?? 'robin';
   if (mode === 'split') body.push('// split: every way at once', 'return out.map((w) => ways.indexOf(w));');
   else if (mode === 'random' || mode === 'portal') body.push(`// ${mode}: one way, by chance`, 'return ways.indexOf(out[Math.floor(rng() * out.length)]);');

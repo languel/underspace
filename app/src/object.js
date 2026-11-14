@@ -17,6 +17,7 @@
 //             'event'      a region that fires when a traveler enters; its code says what happens
 //             'traveler'   moves along the line `on` (see play.js)
 //   kind 'group'   rect, inner (its interior frame), ports (the cut wires)
+//   kind 'point'   a mark at rect's centre, rect.w across; glyph: how it looks (glyphs.js); role 'ink' or 'event'
 //   kind 'joint'   where lines meet: at [{ id, u, slide? }, ...], pos, rect (see joints.js)
 //        role 'junction'   its code says which way a traveler goes on
 // A line can also be an 'event' (crossing it, or entering what it encloses,
@@ -31,7 +32,7 @@
 // in the code's header. Coordinates are local to the object's space (y up);
 // `space` is the id of the group or target it lives in, or null for the canvas.
 
-export const ROLES = { joint: ['junction'], line: ['ink', 'connector', 'path', 'event', 'traveler'], shape: ['visual', 'target', 'code', 'score', 'grid', 'note', 'event', 'traveler'] };
+export const ROLES = { point: ['ink', 'event'], joint: ['junction'], line: ['ink', 'connector', 'path', 'event', 'traveler'], shape: ['visual', 'target', 'code', 'score', 'grid', 'note', 'event', 'traveler'] };
 export const isLine = (o) => o.kind === 'line';
 export const isTarget = (o) => o.kind === 'shape' && o.role === 'target';
 export const hasCode = (o) => o.role === 'code' || o.role === 'path' || o.role === 'score' || o.role === 'event' || o.role === 'junction' || o.role === 'grid';

@@ -36,11 +36,12 @@ import { showPie, recognize } from './pie.js';
 import { createTransport } from './transport.js';
 import { createDebug } from './debug.js';
 import { GRID, GRID_PRESETS, gridAt, pathBeats, snapPoint, fitScale, isGrid } from './grid.js';
+import { POINT_KINDS, MIDINOUS_KINDS, GLYPH_TITLE, glyphLines } from './glyphs.js';
 import { createTimeline } from './timeline.js';
 import { pitch as pitchOf, step as stepOf, snap as snapOf, secPerBeat, degrees } from './music.js';
 import { midiFile, readNotes, createMidiOut } from './midi.js';
 import { iannixPlan, applyPlan } from './iannix.js';
-import { nousPlan, applyNous } from './nous.js';
+import { nousPlan, applyNous, nodeCodeFor } from './nous.js';
 import { INSTRUMENTS, DEFAULT_CHANNELS } from './instruments.js';
 import { solve, crossings, measure, atU, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
@@ -100,10 +101,19 @@ function walk(space, xf) {
     if (o.space !== space || o.hidden) continue;
     const sel = state.selection.has(o.id), blanket = blanketOf(o), st = o.style ?? {};
     if (o.kind === 'joint') {
-      // a small ring where lines meet: filled while lit by a traveler or selected; a pin is hot
-      const c = at(xf, jointAt(o)), lit = performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160, r = (sel || lit ? 5 : 3.2) * upp, q = view.toScreen(c);
-      lines.push({ id: o.id, pts: outline({ cx: c[0], cy: c[1], w: r * 2, h: r * 2 }, 'ellipse'), color: sel ? 'accent' : o.fix || lit ? 'hot' : 'ink', width: 1.3, fill: sel ? 'accent' : lit ? 'hot' : o.fix ? null : st.fill ?? 'line' });
+      // where lines meet: a small ring, or its glyph (a Midinous node); lit by a traveler or selected, it fills; a pin is hot
+      const c = at(xf, jointAt(o)), lit = performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160, q = view.toScreen(c);
+      if (o.glyph) for (const g of glyphLines(o.glyph, c, (sel || lit ? 6.5 : 5.5) * upp)) lines.push({ id: o.id, pts: g.pts, color: sel ? 'accent' : lit ? 'hot' : st.stroke ?? 'ink', width: 1.4, fill: g.fill ? (sel ? 'accent' : lit ? 'hot' : st.fill ?? st.stroke ?? 'ink') : null });
+      else { const r = (sel || lit ? 5 : 3.2) * upp; lines.push({ id: o.id, pts: outline({ cx: c[0], cy: c[1], w: r * 2, h: r * 2 }, 'ellipse'), color: sel ? 'accent' : o.fix || lit ? 'hot' : 'ink', width: 1.3, fill: sel ? 'accent' : lit ? 'hot' : o.fix ? null : st.fill ?? 'line' }); }
       vis.set(o.id, { o, face: 'joint', px: { l: q[0] - 7, t: q[1] - 7, w: 14, h: 14 }, xf, blanket });
+      continue;
+    }
+    if (o.kind === 'point') {
+      // a point: its glyph at its size (it scales with the view, as ink does)
+      const r = rectOf(o), c = at(xf, [r.cx, r.cy]), lit = o.role === 'event' && performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160, q = view.toScreen(c), half = Math.max(r.w * xf.k / 2, 2.5 * upp);
+      for (const g of glyphLines(o.glyph ?? 'dot', c, half)) lines.push({ id: o.id, pts: g.pts, color: sel ? 'accent' : lit ? 'hot' : st.stroke ?? 'ink', width: st.width ?? 1.6, fill: g.fill ? (sel ? 'accent' : lit ? 'hot' : st.fill ?? st.stroke ?? 'ink') : null, opacity: st.opacity });
+      const pxr = Math.max(7, half / upp);
+      vis.set(o.id, { o, face: 'joint', px: { l: q[0] - pxr, t: q[1] - pxr, w: pxr * 2, h: pxr * 2 }, xf, blanket });
       continue;
     }
     if (isLine(o)) {
@@ -182,6 +192,23 @@ function walk(space, xf) {
       });
     }
   }
+}
+
+// Where lines on the canvas cross without a joint: a small mark at each (a view setting). Worked out
+// again only when the drawing changes, and given up past a bound so a dense drawing does not stall.
+let crossCache = { v: -1, pts: [] };
+function crossingMarks() {
+  if (crossCache.v !== state.version) {
+    const ls = [...state.objects.values()].filter((o) => isCurve(o) && o.space === null && !o.hidden && o.role !== 'event'), paths = ls.map(shownPath), out = [];
+    let work = 0;
+    for (let i = 0; i < ls.length && work < 4e6; i++) for (let j = i + 1; j < ls.length && work < 4e6; j++) {
+      work += paths[i].length * paths[j].length;
+      for (const x of crossings(paths[i], paths[j])) if (!(jointHolding(ls[i].id, x.ua) && jointHolding(ls[j].id, x.ub))) out.push(x.at);
+    }
+    crossCache = { v: state.version, pts: out };
+  }
+  const upp = view.unitsPerPx();
+  for (const p of crossCache.pts) for (const g of glyphLines('plus', p, 5 * upp)) lines.push({ pts: g.pts, color: 'hot', width: 1.2 });
 }
 
 // The riders a traveler has split into: copies of it, drawn where each one is.
@@ -350,7 +377,7 @@ function frameInner() {
   for (const [id, when] of playEngine.hitAt) if (performance.now() - when < 160) playSig += when + id.length;
   run = dbg.time('code', () => step(state.objects, performance.now() / 1000));
   vis = new Map(); spaces = [{ id: null, kind: 'canvas', xf: ROOT }]; lines = []; ink3d = []; sceneList = []; dots = []; inkItems = []; pointSrc = [];
-  dbg.time('layout', () => { walk(null, ROOT); ghostsOf(played.ghosts); });
+  dbg.time('layout', () => { walk(null, ROOT); ghostsOf(played.ghosts); if (settings.showCrossings) crossingMarks(); });
   if (guide && !guide.scene) lines.push({ pts: [-1, 1].map((k) => at(guide.xf, [guide.pivot[0] + guide.axis[0] * 1e4 * k, guide.pivot[1] + guide.axis[1] * 1e4 * k])), color: 'hot', width: 1 });
   // Lines that code makes can change every frame; a cheap fingerprint tells.
   let made = 0;
@@ -416,7 +443,7 @@ const isOpen = (v) => (v.o.kind === 'group' && v.face === 'near') || (isTarget(v
 
 function pick(x, y) {
   const free = (id) => !get(id)?.locked;
-  for (const v of vis.values()) if (v.face === 'joint' && v.px && free(v.o.id) && Math.hypot(v.px.l + 7 - x, v.px.t + 7 - y) < 7) return v.o.id;
+  for (const v of vis.values()) if (v.face === 'joint' && v.px && free(v.o.id) && Math.hypot(v.px.l + v.px.w / 2 - x, v.px.t + v.px.h / 2 - y) < Math.max(7, v.px.w / 2)) return v.o.id;
   for (const l of ink3d) if (free(l.id) && onPath(l.pts.map((p) => view.sceneToScreen(l.scene, p)), x, y)) return l.id;
   for (let i = lines.length - 1; i >= 0; i--) if (lines[i].id && free(lines[i].id) && onPath(lines[i].pts.map(view.toScreen), x, y)) return lines[i].id; // ink first: it is thin
   for (const v of [...vis.values()].reverse()) {
@@ -717,6 +744,76 @@ function fitToGrid(list) {
   });
 }
 
+// ---- points, polylines, polygons -----------------------------------------------
+
+// The point tool: on a joint, it gives the joint the tool's glyph (and for a Midinous kind, that
+// kind's code); on a point, its glyph; on a line, a node there (travelers that pass run its code);
+// anywhere else, a point.
+const isNodeCode = (code) => !code || code === JUNCTIONS['round robin'] || /^\/\/ (note|cc|gate|led|counter|switch|terminator|anchor)\b/.test(code);
+function setGlyph(list, kind) {
+  batch(() => {
+    for (const o of list) {
+      const code = o.kind === 'joint' && MIDINOUS_KINDS.includes(kind) && isNodeCode(o.code) ? nodeCodeFor(kind) : null;
+      call('object.glyph', { ids: [o.id], glyph: kind, ...(code ? { code } : {}) });
+    }
+  });
+}
+function placePoint(s, p) {
+  if (s.kind === 'scene') return; // points inside a 3D space: later
+  const kind = settings.pointGlyph, hit = get(pick(p[0], p[1]));
+  if (hit?.kind === 'point' || hit?.kind === 'joint') { setGlyph([hit], kind); call('select.set', { ids: [hit.id] }); return; }
+  const t = touching(s, p);
+  batch(() => {
+    let id;
+    if (t?.joint) { setGlyph([get(t.joint)], kind); id = t.joint; }
+    else if (t) id = call('joint.add', { at: [{ id: t.id, u: round(t.u) }], node: true, glyph: kind, ...(MIDINOUS_KINDS.includes(kind) ? { code: nodeCodeFor(kind) } : {}) });
+    else { const q = snapHere(s.id, toSpace(s, p[0], p[1])); id = call('point.add', { space: s.id, at: q.map(round), glyph: kind, size: round(settings.pointSize * unitsPerPx(s)), ...(settings.stroke ? { style: { stroke: settings.stroke } } : {}) }); }
+    if (id) call('select.set', { ids: [id] });
+  });
+}
+
+// The polyline tool: a click a corner; double-click or Enter ends it, Escape drops it; a last
+// click on the first corner closes it (filled with the fill swatch).
+let poly = null; // { s, pts, px }
+function addPolyPoint(s, p) {
+  const sp = poly?.s ?? s, q0 = toSpace(sp, p[0], p[1]);
+  if (!q0) return;
+  const q = sp.kind === 'scene' ? q0 : snapHere(sp.id, q0);
+  if (poly && Math.hypot(p[0] - poly.px.at(-1)[0], p[1] - poly.px.at(-1)[1]) < 3) return; // the second press of a double-click
+  if (!poly) poly = { s, pts: [q], px: [p] }; else { poly.pts.push(q); poly.px.push(p); }
+  previewPoly(p);
+}
+function previewPoly(p) {
+  if (!poly) return;
+  const end = p && toSpace(poly.s, p[0], p[1]), pts = end ? [...poly.pts, end] : poly.pts;
+  if (poly.s.kind === 'scene') view.setPreview(pts, poly.s.id); else view.setPreview(pts.map((pt) => at(poly.s.xf, pt)), null, 'accent');
+}
+function finishPoly(keep = true) {
+  const g = poly; poly = null; view.setPreview(null);
+  if (!keep || !g || g.pts.length < 2) return;
+  const closed = g.pts.length > 3 && Math.hypot(g.px[0][0] - g.px.at(-1)[0], g.px[0][1] - g.px.at(-1)[1]) < 8;
+  const pts = closed ? g.pts.slice(0, -1) : g.pts;
+  batch(() => {
+    const id = call('line.add', { space: g.s.id, points: pts.map((q) => q.map(round)), ...(closed ? { closed: true } : {}), style: { path: 'straight', ...(settings.stroke ? { stroke: settings.stroke } : {}), ...(closed && settings.fill ? { fill: settings.fill } : {}), ...(settings.width !== 2.2 ? { width: settings.width } : {}) } });
+    if (id && !closed && g.s.kind !== 'scene') { joinEnd(g.s, id, 0, g.px[0]); joinEnd(g.s, id, 1, g.px.at(-1)); }
+    if (id) call('select.set', { ids: [id] });
+  });
+}
+// A regular polygon (or a star) in a box { cx, cy, w, h }, as points, the first at the top.
+function polygonPts(r, n = settings.polySides, star = settings.polyStar) {
+  const k = star ? n * 2 : n;
+  return Array.from({ length: k }, (_, i) => { const a = Math.PI / 2 + (i / k) * Math.PI * 2, f = star && i % 2 ? 0.45 : 1; return [r.cx + Math.cos(a) * r.w / 2 * f, r.cy + Math.sin(a) * r.h / 2 * f]; });
+}
+// The polygon tool, on the canvas: a closed straight line, filled with the fill swatch.
+function polygonAt(g) {
+  const a = toSpace(g.s, g.start[0], g.start[1]), b = toSpace(g.s, g.end[0], g.end[1]);
+  const r = { cx: (a[0] + b[0]) / 2, cy: (a[1] + b[1]) / 2, w: Math.abs(a[0] - b[0]), h: Math.abs(a[1] - b[1]) };
+  batch(() => {
+    const id = call('line.add', { space: g.s.id, points: polygonPts(r).map((q) => q.map(round)), closed: true, style: { path: 'straight', ...(settings.stroke ? { stroke: settings.stroke } : {}), ...(settings.fill ? { fill: settings.fill } : {}) } });
+    if (id) call('select.set', { ids: [id] });
+  });
+}
+
 // ---- the hold menu: hold still while drawing to turn the stroke into something --
 
 // What the ring offers, clockwise from the top; each is an action, so it also has a key, a menu entry and a palette entry.
@@ -773,7 +870,7 @@ let gesture = null; // what the pointer is doing between down and up
 let spaceKey = false, spaceUsed = false, spaceAt0 = 0, pointer = null;
 const ring = $('ring'); // the sculpt brush's reach
 const touches = new Map();
-const MAKE = { grid: { role: 'grid', shape: 'rect' }, rect: { role: 'visual', shape: 'rect' }, ellipse: { role: 'visual', shape: 'ellipse' }, code: { role: 'code', shape: 'rect' }, target: { role: 'target', shape: 'rect' }, score: { role: 'score', shape: 'rect' }, note: { role: 'note', shape: 'rect' }, event: { role: 'event', shape: 'ellipse' } };
+const MAKE = { polygon: { role: 'visual', shape: 'polygon' }, grid: { role: 'grid', shape: 'rect' }, rect: { role: 'visual', shape: 'rect' }, ellipse: { role: 'visual', shape: 'ellipse' }, code: { role: 'code', shape: 'rect' }, target: { role: 'target', shape: 'rect' }, score: { role: 'score', shape: 'rect' }, note: { role: 'note', shape: 'rect' }, event: { role: 'event', shape: 'ellipse' } };
 // The look new lines and shapes take, from the toolbar swatches.
 const newStyle = (fillable) => { const st = {}; if (settings.stroke) st.stroke = settings.stroke; if (fillable && settings.fill) st.fill = settings.fill; if (settings.width !== 2.2) st.width = settings.width; if (!fillable && !settings.smooth) st.path = 'straight'; return Object.keys(st).length ? { style: st } : {}; };
 const snap = (v) => (settings.snap ? Math.round(v / gridCell()) * gridCell() : v);
@@ -784,6 +881,7 @@ const snapHere = (space, p) => { const g = gridHere(space, p); return g.frame ? 
 
 const stacks = new Map(); // stack -> { b, members, current }: tools of one kind share a button
 function setTool(name) {
+  if (name !== 'polyline' && poly) finishPoly(true);
   tool = name;
   for (const b of document.querySelectorAll('[data-tool]')) b.setAttribute('aria-pressed', String(b.dataset.tool === name));
   for (const [key, st] of stacks) {
@@ -893,10 +991,12 @@ pad.addEventListener('pointerdown', (e) => {
     gesture = { kind: 'sculpt', s, marks, last: p, start: p, first: true, n: 0 };
     return;
   }
+  if (tool === 'point') { placePoint(here, p); return; }
+  if (tool === 'polyline') { addPolyPoint(here, p); return; }
   if (tool === 'draw') startDraw(here, p);
   else if (tool === 'line') { const s = placed(here, p), q = toSpace(s, p[0], p[1]); if (q) gesture = { kind: 'line', s, a: q, b: q, start: p }; }
   else if (MAKE[tool]) {
-    const flat = tool !== 'rect' && tool !== 'ellipse'; // only plain shapes can be drawn inside a target
+    const flat = tool !== 'rect' && tool !== 'ellipse' && tool !== 'polygon'; // only plain shapes can be drawn inside a target
     gesture = { kind: 'rect', make: MAKE[tool], s: placed(spaceAt(p[0], p[1], flat), p), start: p, end: p };
   } else {
     const id = pick(p[0], p[1]);
@@ -936,6 +1036,7 @@ pad.addEventListener('pointermove', (e) => {
   }
   ring.hidden = tool !== 'sculpt';
   if (tool === 'sculpt') ring.style.cssText = `left:${p[0]}px;top:${p[1]}px;width:${settings.sculptRadius * 2}px;height:${settings.sculptRadius * 2}px`;
+  if (!gesture && poly) previewPoly(p);
   if (!gesture) { pad.dataset.over = portAt(p[0], p[1]) ? 'port' : ''; if (tool === 'points') handles.hover(handles.at(p[0], p[1])); return; }
   const g = gesture;
   if (g.kind === 'sculpt') {
@@ -1035,7 +1136,7 @@ function shapeIn3d(g) {
   if (!basis || !a || !b) return;
   const dot = (p, q) => p[0] * q[0] + p[1] * q[1] + p[2] * q[2];
   const r = { cx: (dot(a, basis.u) + dot(b, basis.u)) / 2, cy: (dot(a, basis.v) + dot(b, basis.v)) / 2, w: Math.abs(dot(a, basis.u) - dot(b, basis.u)), h: Math.abs(dot(a, basis.v) - dot(b, basis.v)) };
-  const points = outline(r, g.make.shape).slice(0, -1).map(([x, y]) => [0, 1, 2].map((i) => round(basis.u[i] * x + basis.v[i] * y)));
+  const points = (g.make.shape === 'polygon' ? polygonPts(r) : outline(r, g.make.shape).slice(0, -1)).map(([x, y]) => [0, 1, 2].map((i) => round(basis.u[i] * x + basis.v[i] * y)));
   const id = call('line.add', { space: g.s.id, points, closed: true });
   call('select.set', { ids: [id] });
 }
@@ -1104,6 +1205,7 @@ function endGesture(e) {
   } else if (g.kind === 'rect') {
     const tiny = Math.hypot(g.end[0] - g.start[0], g.end[1] - g.start[1]) < 8;
     if (g.s.kind === 'scene') { if (!tiny) batch(() => shapeIn3d(g)); }
+    else if (g.make.shape === 'polygon') { if (!tiny) polygonAt(g); }
     else { addShape(g.s, g.make, g.start, tiny ? null : g.end); if (g.make.role === 'note') panels.show('properties'); }
     setTool('select');
   } else if (g.kind === 'marquee') {
@@ -1213,6 +1315,7 @@ function goUp() {
   if (parent === null) fit(); else frameIds([parent], 0.82);
 }
 pad.addEventListener('dblclick', (e) => {
+  if (poly) { finishPoly(true); return; }
   const p = local(e), v = vis.get(pick(p[0], p[1]));
   if (!v || !v.px) return fit();
   frameIds([v.o.id], 0.82);
@@ -1292,7 +1395,7 @@ const cycle = (dir) => {
 const addHere = (c, make, extra) => { const s = spaceAt(c.p[0], c.p[1], true); addShape(s, make, c.p, null, extra); };
 const can = (list, role) => list.some((o) => o.role !== role);
 // What can be made an event: lines on the flat canvas and plain shapes, not already events.
-const eventable = (c) => c.sel.filter((o) => o.role !== 'event' && ((isLine(o) && flatLine(o) && o.role !== 'traveler') || (o.kind === 'shape' && o.role === 'visual')));
+const eventable = (c) => c.sel.filter((o) => o.role !== 'event' && ((isLine(o) && flatLine(o) && o.role !== 'traveler') || (o.kind === 'shape' && o.role === 'visual') || o.kind === 'point'));
 
 const ACTIONS = [
   // grab, rotate, scale: G, R, S with something selected (or points picked), as in Blender
@@ -1306,8 +1409,14 @@ const ACTIONS = [
   { id: 'tool.pan', title: 'Pan', icon: 'pan', keys: 'h', group: 'tool', bar: 'tools', tool: 'pan' },
   { id: 'tool.draw', title: 'Draw', icon: 'draw', keys: 'd', group: 'tool', bar: 'tools', tool: 'draw', stack: 'line' },
   { id: 'tool.line', title: 'Straight line', icon: 'line', keys: 'l', group: 'tool', bar: 'tools', tool: 'line', stack: 'line' },
+  { id: 'tool.polyline', title: 'Polyline: click corners, double-click to end', icon: 'polyline', group: 'tool', bar: 'tools', tool: 'polyline', stack: 'line' },
+  { id: 'tool.point', title: 'Point: on a line, a node', icon: 'point', keys: 'i', group: 'tool', bar: 'tools', tool: 'point', stack: 'line' },
   { id: 'tool.rect', title: 'Rectangle', icon: 'rect', keys: 'r', group: 'tool', bar: 'tools', tool: 'rect', stack: 'shape' },
   { id: 'tool.ellipse', title: 'Ellipse', icon: 'ellipse', keys: 'o', group: 'tool', bar: 'tools', tool: 'ellipse', stack: 'shape' },
+  { id: 'tool.polygon', title: 'Polygon (sides and star in its settings)', icon: 'polygon', group: 'tool', bar: 'tools', tool: 'polygon', stack: 'shape' },
+  // what a point or a joint is (glyphs.js): a submenu of the context menu
+  ...POINT_KINDS.map((k) => ({ id: 'glyph.' + k, title: GLYPH_TITLE[k], short: k, icon: 'g.' + k, group: 'role', menu: 'Point', when: (c) => c.sel.some((o) => o.kind === 'point' || o.kind === 'joint'), on: () => [...state.selection].map(get).some((o) => o?.glyph === k), run: (c) => setGlyph(c.sel.filter((o) => o.kind === 'point' || o.kind === 'joint'), k) })),
+  { id: 'view.crossings', title: 'Show where lines cross', icon: 'crossing', group: 'show', menu: true, when: (c) => !c.hit, on: () => settings.showCrossings, run: () => setSetting('showCrossings', !settings.showCrossings) },
   { id: 'tool.sculpt', title: 'Sculpt', icon: 'sculpt', keys: 'u', group: 'tool', bar: 'tools', tool: 'sculpt' },
   { id: 'sculpt.smaller', title: 'Sculpt: smaller', keys: '[', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptRadius', Math.max(6, Math.round(settings.sculptRadius / 1.2))) },
   { id: 'sculpt.larger', title: 'Sculpt: larger', keys: ']', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptRadius', Math.min(400, Math.round(settings.sculptRadius * 1.2))) },
@@ -1847,6 +1956,7 @@ const CODE_KEY = { Comma: ',', Period: '.', Semicolon: ';', Slash: '/', BracketL
 const baseKey = (e) => (e.altKey && /^(Key|Digit)./.test(e.code ?? '') ? e.code.slice(-1).toLowerCase() : e.altKey && CODE_KEY[e.code] ? CODE_KEY[e.code] : e.key === ' ' ? 'space' : e.key.toLowerCase());
 const keyOf = (e) => [(e.metaKey || e.ctrlKey) && 'mod', e.shiftKey && 'shift', e.altKey && 'alt', baseKey(e)].filter(Boolean).join('+');
 addEventListener('keydown', (e) => {
+  if (poly && (e.key === 'Enter' || e.key === 'Escape')) { finishPoly(e.key === 'Enter'); e.preventDefault(); return; }
   if (e.target.closest?.('input, textarea, select, .menu')) return;
   if (e.key === ' ') { if (!spaceKey) { spaceUsed = false; spaceAt0 = performance.now(); } spaceKey = true; pad.dataset.pan = '1'; e.preventDefault(); return; }
   const k = keyOf(e), c = context();

@@ -93,6 +93,19 @@ more. Choose one in Properties, in the draw tool's settings (right-click
 the tool), or from the palette ("Brush: charcoal"). Brushed marks are
 painted on a 2D layer, so they do not appear inside render targets.
 
+## Points and nodes
+
+The point tool (I) puts a point: a dot, ring or plus, or one of Midinous's
+kinds (note, cc, gate, LED, counter, switch, terminator, anchor), chosen in
+its settings (right-click the tool). On a line it puts a node of that kind
+instead: a traveler passing it runs its code (a note node plays a note) and
+goes on. On a joint it makes the joint that kind. Right-click › Point
+changes the type of selected points and joints. The line stack also has a
+polyline tool (click the corners; double-click or Enter ends it; ending on
+the first corner closes it), and the shape stack a polygon tool (sides and
+star in its settings). View › Show where lines cross marks crossings that
+are not joints.
+
 ## Joints
 
 Lines that touch connect. When the end of a stroke lands on another line,

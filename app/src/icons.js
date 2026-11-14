@@ -1,4 +1,5 @@
 // Glyphs for the toolbar: 16 by 16, drawn with the current colour.
+import { GLYPH_ICONS } from './glyphs.js';
 
 const PATHS = {
   select: 'M3 2l9 6-4.2 1 2.2 4.2-1.8 1L6 10 3 12.5z',
@@ -49,6 +50,11 @@ const PATHS = {
   line: 'M3 13L13 3',
   straighten: 'M2 12h12 M2 7c2-3 4 2 6-1s4 1 6-2 M2 12v.1 M14 12v.1',
   simplify: 'M2 12l4-7 4 5 4-7 M6 5v.1 M10 10v.1',
+  point: 'M8 10.500a2.500 2.500 0 100-5 2.500 2.500 0 000 5z M3 13l1.500-1.500',
+  polyline: 'M2 12l4-7 4 5 4-6 M2 12v.1 M6 5v.1 M10 10v.1 M14 4v.1',
+  polygon: 'M8 2l5.700 4.100-2.200 6.900h-7L2.300 6.100z',
+  crossing: 'M3 3l10 10 M13 3L3 13 M8 6.500v3',
+  ...Object.fromEntries(Object.entries(GLYPH_ICONS).map(([k, v]) => ['g.' + k, v])),
   timeline: 'M2 4h12 M2 8h12 M2 12h12 M6 2.500v3 M10 6.500v3 M5 10.500v3',
   metronome: 'M5.500 2h5l2.500 12h-10z M8 11L11.500 4 M4 10.500h8',
   instrument: 'M6 12.500V3l7-1.500v9 M6 12.500a2 2 0 11-4 0 2 2 0 014 0z M13 10.500a2 2 0 11-4 0 2 2 0 014 0z',

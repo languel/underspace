@@ -151,12 +151,12 @@ const place = { type: 'object', description: '{ id, u, slide? }: a point on a li
 // A joint loses the places on lines that are gone; with fewer than two (and no pin) it goes.
 function dropPlaces(j, gone) {
   j.at = j.at.filter((q) => !gone.has(q.id));
-  if (j.at.length < (j.fix ? 1 : 2)) { state.objects.delete(j.id); state.selection.delete(j.id); }
+  if (j.at.length < (j.fix || j.node ? 1 : 2)) { state.objects.delete(j.id); state.selection.delete(j.id); }
 }
 define({
   name: 'joint.add',
   doc: 'Join lines where they touch: the places given are held together from now on, and moving one line carries the others (each keeps its drawn shape). The first place is the one that comes to the others. With into, the places join an existing joint. With fix and one place, a pin: that place stays at pos. A joint is also a junction: its code says which way a traveler goes on.',
-  args: { at: { type: 'array', items: place }, into: T.id, fix: { type: 'boolean' }, pos: { type: 'array', items: { type: 'number' } }, code: T.str }, required: ['at'],
+  args: { at: { type: 'array', items: place }, into: T.id, fix: { type: 'boolean' }, node: { type: 'boolean', description: 'one place, no constraint: a node on a line (travelers passing run its code)' }, glyph: { type: 'string' }, pos: { type: 'array', items: { type: 'number' } }, code: T.str }, required: ['at'],
   hold: (a) => (a.into ? [a.into] : a.fix ? [] : a.at.slice(1).map((q) => q.id)),
   run(a) {
     const ok = (a.at ?? []).filter((q) => isCurve(state.objects.get(q.id)) && Number.isFinite(q.u));
@@ -167,15 +167,41 @@ define({
       for (const q of ok) if (state.objects.get(q.id).space === j.space && !j.at.some((p) => p.id === q.id)) j.at.push(clean(q));
       return j.id;
     }
-    if (!ok.length || (!a.fix && new Set(ok.map((q) => q.id)).size < 2)) return null;
+    if (!ok.length || (!a.fix && !a.node && new Set(ok.map((q) => q.id)).size < 2)) return null;
     const space = state.objects.get(ok[0].id).space;
     if (ok.some((q) => state.objects.get(q.id).space !== space)) return null;
     const first = state.objects.get(ok[0].id), m = measure(curveOf(first, ptsOf(first))), at = atU(m, ok[0].u);
     const pos = (Array.isArray(a.pos) && a.pos.length >= 2 ? a.pos : at.slice(0, first.points[0].length > 2 ? 3 : 2)).map(round);
     const j = { id: newId(), kind: 'joint', role: 'junction', space, at: (a.fix ? ok.slice(0, 1) : ok).map(clean), pos, rect: { cx: pos[0], cy: pos[1], w: 0, h: 0 }, code: a.code ?? JUNCTION, params: {} };
     if (a.fix) j.fix = true;
+    if (a.node && ok.length === 1) j.node = true;
+    if (a.glyph) j.glyph = a.glyph;
     state.objects.set(j.id, j);
     return j.id;
+  },
+});
+
+define({
+  name: 'point.add', doc: 'Put a point: a mark with a glyph (dot, ring, plus, or a Midinous kind: note, cc, gate, led, counter, switch, terminator, anchor), `size` across, in canvas units. role "event": a traveler passing within it fires it.',
+  args: { space: T.space, at: { type: 'array', items: { type: 'number' } }, glyph: { type: 'string' }, size: T.num, role: { enum: ['ink', 'event'] }, style: T.style }, required: ['at'],
+  run(a) {
+    const size = a.size > 0 ? a.size : 0.4, o = { id: newId(), kind: 'point', role: 'ink', space: a.space ?? null, glyph: a.glyph ?? 'dot', rect: { cx: round(a.at[0]), cy: round(a.at[1]), w: size, h: size } };
+    if (a.style) o.style = { ...a.style };
+    if (a.role === 'event') { o.role = 'event'; o.code = EVENT; o.params = {}; }
+    state.objects.set(o.id, o);
+    return o.id;
+  },
+});
+define({
+  name: 'object.glyph', doc: 'How points and joints look: a glyph (dot, ring, plus, note, cc, gate, led, counter, switch, terminator, anchor). With code, a joint also gets that code (a Midinous node of that kind).',
+  args: { ids: T.ids, glyph: { type: 'string' }, code: T.str }, required: ['ids', 'glyph'],
+  run(a) {
+    for (const id of a.ids) {
+      const o = state.objects.get(id);
+      if (!o || (o.kind !== 'point' && o.kind !== 'joint')) continue;
+      o.glyph = a.glyph;
+      if (a.code && o.kind === 'joint') o.code = a.code;
+    }
   },
 });
 

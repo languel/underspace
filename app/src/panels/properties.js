@@ -5,6 +5,7 @@
 import { h, row, section, glyphButton, numberField, textField, colorField, syncParams, choice } from '../controls.js';
 import { ROLES, blanketOf, hasCode, isTarget } from '../object.js';
 import { settings, setSetting } from '../settings.js';
+import { POINT_KINDS, GLYPH_TITLE } from '../glyphs.js';
 
 const ROLE_ICON = { event: 'event', traveler: 'traveler', ink: 'ink', connector: 'connector', path: 'path', visual: 'visual', target: 'target', code: 'box', score: 'score', grid: 'grid', note: 'note' };
 const ROLE_TITLE = { event: 'Event', traveler: 'Traveler', ink: 'Ink', connector: 'Connector', path: 'Path', visual: 'Visual', target: 'Render target', code: 'Code container', score: 'Score', grid: 'Grid frame', note: 'Note' };
@@ -21,14 +22,21 @@ function brushSection(app, role, id, params, onBrush, onParam) {
 
 const shared = (list, get) => { const v = get(list[0]); return list.every((o) => get(o) === v) ? v : undefined; };
 
-const TOOL_TITLE = { sculpt: 'Sculpt', select: 'Select', pan: 'Pan', draw: 'Draw', line: 'Straight line', rect: 'Rectangle', ellipse: 'Ellipse', note: 'Note', code: 'Code container', target: 'Render target', score: 'Score' };
+const TOOL_TITLE = { point: 'Point', polyline: 'Polyline', polygon: 'Polygon', sculpt: 'Sculpt', select: 'Select', pan: 'Pan', draw: 'Draw', line: 'Straight line', rect: 'Rectangle', ellipse: 'Ellipse', note: 'Note', code: 'Code container', target: 'Render target', score: 'Score' };
 
 // What the active tool will make, and how.
 export function toolProps(app, tool) {
   const out = [], check = (key) => { const c = h('input'); c.type = 'checkbox'; c.checked = settings[key]; c.addEventListener('change', () => setSetting(key, c.checked)); return c; };
   const look = [];
-  if (['draw', 'line', 'rect', 'ellipse'].includes(tool)) look.push(row('stroke', colorField(settings.stroke, (c) => setSetting('stroke', c))));
-  if (['rect', 'ellipse'].includes(tool)) look.push(row('fill', colorField(settings.fill, (c) => setSetting('fill', c))));
+  if (['draw', 'line', 'rect', 'ellipse', 'point', 'polyline', 'polygon'].includes(tool)) look.push(row('stroke', colorField(settings.stroke, (c) => setSetting('stroke', c))));
+  if (tool === 'point') {
+    // the glyph a point is placed with: plain marks, and Midinous's kinds (on a line, a node of that kind)
+    const bar = h('div', 'glyph-row');
+    bar.append(...POINT_KINDS.map((k) => glyphButton('g.' + k, GLYPH_TITLE[k], () => { setSetting('pointGlyph', k); for (const b of bar.children) b.setAttribute('aria-pressed', String(b.title === GLYPH_TITLE[k])); }, settings.pointGlyph === k)));
+    look.push(bar, row('size', numberField(settings.pointSize, (v) => setSetting('pointSize', Math.max(3, Math.min(200, v))), { step: 1, min: 3 })));
+  }
+  if (tool === 'polygon') look.push(row('sides', numberField(settings.polySides, (v) => setSetting('polySides', Math.max(3, Math.min(24, Math.round(v)))), { step: 1, min: 3, max: 24 })), row('star', check('polyStar')));
+  if (['rect', 'ellipse', 'polygon'].includes(tool)) look.push(row('fill', colorField(settings.fill, (c) => setSetting('fill', c))));
   if (tool === 'draw') look.push(row('smooth', check('smooth')), row('simplify', numberField(settings.simplify, (v) => setSetting('simplify', Math.max(0, v)), { step: 0.5, min: 0 })));
   if (look.length) look.push(row('width', numberField(settings.width, (v) => setSetting('width', Math.max(0.5, v)), { step: 0.2, min: 0.5 })));
   if (tool === 'code') look.push(row('preset', choice(Object.keys(app.PRESETS).filter((k) => !['path', 'wave'].includes(k)), settings.codePreset, (v) => setSetting('codePreset', v))));

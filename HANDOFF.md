@@ -763,6 +763,27 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   localStorage across reloads. A heartbeat marks a session that ended
   without closing, which the next load reports. "Copy a debug report" puts
   it all on the clipboard as JSON; "Clear the error log" empties it.
+- **Points, nodes and their glyphs** (a twenty-sixth pass, after AMS's
+  point, line and plane and its node brush): `src/glyphs.js` draws a point,
+  a joint or a node as dot, ring, plus, or a Midinous kind: note square, cc
+  circle, gate D, LED diamond, counter hexagon, switch octagon, terminator
+  ×, anchor dot.
+  - A `point` kind (`point.add`; role ink or event: a traveler passing
+    within its half size fires it) carries its glyph and scales with the
+    view.
+  - `object.glyph` sets the glyph of points and joints. Giving a joint a
+    Midinous kind also gives it that kind's code (`nodeCodeFor`, unless
+    its code was written by hand).
+  - A joint may have one place (`node: true`): a node on a line, which runs
+    its code when a traveler passes and lets it go on.
+  - Tools: Point (I, in the line stack; its settings list the glyphs and a
+    size). On a line it puts a node of that kind; on a joint or point it
+    retypes it; elsewhere it puts a point. Polyline (click corners;
+    double-click or Enter ends; Escape drops; ending on the first corner
+    closes and fills it). Polygon (in the shape stack; sides and star in
+    its settings; also inside render targets).
+  - Context menu: Point › with the eleven types. View: Show where lines
+    cross marks unjoined crossings (computed once per change, bounded).
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a
