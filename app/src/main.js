@@ -181,7 +181,8 @@ function walk(space, xf) {
         if (m.space !== o.id || !m.points || m.hidden) continue;
         const raw = ptsOf(m), mst = m.style ?? {}, pts = m.closed || mst.path === 'straight' ? raw : smooth(raw, stepsOnScreen(ppu));
         if (m.closed) pts.push(pts[0]);
-        const color = state.selection.has(m.id) ? 'accent' : mst.stroke ?? 'ink', width = mst.width ?? 2.2;
+        const litEv = m.role === 'event' && performance.now() - (playEngine.hitAt.get(m.id) ?? -1e9) < 160;
+        const color = state.selection.has(m.id) ? 'accent' : litEv ? 'hot' : mst.stroke ?? 'ink', width = (mst.width ?? 2.2) + (litEv ? 2 : 0);
         // its pen pressure as its width (grease pencil), its fill when it is closed
         const runs = settings.pressureWidth !== 'off' && !m.closed && mst.path !== 'straight' ? pressureRuns(raw, penOf(m), width, stepsOnScreen(ppu)) : null;
         if (m.closed && mst.fill) marks.push({ pts, color, width: 0, fill: mst.fill, opacity: mst.opacity });
@@ -209,6 +210,19 @@ function walk(space, xf) {
           for (let k = 0; k < 3; k++) { const a = v.slice(), b = v.slice(); a[k] -= d; b[k] += d; marks.push({ pts: [a, b], color, width: 2 }); if (!used.has(i)) ink3d.push({ id: me.id, scene: o.id, pts: [a, b] }); }
         });
         vis.set(me.id, { o: me, face: 'line', scene: o.id });
+      }
+      // points in it: their glyphs, facing the camera
+      const facing = view.planeBasis(o.id, 'view');
+      for (const pt of state.objects.values()) {
+        if (pt.kind !== 'point' || pt.space !== o.id || pt.hidden || !facing) continue;
+        const r = pt.rect, c = [r.cx, r.cy, pt.z ?? 0], psel = state.selection.has(pt.id), lit = litNow.has(pt.id) || (pt.role === 'event' && performance.now() - (playEngine.hitAt.get(pt.id) ?? -1e9) < 160);
+        const to3 = (q) => [0, 1, 2].map((k) => c[k] + facing.u[k] * (q[0] - c[0]) + facing.v[k] * (q[1] - c[1]));
+        for (const g of glyphLines(pt.glyph ?? 'dot', [c[0], c[1]], r.w / 2)) {
+          const pts = g.pts.map(to3), color = psel ? 'accent' : lit ? 'hot' : pt.style?.stroke ?? 'ink';
+          marks.push({ pts, color, width: 1.6, fill: g.fill ? color : null });
+          ink3d.push({ id: pt.id, scene: o.id, pts });
+        }
+        vis.set(pt.id, { o: pt, face: 'joint', scene: o.id });
       }
       // travelers on its lines: a small star where each is
       for (const tr of state.objects.values()) {
@@ -874,7 +888,6 @@ function setGlyph(list, kind) {
   });
 }
 function placePoint(s, p) {
-  if (s.kind === 'scene') return; // points inside a 3D space: later
   const kind = settings.pointGlyph, hit = get(pick(p[0], p[1]));
   if (hit?.kind === 'point' || hit?.kind === 'joint') { setGlyph([hit], kind); call('select.set', { ids: [hit.id] }); return; }
   const t = touching(s, p);
@@ -882,6 +895,7 @@ function placePoint(s, p) {
     let id;
     if (t?.joint) { setGlyph([get(t.joint)], kind); id = t.joint; }
     else if (t) id = call('joint.add', { at: [{ id: t.id, u: round(settings.quantOn ? quantU(get(t.id), t.u) : t.u) }], node: true, glyph: kind, ...(MIDINOUS_KINDS.includes(kind) ? { code: nodeCodeFor(kind) } : {}) });
+    else if (s.kind === 'scene') { const q = magnetIn(placed(s, p), p)?.point; if (q) id = call('point.add', { space: s.id, at: q.map(round), glyph: kind, size: 0.35, ...(settings.stroke ? { style: { stroke: settings.stroke } } : {}) }); }
     else { const q = snapHere(s.id, toSpace(s, p[0], p[1])); id = call('point.add', { space: s.id, at: q.map(round), glyph: kind, size: round(settings.pointSize * unitsPerPx(s)), ...(settings.stroke ? { style: { stroke: settings.stroke } } : {}) }); }
     if (id) call('select.set', { ids: [id] });
   });
@@ -1635,7 +1649,7 @@ const cycle = (dir) => {
 const addHere = (c, make, extra) => { const s = spaceAt(c.p[0], c.p[1], true); addShape(s, make, c.p, null, extra); };
 const can = (list, role) => list.some((o) => o.role !== role);
 // What can be made an event: lines on the flat canvas and plain shapes, not already events.
-const eventable = (c) => c.sel.filter((o) => o.role !== 'event' && ((isLine(o) && flatLine(o) && o.role !== 'traveler') || (o.kind === 'shape' && o.role === 'visual') || o.kind === 'point'));
+const eventable = (c) => c.sel.filter((o) => o.role !== 'event' && ((isLine(o) && !o.bind && o.role !== 'traveler') || (o.kind === 'shape' && o.role === 'visual') || o.kind === 'point'));
 
 const ACTIONS = [
   // grab, rotate, scale: G, R, S with something selected (or points picked), as in Blender

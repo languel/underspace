@@ -905,6 +905,20 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   and loose ones always. Constrain › Weld corners that sit together
   (`weld`). Not yet from PolyQuilt: knife and loop cuts, deleting and
   dissolving parts, AutoQuad, a surface to draw on (raycast).
+- **3D, fifth pass: events and points in render targets.** The point tool
+  works in targets: points go where the magnet puts them (`z` on the
+  point) and are drawn as their glyph facing the camera. On a 3D line the
+  tool puts a node, as on the canvas. Events in 3D: a point is reached by
+  passing within its half size; a line by passing within 0.18 units
+  (`NEAR3D`, the nearest distance between stretches, `segSeg`), latched
+  while near; a closed line by going inside it, in its own plane, within
+  that slab (`enclosed3d`). Lines in targets can be made events, and flash
+  when reached. Examples: Space › 3D (marks into a scene, a Poly Build
+  mesh, events in 3D, a grease pencil stroke).
+- Lesson: a `const` in `walk()` that shadows a name the block reads earlier
+  throws every frame ("Cannot access … before initialization"). The frame
+  guard keeps the page alive and ⌥D shows the error; check it after
+  changing `walk()`.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a

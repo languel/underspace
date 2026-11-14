@@ -75,6 +75,38 @@ function crosses(path, p, q) {
   }
   return null;
 }
+// The nearest distance between two stretches in 3D (a step of a traveler, a stretch of an event line).
+function segSeg(p1, q1, p2, q2) {
+  const v = (a) => [a[0], a[1], a[2] ?? 0], P1 = v(p1), Q1 = v(q1), P2 = v(p2), Q2 = v(q2);
+  const d1 = [0, 1, 2].map((k) => Q1[k] - P1[k]), d2 = [0, 1, 2].map((k) => Q2[k] - P2[k]), r = [0, 1, 2].map((k) => P1[k] - P2[k]);
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r);
+  let s, t;
+  if (a < 1e-12 && e < 1e-12) { s = t = 0; } else if (a < 1e-12) { s = 0; t = Math.max(0, Math.min(1, f / e)); } else {
+    const c = dot(d1, r);
+    if (e < 1e-12) { t = 0; s = Math.max(0, Math.min(1, -c / a)); } else {
+      const b = dot(d1, d2), den = a * e - b * b;
+      s = den > 1e-12 ? Math.max(0, Math.min(1, (b * f - c * e) / den)) : 0;
+      t = (b * s + f) / e;
+      if (t < 0) { t = 0; s = Math.max(0, Math.min(1, -c / a)); } else if (t > 1) { t = 1; s = Math.max(0, Math.min(1, (b - c) / a)); }
+    }
+  }
+  const c1 = [0, 1, 2].map((k) => P1[k] + d1[k] * s), c2 = [0, 1, 2].map((k) => P2[k] + d2[k] * t);
+  return { d: Math.hypot(c1[0] - c2[0], c1[1] - c2[1], c1[2] - c2[2]), at: c1 };
+}
+// Inside a closed line in 3D: within `slab` of its plane, and inside it there.
+function enclosed3d(path, p, slab) {
+  const n = [0, 0, 0], c = [0, 0, 0];
+  path.forEach((a, i) => { const b = path[(i + 1) % path.length]; n[0] += (a[1] - b[1]) * ((a[2] ?? 0) + (b[2] ?? 0)); n[1] += ((a[2] ?? 0) - (b[2] ?? 0)) * (a[0] + b[0]); n[2] += (a[0] - b[0]) * (a[1] + b[1]); c[0] += a[0] / path.length; c[1] += a[1] / path.length; c[2] += (a[2] ?? 0) / path.length; });
+  const l = Math.hypot(...n) || 1, N = n.map((x) => x / l), off = (q) => (q[0] - c[0]) * N[0] + (q[1] - c[1]) * N[1] + ((q[2] ?? 0) - c[2]) * N[2];
+  if (Math.abs(off(p)) > slab) return false;
+  const U = Math.abs(N[0]) < 0.9 ? [0, N[2], -N[1]] : [-N[2], 0, N[0]], ul = Math.hypot(...U), u = U.map((x) => x / ul), w = [N[1] * u[2] - N[2] * u[1], N[2] * u[0] - N[0] * u[2], N[0] * u[1] - N[1] * u[0]];
+  const flat = (q) => [(q[0] - c[0]) * u[0] + (q[1] - c[1]) * u[1] + ((q[2] ?? 0) - c[2]) * u[2], (q[0] - c[0]) * w[0] + (q[1] - c[1]) * w[1] + ((q[2] ?? 0) - c[2]) * w[2]];
+  const fp = flat(p);
+  return enclosed(path.map(flat), fp[0], fp[1]);
+}
+const is3d = (o) => (o.points?.[0]?.length ?? 0) > 2 || Number.isFinite(o.z);
+const NEAR3D = 0.18; // how near a traveler passes a line or a point in 3D to reach it (scene units)
+
 const segDist = (c, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, k = l2 ? Math.max(0, Math.min(1, ((c[0] - a[0]) * dx + (c[1] - a[1]) * dy) / l2)) : 0; return Math.hypot(c[0] - a[0] - dx * k, c[1] - a[1] - dy * k); };
 const isClosed = (o, path) => o.closed || (path.length > 3 && Math.hypot(path[0][0] - path[path.length - 1][0], path[0][1] - path[path.length - 1][1]) < 1e-6);
 
@@ -306,7 +338,16 @@ export function createPlay() {
             const key = o.id + '#' + rider.n + '|' + e.id;
             let entered = null, now = false;
             const wasIn = latched.has(key), ep = hooks.paramsOf(e);
-            if (e.kind === 'line') {
+            if (e.kind === 'line' && is3d(e)) {
+              // in 3D, a line is reached by passing near it; a closed one by going in (within a slab of its plane)
+              const path = pathOf(e);
+              if (isClosed(e, path)) { for (let k = 1; k < trail.length && !entered; k++) if (trail[k] && enclosed3d(path, trail[k], NEAR3D)) entered = trail[k]; now = enclosed3d(path, pos, NEAR3D); }
+              else {
+                // near it counts as inside: it fires on the way in, and again only after the traveler has been away
+                for (let k = 1; k < trail.length && !entered; k++) if (trail[k - 1] && trail[k]) for (let i = 1; i < path.length && !entered; i++) { const h = segSeg(trail[k - 1], trail[k], path[i - 1], path[i]); if (h.d <= NEAR3D) entered = h.at; }
+                for (let i = 1; i < path.length && !now; i++) now = segSeg(pos, pos, path[i - 1], path[i]).d <= NEAR3D;
+              }
+            } else if (e.kind === 'line') {
               const path = pathOf(e);
               if (isClosed(e, path)) { for (let k = 1; k < trail.length && !entered; k++) if (trail[k] && enclosed(path, trail[k][0], trail[k][1])) entered = trail[k]; now = enclosed(path, pos[0], pos[1]); }
               else {
@@ -318,9 +359,9 @@ export function createPlay() {
               }
             } else if (e.kind === 'point') {
               // a point event: the traveler passes within its half size (swept along each step)
-              const r = rectOf(e), c = [r.cx, r.cy], R = r.w / 2;
-              for (let k = 1; k < trail.length && !entered; k++) if (trail[k - 1] && trail[k] && segDist(c, trail[k - 1], trail[k]) <= R) entered = trail[k];
-              now = Math.hypot(pos[0] - c[0], pos[1] - c[1]) <= R;
+              const r = rectOf(e), c = Number.isFinite(e.z) ? [r.cx, r.cy, e.z] : [r.cx, r.cy], R = r.w / 2;
+              if (c.length > 2) { for (let k = 1; k < trail.length && !entered; k++) if (trail[k - 1] && trail[k] && segSeg(trail[k - 1], trail[k], c, c).d <= R) entered = trail[k]; now = Math.hypot(pos[0] - c[0], pos[1] - c[1], (pos[2] ?? 0) - c[2]) <= R; }
+              else { for (let k = 1; k < trail.length && !entered; k++) if (trail[k - 1] && trail[k] && segDist(c, trail[k - 1], trail[k]) <= R) entered = trail[k]; now = Math.hypot(pos[0] - c[0], pos[1] - c[1]) <= R; }
             } else {
               const r = rectOf(e);
               for (let k = 1; k < trail.length && !entered; k++) if (trail[k] && inside(e, r, trail[k][0], trail[k][1])) entered = trail[k];

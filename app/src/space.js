@@ -187,6 +187,7 @@ define({
   args: { space: T.space, at: { type: 'array', items: { type: 'number' } }, glyph: { type: 'string' }, size: T.num, role: { enum: ['ink', 'event'] }, style: T.style }, required: ['at'],
   run(a) {
     const size = a.size > 0 ? a.size : 0.4, o = { id: newId(), kind: 'point', role: 'ink', space: a.space ?? null, glyph: a.glyph ?? 'dot', rect: { cx: round(a.at[0]), cy: round(a.at[1]), w: size, h: size } };
+    if (Number.isFinite(a.at[2])) o.z = round(a.at[2]); // a point in a render target
     if (a.style) o.style = { ...a.style };
     if (a.role === 'event') { o.role = 'event'; o.code = EVENT; o.params = {}; }
     state.objects.set(o.id, o);

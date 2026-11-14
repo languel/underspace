@@ -248,4 +248,45 @@ export const EXAMPLES = [
   { path: 'Drawing/Points', title: 'Every kind of point', icon: 'point', build: (c, at) => {
     POINT_KINDS.forEach((k, i) => c('point.add', { at: [at[0] - 5 + (i % 6) * 2, at[1] + (i < 6 ? 1 : -1)], glyph: k, size: 0.7 }));
   } },
+
+  // ---- 3D: render targets as scenes to draw, build and play in -------------------------
+
+  { path: 'Space/3D', title: 'Marks into a 3D scene', icon: 'target', build: (c, at) => {
+    // lines drawn flat, then a render target over them: it takes them in, with their node and traveler
+    const wave = c('line.add', { points: Array.from({ length: 30 }, (_, i) => [+(at[0] - 4 + i * 0.28).toFixed(3), +(at[1] + Math.sin(i * 0.35) * 1.4).toFixed(3)]) });
+    const flat = c('line.add', { points: [[at[0] - 3, at[1] - 2], [at[0] + 3.5, at[1] - 2]], style: { path: 'straight' } });
+    c('joint.add', { at: [{ id: wave, u: 0.5 }], node: true, glyph: 'note', code: nodeCodeFor('note', 67) });
+    c('traveler.add', { on: wave, dur: 4, loop: 1 });
+    const t = c('shape.add', { role: 'target', rect: { cx: at[0], cy: at[1], w: 11, h: 6.5 } });
+    c('target.set', { id: t, az: 0.6, el: 0.35 });
+    c('target.take', { id: t, ids: [wave, flat] });
+  } },
+  { path: 'Space/3D', title: 'A Poly Build mesh', icon: 'mesh', build: (c, at) => {
+    const t = c('shape.add', { role: 'target', rect: { cx: at[0], cy: at[1], w: 10, h: 6.5 } });
+    c('target.set', { id: t, az: 0.7, el: 0.5 });
+    // a strip of quads bent upward, as an edge pulled out again and again would make
+    const verts = [], faces = [];
+    for (let i = 0; i <= 4; i++) { const a = i * 0.35; verts.push([-2 + i, Math.sin(a) * 1.2, -1], [-2 + i, Math.sin(a) * 1.2, 1]); }
+    for (let i = 0; i < 4; i++) faces.push([i * 2, i * 2 + 2, i * 2 + 3, i * 2 + 1]);
+    c('mesh.add', { space: t, verts, faces, style: { fill: '#0f766e' } });
+  } },
+  { path: 'Space/3D', title: 'Events in 3D', icon: 'event', build: (c, at) => {
+    const t = c('shape.add', { role: 'target', rect: { cx: at[0], cy: at[1], w: 10, h: 6.5 } });
+    c('target.set', { id: t, az: 0.5, el: 0.3 });
+    const line = c('line.add', { space: t, points: Array.from({ length: 24 }, (_, i) => { const a = (i / 23) * Math.PI * 2; return [Math.cos(a) * 2.5, Math.sin(a * 2) * 0.8, Math.sin(a) * 2.5]; }) });
+    c('traveler.add', { on: line, dur: 6, loop: 1 });
+    // a bar it passes near, a ring it goes through, points it passes
+    const bar = c('line.add', { space: t, points: [[2.5, -1.2, 0], [2.5, 1.2, 0]], style: { path: 'straight' } });
+    c('object.role', { id: bar, role: 'event' });
+    const ring = c('line.add', { space: t, points: Array.from({ length: 12 }, (_, i) => { const a = (i / 12) * Math.PI * 2; return [-2.5 + Math.cos(a) * 0.1, Math.sin(a) * 0.7, Math.cos(a) * 0.7]; }), closed: true });
+    c('object.role', { id: ring, role: 'event' });
+    for (const k of [3, 9, 15]) { const a = (k / 23) * Math.PI * 2; c('point.add', { space: t, at: [Math.cos(a) * 2.5, Math.sin(a * 2) * 0.8, Math.sin(a) * 2.5], glyph: 'led', size: 0.5, role: 'event' }); }
+  } },
+  { path: 'Space/3D', title: 'A grease pencil stroke', icon: 'draw', build: (c, at) => {
+    const t = c('shape.add', { role: 'target', rect: { cx: at[0], cy: at[1], w: 10, h: 6.5 } });
+    c('target.set', { id: t, az: 0.4, el: 0.3 });
+    const n = 40, pts = Array.from({ length: n }, (_, i) => [-3 + i * 0.15, Math.sin(i * 0.25) * 1.2, Math.cos(i * 0.2) * 0.8]);
+    c('line.add', { space: t, points: pts, pen: pts.map((_, i) => [i * 20, 0.1 + 0.85 * Math.sin((i / (n - 1)) * Math.PI)]), style: { width: 5, stroke: '#e8e2d4' } });
+    c('line.add', { space: t, points: Array.from({ length: 7 }, (_, i) => { const a = (i / 7) * Math.PI * 2; return [1.5 + Math.cos(a), -1.2, Math.sin(a)]; }), closed: true, style: { fill: '#c2410c', stroke: '#f97316' } });
+  } },
 ];

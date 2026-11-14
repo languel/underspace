@@ -75,3 +75,22 @@ test('pen pressure as width: runs of one width, covering the curve exactly once'
   assert.deepEqual(joined, smooth(pts), 'the runs are the smooth curve, end to end');
   assert.equal(pressureRuns(pts, null, 2), null);
 });
+
+test('events in 3D: a point passed through, a line passed near, a closed line gone through', async () => {
+  const { createPlay } = await import('../src/play.js');
+  call('space.clear');
+  const t = call('shape.add', { role: 'target', rect: { cx: 0, cy: 0, w: 8, h: 6 } });
+  const line = call('line.add', { space: t, points: [[0, 0, 0], [0, 0, 10]], style: { path: 'straight' } });
+  call('traveler.add', { on: line, dur: 10, loop: 0 });
+  const pt = call('point.add', { space: t, at: [0.1, 0, 2], glyph: 'note', size: 0.4, role: 'event' });
+  call('object.code', { id: pt, code: 'note(60, 100, 0.1);' });
+  const bar = call('line.add', { space: t, points: [[-1, 0.1, 5], [1, 0.1, 5]], style: { path: 'straight' } });
+  call('object.role', { id: bar, role: 'event' }); call('object.code', { id: bar, code: 'note(64, 100, 0.1);' });
+  const ring = call('line.add', { space: t, points: Array.from({ length: 12 }, (_, i) => { const a = (i / 12) * Math.PI * 2; return [Math.cos(a), Math.sin(a), 8]; }), closed: true });
+  call('object.role', { id: ring, role: 'event' }); call('object.code', { id: ring, code: 'note(67, 100, 0.1);' });
+  const far = call('point.add', { space: t, at: [3, 3, 4], size: 0.4, role: 'event' });
+  call('object.code', { id: far, code: 'note(99, 100, 0.1);' });
+  const notes = [], play = createPlay(), hooks = { spb: 1, pointsOf: (l) => l.points, paramsOf: (o) => ({ dur: 10, loop: 0, start: 0, at: 0, speed: 0, drawn: 0, ...o.params }), note: (m) => notes.push(m) };
+  for (let s = 0; s <= 9.5; s += 1 / 30) play.step(state.objects, s, true, hooks);
+  assert.deepEqual(notes, [60, 64, 67]);
+});
