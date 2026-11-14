@@ -154,20 +154,25 @@ export function innerXf(g) {
 }
 
 // A smooth curve through the points (centripetal Catmull-Rom), for showing a
-// line; the points themselves are never changed.
+// line; the points themselves are never changed. Flat or 3D. steps: how many
+// pieces between two points, a number, or (a, b) => a number for each stretch
+// (the renderer asks for as many as the stretch is long on screen, so a curve
+// stays smooth however near it is seen, with no points added to it).
 export function smooth(points, steps = 6) {
   const n = points.length;
   if (n < 3) return points;
-  const closed = Math.hypot(points[0][0] - points[n - 1][0], points[0][1] - points[n - 1][1]) < 1e-9;
+  const dim = points[0].length > 2 ? 3 : 2, d = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1], dim > 2 ? (b[2] ?? 0) - (a[2] ?? 0) : 0);
+  const closed = d(points[0], points[n - 1]) < 1e-9;
   const at = (i) => (closed ? points[((i % (n - 1)) + (n - 1)) % (n - 1)] : points[Math.max(0, Math.min(n - 1, i))]);
-  const knot = (a, b) => Math.max(1e-6, Math.sqrt(Math.hypot(b[0] - a[0], b[1] - a[1])));
+  const knot = (a, b) => Math.max(1e-6, Math.sqrt(d(a, b)));
   const out = [];
   for (let i = 0; i < n - 1; i++) {
     const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
     const t1 = knot(p0, p1), t2 = t1 + knot(p1, p2), t3 = t2 + knot(p2, p3);
-    for (let s = 0; s < steps; s++) {
-      const t = t1 + (t2 - t1) * (s / steps), q = [];
-      for (let k = 0; k < 2; k++) {
+    const ns = typeof steps === 'function' ? Math.max(1, Math.round(steps(p1, p2))) : steps;
+    for (let s = 0; s < ns; s++) {
+      const t = t1 + (t2 - t1) * (s / ns), q = [];
+      for (let k = 0; k < dim; k++) {
         const a1 = p0[k] * (t1 - t) / t1 + p1[k] * t / t1;
         const a2 = p1[k] * (t2 - t) / (t2 - t1) + p2[k] * (t - t1) / (t2 - t1);
         const a3 = p2[k] * (t3 - t) / (t3 - t2) + p3[k] * (t - t2) / (t3 - t2);
@@ -178,9 +183,11 @@ export function smooth(points, steps = 6) {
       out.push(q);
     }
   }
-  out.push(points[n - 1].slice(0, 2));
+  out.push(points[n - 1].slice(0, dim));
   return out;
 }
+// Steps for smooth() so a stretch is cut every `px` pixels on screen; pxPerUnit: screen pixels a unit.
+export const stepsOnScreen = (pxPerUnit, px = 3, most = 160) => (a, b) => Math.max(2, Math.min(most, Math.ceil((Math.hypot(b[0] - a[0], b[1] - a[1], (b[2] ?? 0) - (a[2] ?? 0)) * pxPerUnit) / px)));
 
 // Fewer points, same shape (Ramer-Douglas-Peucker): drops what lies within
 // `tol` of the line between its neighbours.

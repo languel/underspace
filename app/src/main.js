@@ -3,6 +3,7 @@
 
 import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, history, travel, stats, argTypes as T } from './space.js';
 import './patch.js';
+import { stepsOnScreen } from './object.js';
 import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplifyIndex, along, setDrag, setLive, setMoved, penOf, isLine, isTarget, hasCode, isWire } from './object.js';
 import { selectionProps, toolProps } from './panels/properties.js';
 import { wirePoints } from './bind.js';
@@ -75,6 +76,7 @@ addEventListener('message', (e) => { if (e.data?.underspace) step.report(e.data.
 // ---- layout: which objects are visible, at which face, and where -----------
 
 const ROOT = { k: 1, ox: 0, oy: 0 };
+const FOV = 40 * Math.PI / 180; // a target's camera's field of view (view.js uses the same)
 const at = (xf, p) => [xf.ox + p[0] * xf.k, xf.oy + p[1] * xf.k];
 const back = (xf, p) => [(p[0] - xf.ox) / xf.k, (p[1] - xf.oy) / xf.k];
 const FAR = 48; // below this many pixels an object shows its far face
@@ -122,7 +124,8 @@ function walk(space, xf) {
     if (isLine(o)) {
       const made = run.shown.get(o.id);
       const raw = isWire(o) ? wirePoints(state.objects, o) : made ?? ptsOf(o);
-      const pts = (st.path === 'straight' || o.closed ? raw : smooth(raw)).map((p) => at(xf, p));
+      // smooth through its points, in as many pieces as it is long on screen (it stays smooth when seen near)
+      const pts = (st.path === 'straight' || o.closed ? raw : smooth(raw, stepsOnScreen(xf.k / upp))).map((p) => at(xf, p));
       const brushed = o.brush && !isWire(o);
       // A brushed line is painted on the ink layer; here it is only something to pick, and an outline while selected.
       if (brushed) inkItems.push(inkItem(o, element(raw, penOf(o), { closed: !!o.closed, color: st.stroke ?? inkColor }), xf, st));
@@ -168,10 +171,10 @@ function walk(space, xf) {
     }
     if (isTarget(o) && face !== 'far') {
       spaces.push({ id: o.id, kind: 'scene', px, plane: o.plane ?? 'view', origin: (o.anchor ?? 'origin') === 'origin' ? [0, 0, 0] : o.cursor ?? [0, 0, 0], focused: face === 'near' || sel });
-      const marks = [];
+      const marks = [], cam0 = camOf(o), ppu = px.h / (2 * cam0.dist * Math.tan(FOV / 2)); // about how many pixels a unit is, at the centre
       for (const m of state.objects.values()) {
         if (m.space !== o.id || !m.points || m.hidden) continue;
-        const pts = ptsOf(m);
+        const raw = ptsOf(m), pts = m.closed || m.style?.path === 'straight' ? raw : smooth(raw, stepsOnScreen(ppu));
         if (m.closed) pts.push(pts[0]);
         marks.push({ pts, color: state.selection.has(m.id) ? 'accent' : m.style?.stroke ?? 'ink' });
         ink3d.push({ id: m.id, scene: o.id, pts });
@@ -438,7 +441,9 @@ function frameInner() {
   // Lines that code makes can change every frame; a cheap fingerprint tells.
   let made = 0;
   for (const pts of run.shown.values()) { const m = pts[pts.length >> 1]; made += pts.length + m[0] * 7 + m[1] * 13; }
-  const sig = `${state.version}|${dragSig}|${settings.quantOn}${settings.quant}|${spaces.map((s) => s.id).join()}|${made}|${playSig}`;
+  // the zoom, in steps of about a fifth, and each target's camera distance: curves are cut finer as they are seen nearer
+  const near = Math.round(Math.log2(view.cam.zoom) * 4) + '/' + sceneList.map((s) => Math.round(Math.log2(s.dist) * 4)).join(',');
+  const sig = `${state.version}|${dragSig}|${near}|${settings.quantOn}${settings.quant}|${spaces.map((s) => s.id).join()}|${made}|${playSig}`;
   const dirty = sig !== lastSig;
   lastSig = sig;
   if (dirty) dbg.time('lines', () => view.setLines(lines));
@@ -1130,7 +1135,7 @@ pad.addEventListener('pointermove', (e) => {
     g.pts.push(q); g.last = p;
     if (!g.wire) showTouch(e.ctrlKey || e.metaKey ? null : touching(g.s, p));
     if (g.s.kind === 'scene') view.setPreview(g.pts, g.s.id);
-    else view.setPreview((settings.smooth ? smooth(g.pts) : g.pts).map((pt) => at(g.s.xf, pt)), null, g.wire ? 'hot' : 'accent');
+    else view.setPreview((settings.smooth ? smooth(g.pts, stepsOnScreen(1 / unitsPerPx(g.s))) : g.pts).map((pt) => at(g.s.xf, pt)), null, g.wire ? 'hot' : 'accent');
   } else if (g.kind === 'line') {
     // Shift holds a straight line to steps of 15 degrees.
     let q = p;
@@ -1176,7 +1181,6 @@ pad.addEventListener('pointermove', (e) => {
 });
 
 // A target's camera after an orbit, pan or zoom of (dx, dy) pixels. h is the target's height on screen.
-const FOV = 40 * Math.PI / 180;
 function navigate(cam, mode, dx, dy, h) {
   if (mode === 'orbit') return { ...cam, az: cam.az - dx * 0.01, el: Math.max(-1.55, Math.min(1.55, cam.el + dy * 0.01)) };
   if (mode === 'zoom') return { ...cam, dist: Math.max(0.5, Math.min(400, cam.dist * Math.exp(dy * 0.01))) };

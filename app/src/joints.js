@@ -85,8 +85,8 @@ export const isJoint = (o) => o?.kind === 'joint';
 
 // The curve a line is shown as: what travelers follow and places sit on.
 export function curveOf(o, pts) {
-  if (pts[0].length > 2 || o.style?.path === 'straight' || o.closed) return pts;
-  return smooth(pts);
+  if (o.style?.path === 'straight' || o.closed) return pts;
+  return smooth(pts); // flat or 3D, a fixed six pieces a stretch: what travel and joints measure does not change with zoom
 }
 
 const v3 = (p) => [p[0], p[1], p[2] ?? 0];

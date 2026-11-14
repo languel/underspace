@@ -33,3 +33,16 @@ test('a traveler moves in 3D on a line in a target', async () => {
   for (let s = 0; s <= 2.0001; s += 0.05) r = play.step(state.objects, s, true, hooks);
   near(r.moved.get(tr), [0, 0, 2], 1e-6);
 });
+
+test('smoothing: 3D curves too, and as many pieces as asked for each stretch', async () => {
+  const { smooth, stepsOnScreen } = await import('../src/object.js');
+  const pts = [[0, 0, 0], [1, 1, 1], [2, 0, 2], [3, 1, 3]];
+  const s = smooth(pts);
+  assert.equal(s[0].length, 3, 'it stays 3D');
+  assert.equal(s.length, 3 * 6 + 1);
+  const fine = smooth(pts, stepsOnScreen(100));          // a stretch is about 173 px: about 58 pieces
+  assert.ok(fine.length > 150, `${fine.length}`);
+  const coarse = smooth([[0, 0], [1, 0], [2, 1]], stepsOnScreen(1)); // a pixel a unit: the fewest
+  assert.equal(coarse.length, 2 * 2 + 1);
+  assert.deepEqual(fine[0], [0, 0, 0]); assert.deepEqual(fine[fine.length - 1], [3, 1, 3]);
+});
