@@ -214,9 +214,16 @@ const scorePlan = new Map(); // id -> { k: the next pass to schedule, L: its len
 let scoreSet = null;         // the scores that play: ids, or null for all
 const passLen = (o) => { const p = scoreParams(o); return Math.max(0.25, (p.beats * 60) / p.bpm); };
 const scorePlaying = (o) => !o.hidden && (!scoreSet || scoreSet.has(o.id));
+let nextClick = null; // the next beat the metronome clicks on
 function scoreTick() {
   if (!transport.playing) return;
   const now = transport.t, aNow = sound.audioNow();
+  // the metronome: each beat a little ahead, on the audio clock; the bar's first beat higher
+  if (settings.metronome) {
+    const spb = transport.spb;
+    if (nextClick == null || nextClick * spb < now - 0.05) nextClick = Math.ceil(now / spb - 1e-6);
+    while (nextClick * spb - now < 0.25) { sound.click(aNow + (nextClick * spb - now), nextClick % state.music.meter[0] === 0); nextClick++; }
+  } else nextClick = null;
   for (const [id] of scorePlan) if (get(id)?.role !== 'score' || !scorePlaying(get(id))) { sound.silence(id); scorePlan.delete(id); }
   for (const o of scores()) {
     if (!scorePlaying(o)) continue;
@@ -233,7 +240,7 @@ function scoreTick() {
   }
 }
 setInterval(scoreTick, 40);
-function resetScores() { sound.silenceAll(); scorePlan.clear(); }
+function resetScores() { sound.silenceAll(); scorePlan.clear(); nextClick = null; }
 // How far through its pass a score is, 0..1, or -1 when it is not playing.
 const scorePos = (o) => (transport.playing && scorePlaying(o) && scorePlan.has(o.id) ? (transport.t % passLen(o)) / passLen(o) : -1);
 // Space: pause what is playing; otherwise play from where the transport is: the selected scores
@@ -276,6 +283,13 @@ function holdNote(midi, vel = 100, ch = 1) {
   if (!Number.isFinite(midi)) return { stop() {} };
   const a = sound.hold(midi, vel, instrumentOf(ch)), b = midiOut.hold(midi, vel, ch), beat = transport.beat, rec = transport.recording && transport.playing;
   return { stop() { a.stop(); b.stop(); if (rec) recNotes.push({ beat, midi, vel, len: Math.max(1 / 16, transport.beat - beat), ch }); } };
+}
+// Recording from rest starts after a bar of clicks (with the metronome on), so the hand is ready.
+function countIn(then) {
+  if (!settings.metronome) return then();
+  const spb = secPerBeat(state.music), per = state.music.meter[0], a = sound.audioNow() + 0.05;
+  for (let k = 0; k < per; k++) sound.click(a + k * spb, k === 0);
+  setTimeout(then, (per * spb + 0.05) * 1000);
 }
 // What was recorded becomes a clip on the timeline, starting on the beat it began.
 function endRecording() {
@@ -1302,7 +1316,8 @@ const ACTIONS = [
   { id: 'timeline', title: 'Timeline', icon: 'timeline', keys: 'alt+t', group: 'play', bar: 'edit', on: () => !!timeline?.visible, run: () => timeline.show() },
   { id: 'take.replay', title: 'Replay the making', icon: 'play', group: 'history', when: () => history().steps.length > 0, run: () => replay() },
   { id: 'transport.rewind', title: 'Back to the start', icon: 'rewind', keys: 'alt+,', group: 'play', run: () => rewind() },
-  { id: 'transport.record', title: 'Record what plays', icon: 'record', keys: 'alt+r', group: 'play', on: () => transport.recording, run: () => { const was = transport.recording; transport.record(); if (was) endRecording(); else if (!transport.playing) togglePlay(); } },
+  { id: 'transport.record', title: 'Record what plays', icon: 'record', keys: 'alt+r', group: 'play', on: () => transport.recording, run: () => { const was = transport.recording; if (was) { transport.record(false); endRecording(); return; } transport.record(true); if (!transport.playing) countIn(() => togglePlay()); } },
+  { id: 'transport.metronome', title: 'Metronome', icon: 'metronome', group: 'play', on: () => settings.metronome, run: () => setSetting('metronome', !settings.metronome) },
   { id: 'transport.loop', title: 'Loop', icon: 'loop', keys: 'alt+l', group: 'play', on: () => transport.loop.on, run: () => { transport.loop = { ...transport.loop, on: !transport.loop.on }; } },
   { id: 'render.clip', title: 'Render to a clip', icon: 'record', group: 'play', menu: true, when: (c) => !c.hit && (travelers().length || scores().length), run: () => renderToClip() },
   { id: 'iannix.import', title: 'Import an IanniX score', icon: 'open', group: 'play', menu: true, when: (c) => !c.hit, run: () => iannixInput.click() },
@@ -1605,7 +1620,7 @@ function replay() {
 for (const type of ['pointerdown', 'keydown']) addEventListener(type, (e) => { if (replaying && !e.target.closest?.('.timeline')) stopReplay(); }, true);
 
 timeline = createTimeline($('timeline'), {
-  transport, state, call, history, travel, replay, get replaying() { return !!replaying; },
+  transport, state, call, history, travel, replay, get replaying() { return !!replaying; }, runAction: (id) => runAction(id), get metronome() { return settings.metronome; },
   lanes() {
     const m = state.music, spb = secPerBeat(m), out = [];
     for (const o of travelers()) { const p = paramsOf(o), line = get(o.on), len = p.speed > 0 && line ? measure(shownPath(line)).total / (p.speed * settings.gridSize) : p.dur; out.push({ id: o.id, kind: 'traveler', name: o.name || 'traveler ' + o.id, at: p.at ?? 0, len: Math.max(0.25, len), repeat: p.loop !== 0 }); }

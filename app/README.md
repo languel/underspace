@@ -133,7 +133,10 @@ sixteenths, and the musical context everything plays in: tempo, meter,
 scale (Midinous's 37, or your own steps in semitones, fractions allowed,
 for other tunings), root, and the range of notes that heights map to.
 Below it is a ruler: click or drag it to move the playhead, and Shift-drag
-it to mark the loop. Under the ruler there is a lane for each traveler,
+it to mark the loop. Drag the loop's ends to change it. With the pointer over the
+timeline, F fits everything, = − zoom, ← → step a beat (Shift a bar), Home
+goes to the start; click the position to read it in seconds. The metronome
+glyph clicks each beat and counts a bar in before recording from rest. Under the ruler there is a lane for each traveler,
 score and recorded clip.
 
 Travelers run on beats. `dur` is how many beats the whole line takes, `at`

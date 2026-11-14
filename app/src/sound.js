@@ -111,6 +111,13 @@ export function silence(id) {
   bus.gain.linearRampToValueAtTime(0, t + 0.04);
   setTimeout(() => bus.disconnect(), 120);
 }
+// A metronome click at audio time `at`: higher on the first beat of a bar.
+export function click(at, accent = false) {
+  const ac = ensureAudio(), o = ac.createOscillator(), g = ac.createGain();
+  o.frequency.value = accent ? 1760 : 1320; o.type = 'square';
+  g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(accent ? 0.12 : 0.07, at + 0.002); g.gain.exponentialRampToValueAtTime(0.0005, at + 0.05);
+  o.connect(g).connect(master); o.start(at); o.stop(at + 0.06);
+}
 export const silenceAll = () => [...buses.keys()].forEach(silence);
 
 // How far through its frame a score is, 0..1, or -1 when stopped.

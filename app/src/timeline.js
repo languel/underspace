@@ -14,7 +14,9 @@
 //
 // Ruler: click or drag to move the playhead; Shift-drag marks the loop.
 // Clips: drag to move (by sixteenths; Shift: free), right-click for more.
-// Wheel: scroll; ⌘ wheel or pinch: zoom.
+// Wheel: scroll; ⌘ wheel or pinch: zoom. Drag the loop's ends on the ruler.
+// Keys, with the pointer over the timeline: F fit, = − zoom, ← → a beat (Shift a bar), Home the start.
+// The position reads in bars (bar.beat.sixteenth) or in seconds: click it.
 
 import { h } from './controls.js';
 import { icon } from './icons.js';
@@ -32,6 +34,7 @@ export function createTimeline(el, host) {
   const button = (name, title, run) => { const b = h('button'); b.title = title; b.setAttribute('aria-label', title); b.innerHTML = icon(name); b.onclick = run; return b; };
   const rewind = button('rewind', 'Back to the start (⌥,)', host.actions.stop), play = button('play', 'Play or pause (Space)', host.actions.play);
   const rec = button('record', 'Record what plays (⌥R)', host.actions.record), loop = button('loop', 'Loop (⌥L); Shift-drag the ruler to mark it', host.actions.loop);
+  let seconds = false;
   const pos = h('span', 'tl-pos'), num = (title, w, get, set, step = 1) => {
     const i = h('input'); i.type = 'number'; i.step = step; i.title = title; i.setAttribute('aria-label', title); i.style.width = w;
     i.onchange = () => { const v = Number(i.value); if (Number.isFinite(v)) set(v); };
@@ -59,8 +62,9 @@ export function createTimeline(el, host) {
   root.sync = () => { if (document.activeElement !== root) root.value = String(Math.round(m().root)); };
   const low = num('Lowest note (MIDI)', '38px', () => m().low, (v) => host.call('music.set', { low: v })), high = num('Highest note (MIDI)', '38px', () => m().high, (v) => host.call('music.set', { high: v }));
   const range = h('span', 'tl-range'); range.append(low, h('span', '', '–'), high);
+  const metro = button('metronome', 'Metronome (a bar of clicks before recording from rest)', () => host.runAction('transport.metronome'));
   const inst = button('instrument', 'Instruments on each channel', (e) => { const r = inst.getBoundingClientRect(); host.instruments(r.left, r.top - 4); });
-  head.append(rewind, play, rec, loop, pos, bpm, meter, scale, root, range, inst);
+  head.append(rewind, play, rec, loop, metro, pos, bpm, meter, scale, root, range, inst);
   const fields = [bpm, meter, scale, root, low, high];
 
   // Where each step of the making sits across the lane: its time, pauses over 1.5 s shortened.
@@ -136,9 +140,9 @@ export function createTimeline(el, host) {
     if (el.hidden) return;
     document.body.style.setProperty('--tl-h', el.offsetHeight + 'px');
     const tr = host.transport;
-    pos.textContent = bbt(tr.t, m());
+    pos.textContent = seconds ? `${Math.floor(tr.t / 60)}:${(tr.t % 60).toFixed(2).padStart(5, '0')}` : bbt(tr.t, m());
     play.innerHTML = icon(tr.playing ? 'pause' : 'play');
-    rec.classList.toggle('on', tr.recording); loop.classList.toggle('on', tr.loop.on);
+    rec.classList.toggle('on', tr.recording); loop.classList.toggle('on', tr.loop.on); metro.classList.toggle('on', !!host.metronome);
     for (const f of fields) f.sync();
     // follow the playhead while playing
     if (tr.playing && !drag) { const b = tr.beat, vis = (el.clientWidth - GUTTER) / ppb; if (b > scroll + vis * 0.9 || b < scroll) scroll = Math.max(0, b - vis * 0.1); }
@@ -153,6 +157,11 @@ export function createTimeline(el, host) {
     const r = canvas.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top, b = Math.max(0, beatAt(x)), tr = host.transport;
     try { canvas.setPointerCapture(e.pointerId); } catch { /* a scripted pointer has nothing to capture */ }
     if (e.button === 2) return;
+    if (y < RULER && x >= GUTTER && tr.loop.b > tr.loop.a && !e.shiftKey) {
+      // the loop's ends can be dragged
+      const end = Math.abs(x - xOf(tr.loop.a)) < 6 ? 'a' : Math.abs(x - xOf(tr.loop.b)) < 6 ? 'b' : null;
+      if (end) { drag = { kind: 'loopEnd', end }; return; }
+    }
     if (y < RULER || x < GUTTER) {
       if (e.shiftKey) { drag = { kind: 'loop', a: Math.round(b) }; tr.loop = { on: true, a: Math.round(b), b: Math.round(b) + 1 }; }
       else { drag = { kind: 'seek' }; host.seek(b * tr.spb); }
@@ -178,6 +187,7 @@ export function createTimeline(el, host) {
     }
     if (drag.kind === 'making') host.travel(doneAt(making(el.clientWidth), x));
     else if (drag.kind === 'seek') host.seek(b * tr.spb);
+    else if (drag.kind === 'loopEnd') { const v = Math.max(0, Math.round(b * 4) / 4), l = { ...tr.loop, on: true }; if (drag.end === 'a') l.a = Math.min(v, l.b - 0.25); else l.b = Math.max(v, l.a + 0.25); tr.loop = l; }
     else if (drag.kind === 'loop') { const a = Math.min(drag.a, Math.round(b)), z = Math.max(drag.a + 1, Math.round(b)); tr.loop = { on: true, a: Math.min(a, drag.a), b: Math.max(z, a + 1) }; }
     else if (drag.kind === 'clip') { drag.to = Math.max(0, sixteenth(drag.at + b - drag.from, e)); host.preview(drag.id, drag.to); }
     lastSig = '';
@@ -212,6 +222,28 @@ export function createTimeline(el, host) {
     const r = canvas.getBoundingClientRect(), lane = host.lanes()[laneAt(e.clientY - r.top)];
     if (lane?.kind === 'clip') { editing = editing === lane.id ? null : lane.id; lastSig = ''; }
   });
+
+  pos.title = 'Bars or seconds'; pos.style.cursor = 'pointer';
+  pos.addEventListener('click', () => { seconds = !seconds; lastSig = ''; });
+  // the timeline's own keys, while the pointer is over it (after the piano roll's)
+  let over = false;
+  el.addEventListener('pointerenter', () => { over = true; });
+  el.addEventListener('pointerleave', () => { over = false; });
+  const fitAll = () => {
+    const end = Math.max(8, ...host.lanes().map((l) => l.at + (l.repeat ? 0 : l.len)), host.transport.loop.on ? host.transport.loop.b : 0, host.transport.beat + 1);
+    ppb = Math.max(2, Math.min(240, (el.clientWidth - GUTTER - 12) / end)); scroll = 0; lastSig = '';
+  };
+  addEventListener('keydown', (e) => {
+    if (!over || el.hidden || e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.('input, textarea, select')) return;
+    const tr = host.transport, per = m().meter[0], k = e.key;
+    if (k === 'f' || k === 'F') fitAll();
+    else if (k === '=' || k === '+') { const at = tr.beat; ppb = Math.min(240, ppb * 1.4); scroll = Math.max(0, at - (el.clientWidth - GUTTER) / ppb / 2); }
+    else if (k === '-' || k === '_') { const at = tr.beat; ppb = Math.max(2, ppb / 1.4); scroll = Math.max(0, at - (el.clientWidth - GUTTER) / ppb / 2); }
+    else if (k === 'ArrowLeft' || k === 'ArrowRight') { const d = (k === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? per : 1), b = Math.max(0, Math.round(tr.beat) + d); host.seek(b * tr.spb); }
+    else if (k === 'Home') host.actions.stop();
+    else return;
+    e.preventDefault(); e.stopImmediatePropagation(); lastSig = '';
+  }, true);
 
   return { edit(id) { editing = id; lastSig = ''; }, get editing() { return editing; }, update, get visible() { return !el.hidden; }, show(on = el.hidden) { el.hidden = !on; document.body.classList.toggle('with-timeline', on); lastSig = ''; } };
 }

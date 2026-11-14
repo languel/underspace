@@ -702,6 +702,13 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   timeline. Junction code now gets `ev.last` (the rider's last note) and
   `ev.spb`. Robin goes the straightest way first, not in the file's order.
   Gates and LEDs only pass travelers on.
+- **Timeline polish** (a twenty-second pass). With the pointer over the
+  timeline: F fits everything, = and − zoom about the playhead, ← → step a
+  beat (Shift a bar), Home goes back to the start. The loop's ends drag on
+  the ruler. Clicking the position switches it between bars and seconds.
+  The metronome glyph (a setting) clicks each beat on the audio clock, the
+  bar's first beat higher. With it on, recording from rest begins after a
+  bar of clicks.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); audio recording; note-off at exit (IanniX's gate); scores on
   the shared transport (they still schedule their own passes); MIDI clock;
