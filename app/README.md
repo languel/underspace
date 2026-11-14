@@ -44,7 +44,8 @@ or with a shape selected, makes it a render target.
 
 | Key | Does |
 | --- | --- |
-| V D R O B T S | select, draw, rectangle, ellipse, code container, render target, score |
+| V H D L R O N | select, pan, draw, straight line (Shift: 15° steps), rectangle, ellipse, note |
+| B T S | code container, render target, score |
 | Space (tap) | play or stop the selected scores, or all of them; hold and drag to pan |
 | C / T / S / X | selection becomes code (a line: a path) / a render target / a score / plain |
 | W | selected line becomes a connector to the nearest ports |
@@ -59,7 +60,10 @@ or with a shape selected, makes it a render target.
 | Alt-drag in a target | turn it |
 | ⌘K or / | palette: find a command, or say what to build |
 | ⌘Z, ⇧⌘Z | undo, redo |
-| \, Tab | sidebar, hide every panel |
+| \, Tab | side panel, hide the whole interface |
+| ⌘; ⌥; ? ⌘, | Code, Properties, Shortcuts, Settings panels |
+| ⌘] ⌘[ ⇧H ⇧L | bring to front, send to back, hide, lock |
+| ⌘' ⇧⌘' | grid, snap |
 | right-click | context menu |
 
 ## Scores

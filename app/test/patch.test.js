@@ -116,3 +116,21 @@ test('a role keeps its own code when a shape changes role and back', () => {
   call('object.role', { id: s, role: 'code' });
   assert.match(state.objects.get(s).code, /^\/\/ osc/);
 });
+
+test('style, flags and order are commands like any other', () => {
+  fresh();
+  const a = call('shape.add', { rect: { cx: 0, cy: 0, w: 1, h: 1 }, style: { fill: '#c2410c' } });
+  const b = call('shape.add', { rect: { cx: 2, cy: 0, w: 1, h: 1 } });
+  call('object.style', { ids: [a, b], style: { stroke: '#0f766e', fill: null } });
+  assert.deepEqual(state.objects.get(a).style, { stroke: '#0f766e' }, 'null puts a key back to its default');
+  call('select.set', { ids: [a] });
+  call('object.flag', { ids: [a], hidden: true });
+  assert.equal(state.objects.get(a).hidden, true);
+  assert.equal(state.selection.size, 0, 'a hidden object leaves the selection');
+  call('object.order', { ids: [a], to: 'front' });
+  assert.deepEqual([...state.objects.keys()], [b, a]);
+  const n = call('shape.add', { rect: { cx: 0, cy: 3, w: 2, h: 1 }, role: 'note', text: 'hi' });
+  call('object.text', { id: n, text: 'there' });
+  call('object.name', { id: n, name: 'label' });
+  assert.deepEqual([state.objects.get(n).text, state.objects.get(n).name], ['there', 'label']);
+});

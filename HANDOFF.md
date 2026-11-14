@@ -303,14 +303,41 @@ Added in a second pass the same day:
 - **Duplicate** (⌘D, `object.copy`), with contents and inner connectors.
 - Each role keeps its own code when an object changes role and back.
 
+Added in a third pass (the UI):
+
+- **Islands.** File menu, play, undo, redo and palette at the top left;
+  tools with stroke and fill swatches in the middle; panel tabs at the top
+  right; zoom and grid at the bottom left. All built from `ACTIONS`.
+- **Side panel** (`src/panel.js`, one file per panel in `src/panels/`):
+  Code, Properties, Outliner, Examples, Docs, Shortcuts, Settings. Docs and
+  Shortcuts are generated from the presets, brushes, command registry and
+  action table, so they cannot go stale.
+- **Look and organisation as commands:** `object.style` (stroke, fill,
+  width, opacity), `object.name`, `object.flag` (hidden, locked),
+  `object.order`, `object.text`. Fills are drawn in three.js in document
+  order.
+- **More tools:** pan (H), straight line (L, Shift holds 15° steps), note
+  (N). A dot grid that follows the view, and snap to it.
+- **Settings** (`src/settings.js`) live in localStorage, apart from the
+  take: theme, grid, snap, the look of new marks, the assistant's endpoint.
+
+The owner asked to match Poliplan's functionality "for starters" without
+copying it. Not matched yet: textured brushes and the brush kit, sculpt
+tools, rotate and scale of lines, the point and lasso-plane tools,
+boards and artboard sizes, PNG/SVG/p5 export, image layers and reference
+underlay, the full colour picker (palettes, eyedropper, names), blend
+modes, simplify, stages, key remapping, docking and floating panels.
+
 Checked in a browser on WebGPU, by pointer or scripted pointer events: the
 demo; palette with the scripted engine; the endpoint engine against Ollama
 (`gemma4`, about 30 s, a valid collapsed patch with code it wrote);
 rectangle tool, context menu, role change; a pasted p5.js sketch and a
 three.js sketch running as objects with ports; `wave` and `follow`; an
 ellipse on a target's top plane; Alt-drag orbit; resize with undo and
-redo; port-drag connector; a score looping across passes with a line
-added while it played, Space to start and stop. 19 unit tests.
+redo; port-drag connector; every panel rendering; examples added from
+the panel; fills and opacity; the line and note tools; a locked line not
+being picked; a score looping across passes with a line
+added while it played, Space to start and stop. 20 unit tests.
 Sound itself was not heard: only that scheduling runs and does not throw.
 
 Not checked: touch (pinch and two-finger pan are written, never run),

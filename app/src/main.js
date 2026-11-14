@@ -436,7 +436,10 @@ function frameIds(ids, fill = 0.8) {
     x0 = Math.min(x0, r.cx - r.w / 2); x1 = Math.max(x1, r.cx + r.w / 2); y0 = Math.min(y0, r.cy - r.h / 2); y1 = Math.max(y1, r.cy + r.h / 2);
   }
   if (x0 === Infinity) return false;
-  view.frame({ cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) }, fill);
+  // With the side panel open, frame into the part of the stage it leaves free.
+  const taken = settings.panelOpen && !document.body.classList.contains('clean') ? Math.min(316, view.size.w * 0.5) : 0, free = (view.size.w - taken) / view.size.w;
+  view.frame({ cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(1, x1 - x0) / free, h: Math.max(1, y1 - y0) }, fill);
+  view.cam.cx += taken / 2 * view.unitsPerPx();
   return true;
 }
 function fit() {
