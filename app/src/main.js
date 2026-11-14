@@ -1,7 +1,7 @@
 // Wiring: layout by zoom, gestures, and the action table that the toolbar,
 // keys, context menus and palette all read.
 
-import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, argTypes as T } from './space.js';
+import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, history, travel, argTypes as T } from './space.js';
 import './patch.js';
 import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplifyIndex, along, setDrag, setLive, setMoved, penOf, isLine, isTarget, hasCode, isWire } from './object.js';
 import { selectionProps, toolProps } from './panels/properties.js';
@@ -1250,6 +1250,7 @@ const ACTIONS = [
   { id: 'play', title: 'Play or pause', icon: 'play', keys: 'mod+enter', group: 'play', bar: 'edit', menu: true, when: () => canPlay(), run: (c) => togglePlay(c) },
   // The timeline: the transport, the musical context, and what plays on it (timeline.js).
   { id: 'timeline', title: 'Timeline', icon: 'timeline', keys: 'alt+t', group: 'play', bar: 'edit', on: () => !!timeline?.visible, run: () => timeline.show() },
+  { id: 'take.replay', title: 'Replay the making', icon: 'play', group: 'history', when: () => history().steps.length > 0, run: () => replay() },
   { id: 'transport.rewind', title: 'Back to the start', icon: 'rewind', keys: 'alt+,', group: 'play', run: () => rewind() },
   { id: 'transport.record', title: 'Record what plays', icon: 'record', keys: 'alt+r', group: 'play', on: () => transport.recording, run: () => { const was = transport.recording; transport.record(); if (was) endRecording(); else if (!transport.playing) togglePlay(); } },
   { id: 'transport.loop', title: 'Loop', icon: 'loop', keys: 'alt+l', group: 'play', on: () => transport.loop.on, run: () => { transport.loop = { ...transport.loop, on: !transport.loop.on }; } },
@@ -1514,8 +1515,26 @@ const app = {
   },
 };
 const panels = createPanels($('tabs'), $('side'), app, PANELS);
+// Replay the making: every step again, at the pace it was made (pauses over 1.5 s shortened).
+// A press or a key stops it where it is.
+let replaying = 0;
+function replay() {
+  if (replaying) { clearTimeout(replaying); replaying = 0; return; }
+  const end = history().steps.length;
+  if (!end) return;
+  travel(0);
+  let i = 0;
+  const next = () => {
+    travel(++i);
+    const st = history().steps;
+    replaying = i < end ? setTimeout(next, Math.max(0.05, Math.min(1.5, st[i].t - st[i - 1].t)) * 1000) : 0;
+  };
+  replaying = setTimeout(next, 400);
+}
+for (const type of ['pointerdown', 'keydown']) addEventListener(type, (e) => { if (replaying && !e.target.closest?.('.timeline')) { clearTimeout(replaying); replaying = 0; } }, true);
+
 timeline = createTimeline($('timeline'), {
-  transport, state, call,
+  transport, state, call, history, travel, replay, get replaying() { return !!replaying; },
   lanes() {
     const m = state.music, spb = secPerBeat(m), out = [];
     for (const o of travelers()) { const p = paramsOf(o), line = get(o.on), len = p.speed > 0 && line ? measure(shownPath(line)).total / (p.speed * settings.gridSize) : p.dur; out.push({ id: o.id, kind: 'traveler', name: o.name || 'traveler ' + o.id, at: p.at ?? 0, len: Math.max(0.25, len), repeat: p.loop !== 0 }); }

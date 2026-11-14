@@ -603,6 +603,36 @@ export function redo() {
   rerun();
 }
 
+// ---- the take as a history to move through (the timeline's "making" lane) ----------
+
+// The take's clips as steps, oldest first: what one undo takes away (a command,
+// or a batch, with the selection changes that ride along).
+function groupSteps(clips) {
+  const out = [];
+  let cur = null;
+  for (const c of clips) {
+    const sel = c.name === 'select.set';
+    if (!cur || (!sel && cur.main && !(c.batch && c.batch === cur.main.batch))) { cur = { clips: [], main: null }; out.push(cur); }
+    cur.clips.push(c);
+    if (!sel && !cur.main) cur.main = c;
+  }
+  return out.map((st) => st.clips);
+}
+// Every step, done and undone, in the order they were made; `done` of them are in effect.
+export function history() {
+  const done = groupSteps(take.clips), all = [...done, ...take.undone.slice().reverse()];
+  return { done: done.length, steps: all.map((clips) => { const main = clips.find((c) => c.name !== 'select.set') ?? clips[0]; return { t: clips[0].t, name: main.name, by: main.by, size: clips.length }; }) };
+}
+// Go to just after step k: the steps after it are undone (redo brings them back), one rerun.
+export function travel(k) {
+  const done = groupSteps(take.clips), all = [...done, ...take.undone.slice().reverse()];
+  k = Math.max(0, Math.min(all.length, Math.round(k)));
+  if (k === done.length) return;
+  take.clips = all.slice(0, k).flat();
+  take.undone = all.slice(k).reverse();
+  rerun();
+}
+
 export function loadTake(json) {
   if (json?.type !== 'underspace-take' || !Array.isArray(json.clips)) throw new Error('not an underspace take');
   take.clips = json.clips; take.undone = [];

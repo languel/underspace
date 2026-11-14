@@ -74,3 +74,22 @@ test('a looping traveler does not cross events on its jump back to the start', a
   for (let t = 0; t <= 3.9; t += 1 / 60) play.step(state.objects, t, true, hooks); // nearly two laps of 2 s
   assert.equal(notes.length, 4, `two events a lap: ${notes.length}`);
 });
+
+test('the take as a history: travel back and forward, an edit continues from there', async () => {
+  const { history, travel } = await import('../src/space.js');
+  call('space.clear');
+  const ids = [];
+  for (let i = 0; i < 4; i++) { ids.push(call('line.add', { points: [[i, 0], [i, 1]] })); call('select.set', { ids: [ids[i]] }); }
+  const h0 = history();
+  const n = h0.steps.length;
+  travel(n - 2);
+  assert.ok(!state.objects.has(ids[3]) && !state.objects.has(ids[2]) && state.objects.has(ids[1]));
+  assert.equal(history().steps.length, n, 'nothing lost: the rest is ahead');
+  travel(n - 1);
+  assert.ok(state.objects.has(ids[2]) && !state.objects.has(ids[3]));
+  travel(n);
+  assert.ok(state.objects.has(ids[3]));
+  travel(n - 3);
+  call('line.add', { points: [[9, 9], [9, 8]] });
+  assert.equal(history().steps.length, n - 2, 'a new edit continues from there');
+});

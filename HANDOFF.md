@@ -617,8 +617,18 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   the traveler's passes, the clip's notes and the playhead. Tests: scales,
   time, a MIDI file, the transport's pause and loop, music and clip
   commands with undo, `at` and `speed`, the loop jump. 66 in all.
-- Not yet: the process take as a timeline lane (scrub how the drawing was
-  made); gestures recorded in time (a stroke replayed at the speed it was
+- **The making lane** (a thirteenth pass, the same day): the first
+  timeline lane is the take, one tick per step (what one undo takes away),
+  placed by when it was made with pauses over 1.5 s shortened, and fitted
+  to the lane. It has its own time, not the music's, because time in the
+  work and time of its making stay apart. `history()` and `travel(k)` in
+  `space.js` move the line between done and undone steps and rerun the take
+  once, so dragging along the lane is undo and redo, and an edit made there
+  continues from there. Clicking the lane's name replays the making at its
+  pace (`replay()` in `main.js`); a press or a key stops it. Ticks are
+  coloured by kind: drawing in ink, joints in hot, music in accent. Hover
+  names the step.
+- Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); audio recording; note-off at exit (IanniX's gate); scores on
   the shared transport (they still schedule their own passes); MIDI clock;
   a nested space with its own context; editing notes inside a clip.

@@ -143,6 +143,13 @@ junction code can use `pitch(v)` (a place 0..1 as a note of the scale),
 `step(n, k)` (k degrees up the scale from n) and `snap(n)`. Event presets
 include fixed note and step up.
 
+The first lane, "making", is the take: every step of how the drawing was
+made, by when it was made (long pauses shortened). Drag along it to move
+through the history: the drawing shows as it was at that step. An edit
+made there continues from there, as it would after undo. Click its name
+to replay the making at the pace it was made; a press or a key stops the
+replay.
+
 Recording: the notes travelers and events play while ● is on become a clip
 on the timeline. A clip plays back with the transport, can be dragged
 along it, and has a right-click menu: mute, export as MIDI, delete.
