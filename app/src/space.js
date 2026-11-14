@@ -12,6 +12,7 @@ import { collapse, expand } from './collapse.js';
 import { PRESETS } from './presets.js';
 import { BRUSHES } from './brushes.js';
 import { BRUSHES as INK } from './ink/brushes.js';
+import { spec, apply, applyRect } from './transform.js';
 
 export const state = {
   objects: new Map(),   // id -> object, see object.js
@@ -118,6 +119,44 @@ define({
 });
 
 define({
+  name: 'traveler.attach', doc: 'Put a traveler on another line, starting at u (0..1).',
+  args: { id: T.id, on: { type: 'string' }, u: T.num }, required: ['id', 'on'],
+  run(a) {
+    const o = state.objects.get(a.id), line = state.objects.get(a.on);
+    if (o?.role !== 'traveler' || !line || line.kind !== 'line' || line.bind || line.space !== o.space) return false;
+    o.on = line.id; o.params = { ...o.params, start: Math.max(0, Math.min(1, a.u ?? 0)) };
+    return true;
+  },
+});
+
+define({
+  name: 'object.paste', doc: 'Add objects copied out as JSON (Copy as JSON), with new ids, into a space, moved by dx, dy. Returns the new ids of the outermost ones.',
+  args: { objects: { type: 'array' }, space: { type: ['string', 'null'] }, dx: T.num, dy: T.num }, required: ['objects'],
+  run(a) {
+    const space = a.space && state.objects.has(a.space) ? a.space : null, map = new Map();
+    const list = a.objects.filter((o) => o && typeof o.id === 'string' && (o.kind === 'line' || o.kind === 'shape' || o.kind === 'group'));
+    for (const o of list) map.set(o.id, newId());
+    const top = [];
+    for (const src of list) {
+      const c = structuredClone(src);
+      c.id = map.get(src.id);
+      if (map.has(c.space)) c.space = map.get(c.space);
+      else {
+        c.space = space;
+        if (c.rect) { c.rect.cx += a.dx ?? 0; c.rect.cy += a.dy ?? 0; } else c.off = [(c.off?.[0] ?? 0) + (a.dx ?? 0), (c.off?.[1] ?? 0) + (a.dy ?? 0)];
+        if (!c.bind) top.push(c.id);
+      }
+      if (c.on) { if (!map.has(c.on)) continue; c.on = map.get(c.on); }
+      if (c.bind) { if (!map.has(c.bind.from.id) || !map.has(c.bind.to.id)) continue; c.bind = { from: { ...c.bind.from, id: map.get(c.bind.from.id) }, to: { ...c.bind.to, id: map.get(c.bind.to.id) } }; }
+      if (c.kind === 'group') for (const side of ['ins', 'outs']) for (const p of c.ports?.[side] ?? []) if (p.inner && map.has(p.inner.id)) p.inner.id = map.get(p.inner.id);
+      state.objects.set(c.id, c);
+    }
+    state.selection = new Set(top);
+    return top;
+  },
+});
+
+define({
   name: 'object.role',
   doc: 'Change what an object is. A line: "ink", "connector" (binds to the ports nearest its ends, within tol), "path". A shape: "visual", "target", "code", "score", "note".',
   args: { id: T.id, role: { enum: [...ROLES.line, ...ROLES.shape] }, tol: T.num },
@@ -177,6 +216,21 @@ define({
 define({
   name: 'object.resize', doc: 'Give a shape or group a new rectangle.', args: { id: T.id, rect: T.rect }, required: ['id', 'rect'],
   run(a) { const o = state.objects.get(a.id); if (o?.rect) o.rect = { cx: a.rect.cx, cy: a.rect.cy, w: Math.max(0.05, a.rect.w), h: Math.max(0.05, a.rect.h) }; },
+});
+
+define({
+  name: 'object.transform',
+  doc: 'Move, rotate or scale objects about a pivot, as G, R and S do: p\' = pivot + R(axis, angle) * S * (p - pivot) + d. angle in degrees. On the canvas lines turn about z; a shape\'s centre moves and its size scales (a quarter turn swaps width and height). Lines inside a render target turn about axis ("x", "y", "z" or [x, y, z]).',
+  args: { ids: T.ids, pivot: { type: 'array', items: { type: 'number' } }, dx: T.num, dy: T.num, dz: T.num, angle: T.num, axis: { type: ['string', 'array'] }, sx: T.num, sy: T.num, sz: T.num }, required: ['ids'],
+  run(a) {
+    const t = spec(a);
+    for (const id of a.ids) {
+      const o = state.objects.get(id);
+      if (!o || o.bind || o.role === 'traveler') continue;
+      if (o.rect) { const r = applyRect(t, o.rect); for (const k in r) r[k] = Math.round(r[k] * 1e4) / 1e4; o.rect = r; }
+      else if (o.points) { o.points = ptsOf(o).map((p) => apply(t, p).map((v) => Math.round(v * 1e4) / 1e4)); o.off = [0, 0]; }
+    }
+  },
 });
 
 define({
@@ -244,9 +298,24 @@ define({
 });
 
 define({
-  name: 'object.order', doc: 'Bring objects to the front or send them to the back of the drawing order.',
-  args: { ids: T.ids, to: { enum: ['front', 'back'] } }, required: ['ids', 'to'],
+  name: 'object.order', doc: 'Bring objects to the front, one step forward, one step backward, or to the back of the drawing order.',
+  args: { ids: T.ids, to: { enum: ['front', 'forward', 'backward', 'back'] } }, required: ['ids', 'to'],
   run(a) {
+    if (a.to === 'forward' || a.to === 'backward') {
+      // each one changes place with its neighbour in the same space
+      const list = [...state.objects], sel = new Set(a.ids), up = a.to === 'forward';
+      for (let n = 0; n < list.length; n++) {
+        const i = up ? list.length - 1 - n : n;
+        if (!sel.has(list[i][0])) continue;
+        let j = i + (up ? 1 : -1);
+        while (j >= 0 && j < list.length && list[j][1].space !== list[i][1].space) j += up ? 1 : -1;
+        if (j < 0 || j >= list.length || sel.has(list[j][0])) continue;
+        const [it] = list.splice(i, 1); list.splice(j, 0, it);
+      }
+      state.objects.clear();
+      for (const [id, o] of list) state.objects.set(id, o);
+      return;
+    }
     const moved = a.ids.filter((id) => state.objects.has(id)).map((id) => [id, state.objects.get(id)]);
     const rest = [...state.objects].filter(([id]) => !a.ids.includes(id));
     state.objects.clear();

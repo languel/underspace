@@ -100,6 +100,7 @@ export function rectOf(o) {
   const d = dragOf(o), at = moved?.get(o.id);
   if (at && !d) return { cx: at[0], cy: at[1], w: o.rect.w, h: o.rect.h };
   if (o.rect) {
+    if (d?.rects?.has(o.id)) return d.rects.get(o.id); // a transform in progress: one rectangle each
     if (d?.rect) return d.rect;
     return { cx: o.rect.cx + (d?.dx ?? 0), cy: o.rect.cy + (d?.dy ?? 0), w: o.rect.w, h: o.rect.h };
   }

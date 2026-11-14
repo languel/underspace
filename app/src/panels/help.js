@@ -19,10 +19,12 @@ const GESTURES = [
   ['Ctrl+middle-drag, or Alt+Ctrl-drag', 'zoom, on the canvas and in a target'],
   ['Points tool: drag a handle', 'move it; Shift picks more, a box picks many, Delete removes'],
   ['Tap Space', 'play or stop the scores'],
+  ['G, R, S with a selection', 'grab, rotate, scale: X Y Z hold to an axis (Shift: the plane without it), type a number, Shift fine, Ctrl steps, click or Enter accepts, right-click or Esc cancels'],
+  ['Points tool, G R S', 'the same, on the picked points'],
   ['Right-click', 'what can be done here'],
   ['Paste code on the canvas', 'a code container; a p5.js or three.js sketch runs'],
 ];
-const GROUPS = { brush: 'Brushes', tool2: 'Object tools', history: 'History', tool: 'Tools', role: 'Roles', play: 'Sound', edit: 'Edit', plane: 'Drawing plane', add: 'Add', nav: 'Navigate', file: 'File', panel: 'Panels' };
+const GROUPS = { transform: 'Transform', attach: 'Paths', show: 'Panels', delete: 'Edit', brush: 'Brushes', tool2: 'Object tools', history: 'History', tool: 'Tools', role: 'Roles', play: 'Sound', edit: 'Edit', plane: 'Drawing plane', add: 'Add', nav: 'Navigate', file: 'File', panel: 'Panels' };
 
 export function helpPanel(el, app) {
   const search = h('input'), list = h('div', 'list');

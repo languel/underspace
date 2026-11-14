@@ -414,6 +414,44 @@ Added in a seventh pass (14 Nov 2026):
   go through `line.set`. Lines that code makes show no handles. Not yet:
   inserting points, Bézier tangents, editing a shape's outline.
 
+Added in an eighth pass (14 Nov 2026):
+
+- **Grab, rotate, scale as in Blender** (`src/transform.js`, after
+  threeditor's `editor/js/ModalTransform.js` and its Blender keymap). G, R,
+  S with a selection, or with points picked in the points tool. X, Y, Z
+  hold to an axis (Shift+axis: the plane without it, in a target; the same
+  key again lets go); a typed number sets the amount; Shift is fine, Ctrl
+  steps (grid, 15°, tenths); click or Enter accepts, right-click or Escape
+  cancels; G, R, S switch mid-way. In a target grab moves on the plane
+  through the pivot facing the view, rotate turns about the line of sight
+  unless an axis is given. Shift+D duplicates and grabs. A readout at the
+  bottom shows the state as glyph, axis and amount. Whole objects commit
+  as `object.transform` (pivot, d, angle, axis, s; a shape's centre moves,
+  its size scales, a quarter turn swaps its sides; shapes do not rotate);
+  points as `line.set`. Keys moved for it: collapse is ⌘G (was G), expand
+  ⌘⇧G or E, make score has no key (S scales); R and S without a selection
+  are still the rectangle and score tools.
+- **Context menu after AMS's** (`contextItemsBase` in its
+  `src/workbench/app.js`): a header naming what is under the pointer, then
+  Attach an event here / a traveler here / to the nearest line, transform,
+  Convert to ›, Path code ›, Sculpt ›, Brush ›, Play, group, Duplicate,
+  Copy as › (JSON, SVG, p5 code, code), Simplify › (lightly, moderately,
+  strongly), Snap › (points to grid, tidy, position top left or centre,
+  quantize 2× and 4×), Arrange › (front, forward, backward, back), Hide,
+  Lock, Show code / properties / outliner, Delete; on empty canvas Add ›,
+  Paste here, grid and snap. Menus have submenus (`menu: 'Name'` on an
+  action puts it in one). ⌘C copies the selection as JSON (with what is
+  inside, travelers on it and connectors between) and ⌘V pastes it at the
+  pointer (`object.paste`). New commands: `object.transform`,
+  `object.paste`, `traveler.attach`, `object.order` forward and backward.
+  `src/selection.js` holds snapping and SVG/p5 output. Not ported: PNG
+  copy, bake, assets, stages, masks, boards, solo, Midinous nodes, bodies.
+- **Pinch.** A synthetic Ctrl+wheel zooms as it should. The owner reported
+  pinch not working in the desktop app's browser pane; that pane was
+  serving stale cached scripts (`python3 -m http.server` sends no cache
+  headers), so reload hard (⌘⇧R) after changes. Whether that pane turns a
+  trackpad pinch into Ctrl+wheel at all is not yet known.
+
 The owner asked to match Poliplan's functionality "for starters" without
 copying it. Not matched yet: writing your own brushes and sculpt tools in
 the app, rotate and scale of lines, the point and lasso-plane tools,

@@ -3,7 +3,7 @@
 
 import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, argTypes as T } from './space.js';
 import './patch.js';
-import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplifyIndex, setDrag, setLive, setMoved, penOf, isLine, isTarget, hasCode, isWire } from './object.js';
+import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplifyIndex, along, setDrag, setLive, setMoved, penOf, isLine, isTarget, hasCode, isWire } from './object.js';
 import { selectionProps, toolProps } from './panels/properties.js';
 import { wirePoints } from './bind.js';
 import { createRunner } from './run.js';
@@ -30,6 +30,8 @@ import * as sound from './sound.js';
 import { createPlay, nearestU } from './play.js';
 import { icon } from './icons.js';
 import { createPoints, without } from './points.js';
+import { createModal, apply, applyRect } from './transform.js';
+import { snapPoints, snapBox, toSVG, toP5 } from './selection.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
 import { SCULPTS, sculptMark, effectiveSculpt } from './ink/sculpt.js';
@@ -128,6 +130,7 @@ function walk(space, xf) {
         if (tool === 'points') pointSrc.push({ o: m, pts: ptsOf(m), pen: penOf(m), scene: o.id });
         vis.set(m.id, { o: m, face: 'line', scene: o.id });
       }
+      if (guide?.scene === o.id) marks.push({ pts: [-1, 1].map((k) => guide.pivot.map((v, i) => v + guide.axis[i] * 60 * k)), color: 'hot' });
       // its 3D cursor, when the drawing plane hangs from it
       if ((o.anchor ?? 'origin') === 'cursor') { const c = o.cursor ?? [0, 0, 0], d = 0.35; for (let k = 0; k < 3; k++) { const a = c.slice(), b = c.slice(); a[k] -= d; b[k] += d; marks.push({ pts: [a, b], color: 'hot' }); } }
       const cam = camOf(o);
@@ -178,6 +181,7 @@ function frame() {
   run = step(state.objects, performance.now() / 1000);
   vis = new Map(); spaces = [{ id: null, kind: 'canvas', xf: ROOT }]; lines = []; ink3d = []; sceneList = []; dots = []; inkItems = []; pointSrc = [];
   walk(null, ROOT);
+  if (guide && !guide.scene) lines.push({ pts: [-1, 1].map((k) => at(guide.xf, [guide.pivot[0] + guide.axis[0] * 1e4 * k, guide.pivot[1] + guide.axis[1] * 1e4 * k])), color: 'hot', width: 1 });
   // Lines that code makes can change every frame; a cheap fingerprint tells.
   let made = 0;
   for (const pts of run.shown.values()) { const m = pts[pts.length >> 1]; made += pts.length + m[0] * 7 + m[1] * 13; }
@@ -312,6 +316,134 @@ function removePoints() {
   });
   handles.picked.clear();
 }
+
+// ---- grab, rotate, scale (G, R, S, as in Blender) ----------------------------
+
+let guide = null; // the axis a transform is held to: { scene, pivot, axis, xf }
+const readout = $('readout');
+// What G, R and S move: the picked points (points tool), or the selected objects; one space at a time.
+function transformItems() {
+  if (laidOut !== state.version) frame();
+  let out;
+  if (tool === 'points' && handles.picked.size) {
+    out = [];
+    for (const [id, idx] of handles.byLine()) { const src = pointSrc.find((l) => l.o.id === id); if (src) out.push({ id, pts: src.pts, idx, pen: src.pen, scene: src.scene, xf: src.xf }); }
+  } else {
+    out = [...state.selection].map(get).filter((o) => o && !o.bind && o.role !== 'traveler' && !o.locked && vis.get(o.id)).map((o) => {
+      const v = vis.get(o.id);
+      return v.scene ? { id: o.id, pts: ptsOf(o), scene: v.scene } : o.rect ? { id: o.id, rect: rectOf(o), xf: v.xf } : { id: o.id, pts: ptsOf(o), pen: o.pen, xf: v.xf };
+    });
+  }
+  const sp = out.length ? get(out[0].id).space : null;
+  return out.filter((it) => get(it.id).space === sp);
+}
+const transformed = (it, t) => { const idx = it.idx && new Set(it.idx); return it.pts.map((p, i) => (!idx || idx.has(i) ? apply(t, p) : p)); };
+const modal = createModal({
+  items: transformItems,
+  local,
+  unitsPerPx: (it) => view.unitsPerPx() / (it.xf?.k ?? 1),
+  toScreen: (it, p) => (it.scene ? view.sceneToScreen(it.scene, p) : view.toScreen(at(it.xf, p))),
+  toLocal: (it, x, y, plane, through) => view.sceneToLocal(it.scene, x, y, plane, through),
+  basis: (scene) => view.planeBasis(scene, 'view'),
+  snap: (v) => snap(v),
+  preview(items, t, axis) {
+    const live = new Map(), rects = new Map();
+    for (const it of items) {
+      if (it.rect) rects.set(it.id, applyRect(t, it.rect));
+      else live.set(it.id, { points: transformed(it, t), pen: it.pen ?? get(it.id)?.pen });
+    }
+    setLive(live); setDrag(rects.size ? { ids: new Set(rects.keys()), rects } : null);
+    guide = axis ? { scene: items[0].scene, pivot: t.pivot, axis, xf: items[0].xf } : null;
+    dragSig = 'transform' + (++transformN);
+  },
+  commit(items, t) {
+    this.cancel();
+    if (items.some((it) => it.idx)) {
+      batch(() => { for (const it of items) call('line.set', { id: it.id, points: transformed(it, t).map((p) => p.map(round)), ...(it.pen?.length === it.pts.length ? { pen: it.pen } : {}) }); });
+      return;
+    }
+    const a = { ids: items.map((it) => it.id), pivot: t.pivot.map(round) };
+    if (t.d.some(Boolean)) Object.assign(a, { dx: round(t.d[0]), dy: round(t.d[1]) }, t.d[2] ? { dz: round(t.d[2]) } : {});
+    if (t.angle) Object.assign(a, { angle: round((t.angle * 180) / Math.PI), axis: t.axis.map(round) });
+    if (t.s.some((v) => v !== 1)) Object.assign(a, { sx: round(t.s[0]), sy: round(t.s[1]) }, t.s[2] !== 1 ? { sz: round(t.s[2]) } : {});
+    if (a.dx != null || a.angle != null || a.sx != null) call('object.transform', a);
+  },
+  cancel() { setLive(null); setDrag(null); guide = null; dragSig = ''; },
+  readout(text) { readout.hidden = !text; readout.textContent = text ?? ''; },
+});
+let transformN = 0;
+const canTransform = (c) => (tool === 'points' && handles.picked.size) || c.sel.some((o) => !o.bind && o.role !== 'traveler' && !o.locked);
+const transform = (mode) => modal.start(mode, pointer ?? centre());
+
+// ---- what the context menu does to a selection --------------------------------
+
+// The point of a line nearest the pointer, in the line's space, and how far along it is.
+function onLineAt(l, p) {
+  const s = spaces.find((x) => x.id === l.space) ?? spaces[0], q = toSpace(s, p[0], p[1]), path = shownPath(l), u = nearestU(path, q[0], q[1]);
+  return { s, u, at: along(path, u) };
+}
+const flatLine = (o) => isLine(o) && !o.bind && get(o.space)?.role !== 'target';
+// The line nearest a point of a space, other than `not`.
+function nearestLine(space, x, y, not) {
+  let best = null, bestD = Infinity;
+  for (const l of state.objects.values()) {
+    if (!flatLine(l) || l.space !== space || l.id === not || l.hidden) continue;
+    const path = shownPath(l), u = nearestU(path, x, y), q = along(path, u), d = Math.hypot(q[0] - x, q[1] - y);
+    if (d < bestD) { bestD = d; best = { l, u, at: q }; }
+  }
+  return best;
+}
+function attachToNearest(c) {
+  batch(() => {
+    for (const o of c.shapes) {
+      const r = rectOf(o), near = nearestLine(o.space, r.cx, r.cy, o.on);
+      if (!near) continue;
+      if (o.role === 'traveler') call('traveler.attach', { id: o.id, on: near.l.id, u: round(near.u) });
+      else call('object.move', { ids: [o.id], dx: round(near.at[0] - r.cx), dy: round(near.at[1] - r.cy) });
+    }
+  });
+}
+function simplifyLines(c, px) {
+  batch(() => {
+    for (const l of c.lines.filter(flatLine)) {
+      const v = vis.get(l.id), pts = ptsOf(l), keep = simplifyIndex(pts, px * view.unitsPerPx() / (v?.xf?.k ?? 1));
+      if (keep.length < pts.length && keep.length >= 2) call('line.set', { id: l.id, points: keep.map((i) => pts[i].map(round)), ...(l.pen?.length === pts.length ? { pen: keep.map((i) => l.pen[i]) } : {}) });
+    }
+  });
+}
+function snapSelection(c, mode, k = 1) {
+  const q = settings.gridSize * k;
+  batch(() => {
+    for (const o of c.sel) {
+      if (o.bind || o.locked) continue;
+      if (mode === 'topleft' || mode === 'center') { const d = snapBox(rectOf(o), q, mode); if (d[0] || d[1]) call('object.move', { ids: [o.id], dx: round(d[0]), dy: round(d[1]) }); continue; }
+      if (!flatLine(o)) continue;
+      const pts = ptsOf(o), r = snapPoints(pts, q, mode);
+      call('line.set', { id: o.id, points: r.points, ...(o.pen?.length === pts.length ? { pen: r.keep.map((i) => o.pen[i]) } : {}) });
+    }
+  });
+}
+// The selection as marks on the canvas (y up), for SVG and p5.
+function marksOf(c) {
+  const out = [];
+  for (const o of c.sel) {
+    const v = vis.get(o.id), st = o.style ?? {};
+    if (!v?.xf) continue;
+    const look = { stroke: st.stroke, fill: st.fill, width: st.width };
+    if (isLine(o)) out.push({ ...look, pts: shownPath(o).map((p) => at(v.xf, p)), closed: o.closed });
+    else if (o.rect) out.push({ ...look, rect: worldRect(v), shape: o.shape });
+  }
+  return out;
+}
+// The selection with everything inside it, the travelers on it and the connectors between it.
+function copyJSON(c) {
+  const ids = new Set(), add = (id) => { if (ids.has(id)) return; ids.add(id); for (const o of state.objects.values()) if (o.space === id || o.on === id) add(o.id); };
+  for (const o of c.sel) if (!o.bind) add(o.id);
+  for (const w of state.objects.values()) if (w.bind && ids.has(w.bind.from.id) && ids.has(w.bind.to.id)) ids.add(w.id);
+  const objects = [...state.objects.values()].filter((o) => ids.has(o.id));
+  navigator.clipboard?.writeText(JSON.stringify({ underspace: 1, objects }));
+}
+const clip = (text) => navigator.clipboard?.writeText(text);
 
 // ---- gestures: what a press means depends on what is under it --------------
 
@@ -814,6 +946,11 @@ const addHere = (c, make, extra) => { const s = spaceAt(c.p[0], c.p[1], true); a
 const can = (list, role) => list.some((o) => o.role !== role);
 
 const ACTIONS = [
+  // grab, rotate, scale: G, R, S with something selected (or points picked), as in Blender
+  { id: 'grab', title: 'Grab', icon: 'grab', keys: 'g', group: 'transform', menu: true, when: canTransform, run: () => transform('grab') },
+  { id: 'rotate', title: 'Rotate', icon: 'rotate', keys: 'r', group: 'transform', menu: true, when: canTransform, run: () => transform('rotate') },
+  { id: 'scale', title: 'Scale', icon: 'scale', keys: 's', group: 'transform', menu: true, when: canTransform, run: () => transform('scale') },
+  { id: 'dupgrab', title: 'Duplicate and grab', icon: 'copy', keys: 'shift+d', group: 'transform', when: (c) => c.sel.some((o) => !o.bind), run: (c) => { call('object.copy', { ids: ids(c.sel), dx: 0, dy: 0 }); transform('grab'); } },
   // tools
   { id: 'tool.select', title: 'Select', icon: 'select', keys: 'v', group: 'tool', bar: 'tools', tool: 'select', stack: 'select' },
   { id: 'tool.points', title: 'Control points', icon: 'points', keys: 'shift+v', group: 'tool', bar: 'tools', tool: 'points', stack: 'select' },
@@ -827,30 +964,33 @@ const ACTIONS = [
   { id: 'sculpt.larger', title: 'Sculpt: larger', keys: ']', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptRadius', Math.min(400, Math.round(settings.sculptRadius * 1.2))) },
   { id: 'sculpt.weaker', title: 'Sculpt: weaker', keys: 'shift+{', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptStrength', Math.max(0.05, +(settings.sculptStrength - 0.1).toFixed(2))) },
   { id: 'sculpt.stronger', title: 'Sculpt: stronger', keys: 'shift+}', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptStrength', Math.min(1, +(settings.sculptStrength + 0.1).toFixed(2))) },
-  ...Object.entries(SCULPTS).map(([id, t]) => ({ id: 'sculpt.' + id, title: `Sculpt: ${t.label}`, icon: 'sculpt', group: 'brush', run: () => { setSetting('sculpt', id); setTool('sculpt'); } })),
+  ...Object.entries(SCULPTS).map(([id, t]) => ({ id: 'sculpt.' + id, title: `Sculpt: ${t.label}`, short: t.label, icon: 'sculpt', group: 'brush', menu: 'Sculpt', menuWhen: (c) => c.lines.some(flatLine), on: () => settings.sculpt === id && tool === 'sculpt', run: () => { setSetting('sculpt', id); setTool('sculpt'); } })),
   { id: 'tool.note', title: 'Note', icon: 'note', keys: 'n', group: 'tool', bar: 'tools', tool: 'note' },
   { id: 'tool.code', title: 'Code container', icon: 'box', keys: 'b', group: 'tool2', bar: 'tools', tool: 'code', stack: 'object' },
   // roles: the same key means "tool" with nothing selected and "make this one" with a selection
-  { id: 'role.target', title: 'Make render target', icon: 'target', keys: 't', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'target'), run: (c) => setRole(c.shapes, 'target') },
+  { id: 'role.target', title: 'Make render target', icon: 'target', keys: 't', group: 'role', menu: 'Convert to', when: (c) => c.shapes.length && can(c.shapes, 'target'), run: (c) => setRole(c.shapes, 'target') },
   { id: 'tool.target', title: 'Render target', icon: 'target', keys: 't', group: 'tool2', bar: 'tools', tool: 'target', stack: 'object' },
-  { id: 'role.score', title: 'Make score', icon: 'score', keys: 's', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'score'), run: (c) => setRole(c.shapes, 'score') },
+  { id: 'role.score', title: 'Make score', icon: 'score', group: 'role', menu: 'Convert to', when: (c) => c.shapes.length && can(c.shapes, 'score'), run: (c) => setRole(c.shapes, 'score') },
   { id: 'tool.score', title: 'Score', icon: 'score', keys: 's', group: 'tool2', bar: 'tools', tool: 'score', stack: 'object' },
   { id: 'tool.event', title: 'Event', icon: 'event', keys: 'y', group: 'tool2', bar: 'tools', tool: 'event', stack: 'object' },
-  { id: 'role.event', title: 'Make event', icon: 'event', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'event') && !c.shapes.some((o) => o.role === 'traveler'), run: (c) => setRole(c.shapes, 'event') },
-  { id: 'attach.traveler', title: 'Attach a traveler here', icon: 'traveler', keys: 'a', group: 'role', menu: true, when: (c) => c.lines.length === 1 && !c.lines[0].bind && get(c.lines[0].space)?.role !== 'target', // not inside a 3D space, for now
+  { id: 'role.event', title: 'Make event', icon: 'event', group: 'role', menu: 'Convert to', when: (c) => c.shapes.length && can(c.shapes, 'event') && !c.shapes.some((o) => o.role === 'traveler'), run: (c) => setRole(c.shapes, 'event') },
+  { id: 'attach.event', title: 'Attach an event here', icon: 'event', group: 'attach', menu: true, when: (c) => c.lines.length === 1 && flatLine(c.lines[0]),
+    run: (c) => { const l = c.lines[0], { s, at: q } = onLineAt(l, c.p), size = round(26 * unitsPerPx(s)); call('shape.add', { space: l.space, role: 'event', shape: 'ellipse', rect: { cx: round(q[0]), cy: round(q[1]), w: size, h: size } }); } },
+  { id: 'attach.nearest', title: 'Attach to the nearest line', icon: 'path', group: 'attach', menu: true, when: (c) => c.shapes.length && c.shapes.every((o) => o.kind === 'shape' && get(o.space)?.role !== 'target') && [...state.objects.values()].some((l) => flatLine(l) && l.space === c.shapes[0].space), run: attachToNearest },
+  { id: 'attach.traveler', title: 'Attach a traveler here', icon: 'traveler', keys: 'a', group: 'attach', menu: true, when: (c) => c.lines.length === 1 && !c.lines[0].bind && get(c.lines[0].space)?.role !== 'target', // not inside a 3D space, for now
     run: (c) => { const l = c.lines[0], s = spaces.find((x) => x.id === l.space) ?? spaces[0], q = toSpace(s, c.p[0], c.p[1]); const id = call('traveler.add', { on: l.id, u: round(nearestU(shownPath(l), q[0], q[1])), size: round(22 * unitsPerPx(s)) }); if (id) call('select.set', { ids: [id] }); } },
-  { id: 'role.code', title: 'Make code container', icon: 'code', keys: 'c', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'code'), run: (c) => setRole(c.shapes, 'code') },
-  { id: 'role.path', title: 'Make path', icon: 'path', keys: 'c', group: 'role', menu: true, when: (c) => c.lines.length && can(c.lines, 'path'), run: (c) => setRole(c.lines, 'path') },
-  { id: 'role.connector', title: 'Make connector', icon: 'connector', keys: 'w', group: 'role', menu: true, when: (c) => c.lines.some((o) => !o.bind), run: (c) => setRole(c.lines, 'connector') },
-  { id: 'role.ink', title: 'Make plain ink', icon: 'ink', keys: 'x', group: 'role', menu: true, when: (c) => c.lines.length && can(c.lines, 'ink'), run: (c) => setRole(c.lines, 'ink') },
+  { id: 'role.code', title: 'Make code container', icon: 'code', keys: 'c', group: 'role', menu: 'Convert to', when: (c) => c.shapes.length && can(c.shapes, 'code'), run: (c) => setRole(c.shapes, 'code') },
+  { id: 'role.path', title: 'Make path', icon: 'path', keys: 'c', group: 'role', menu: 'Convert to', when: (c) => c.lines.length && can(c.lines, 'path'), run: (c) => setRole(c.lines, 'path') },
+  { id: 'role.connector', title: 'Make connector', icon: 'connector', keys: 'w', group: 'role', menu: 'Convert to', when: (c) => c.lines.some((o) => !o.bind), run: (c) => setRole(c.lines, 'connector') },
+  { id: 'role.ink', title: 'Make plain ink', icon: 'ink', keys: 'x', group: 'role', menu: 'Convert to', when: (c) => c.lines.length && can(c.lines, 'ink'), run: (c) => setRole(c.lines, 'ink') },
   { id: 'path.straight', title: 'Straight strokes', icon: 'line', keys: 'shift+s', group: 'role', menu: true, when: (c) => c.lines.some((o) => o.style?.path !== 'straight' && !o.closed), run: (c) => call('object.style', { ids: ids(c.lines), style: { path: 'straight' } }) },
   { id: 'path.smooth', title: 'Smooth strokes', icon: 'draw', keys: 'shift+s', group: 'role', menu: true, when: (c) => c.lines.some((o) => o.style?.path === 'straight'), run: (c) => call('object.style', { ids: ids(c.lines), style: { path: null } }) },
-  { id: 'role.visual', title: 'Make visual', icon: 'visual', keys: 'x', group: 'role', menu: true, when: (c) => c.shapes.length && can(c.shapes, 'visual'), run: (c) => setRole(c.shapes, 'visual') },
+  { id: 'role.visual', title: 'Make visual', icon: 'visual', keys: 'x', group: 'role', menu: 'Convert to', when: (c) => c.shapes.length && can(c.shapes, 'visual'), run: (c) => setRole(c.shapes, 'visual') },
   // sound: a tap of Space plays or stops (holding it and dragging pans)
   { id: 'play', title: 'Play or stop', icon: 'play', keys: 'mod+enter', group: 'play', bar: 'edit', menu: true, when: () => scores().length || travelers().length, run: (c) => togglePlay(c) },
   // ink brushes: on the selection, or with nothing selected, for the lines drawn next
   ...['', ...brushesFor('line')].map((id) => ({
-    id: 'brush.' + (id || 'none'), title: id ? `Brush: ${INK[id].label}` : 'Brush: plain line', icon: 'brush', group: 'brush',
+    id: 'brush.' + (id || 'none'), title: id ? `Brush: ${INK[id].label}` : 'Brush: plain line', short: id ? INK[id].label : 'Plain line', icon: 'brush', group: 'brush', menu: 'Brush', menuWhen: (c) => c.lines.some((o) => !o.bind),
     run: (c) => { const on = c.lines.filter((o) => !o.bind); if (on.length) call('object.brush', { ids: ids(on), id: id || null }); else { setSetting('brush', id); setTool('draw'); } },
   })),
   ...brushesFor('plane').filter((id) => !brushesFor('line').includes(id)).map((id) => ({
@@ -858,41 +998,51 @@ const ACTIONS = [
     run: (c) => { const on = c.shapes.filter((o) => o.role === 'visual'); if (on.length) call('object.brush', { ids: ids(on), id }); else setSetting('planeBrush', id); },
   })),
   // structure
-  { id: 'collapse', title: 'Collapse into a group', icon: 'collapse', keys: 'g', group: 'edit', menu: true, when: (c) => c.sel.some((o) => !o.bind), run: (c) => call('group.collapse', { ids: ids(c.sel) }) },
-  { id: 'expand', title: 'Expand group', icon: 'expand', keys: ['e', 'shift+g'], group: 'edit', menu: true, when: (c) => c.groups.length, run: (c) => batch(() => c.groups.forEach((g) => call('group.expand', { id: g.id }))) },
+  { id: 'collapse', title: 'Collapse into a group', icon: 'collapse', keys: 'mod+g', group: 'edit', menu: true, when: (c) => c.sel.some((o) => !o.bind), run: (c) => call('group.collapse', { ids: ids(c.sel) }) },
+  { id: 'expand', title: 'Expand group', icon: 'expand', keys: ['mod+shift+g', 'e'], group: 'edit', menu: true, when: (c) => c.groups.length, run: (c) => batch(() => c.groups.forEach((g) => call('group.expand', { id: g.id }))) },
   { id: 'copy', title: 'Duplicate', icon: 'copy', keys: 'mod+d', group: 'edit', menu: true, when: (c) => c.sel.some((o) => !o.bind), run: (c) => { const u = round(24 * unitsPerPx(c.here.kind === 'scene' ? spaces[0] : spaces.find((s) => s.id === c.sel[0].space) ?? spaces[0])); call('object.copy', { ids: ids(c.sel), dx: u, dy: -u }); } },
-  { id: 'copycode', title: 'Copy code', icon: 'code', keys: 'mod+c', group: 'edit', menu: true, when: (c) => c.one && hasCode(c.one), run: (c) => navigator.clipboard?.writeText(c.one.code) },
-  { id: 'front', title: 'Bring to front', icon: 'front', keys: 'mod+]', group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'front' }) },
-  { id: 'back', title: 'Send to back', icon: 'back', keys: 'mod+[', group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'back' }) },
+  { id: 'copycode', title: 'Copy code', short: 'Code', icon: 'code', keys: 'mod+c', group: 'edit', menu: 'Copy as', when: (c) => c.one && hasCode(c.one), run: (c) => clip(c.one.code) },
+  { id: 'copy.json', title: 'Copy', short: 'JSON', icon: 'copy', keys: 'mod+c', group: 'edit', menu: 'Copy as', when: (c) => c.sel.some((o) => !o.bind), run: copyJSON },
+  { id: 'copy.svg', title: 'Copy as SVG', short: 'SVG', icon: 'visual', group: 'edit', menu: 'Copy as', when: (c) => marksOf(c).length, run: (c) => clip(toSVG(marksOf(c))) },
+  { id: 'copy.p5', title: 'Copy as p5 code', short: 'p5 code', icon: 'code', group: 'edit', menu: 'Copy as', when: (c) => marksOf(c).length, run: (c) => clip(toP5(marksOf(c))) },
+  ...[['lightly', 'Lightly', 1.5], ['moderately', 'Moderately', 4], ['strongly', 'Strongly', 10]].map(([id, title, px]) => ({ id: 'simplify.' + id, title: `Simplify ${id}`, short: title, icon: 'line', group: 'edit', menu: 'Simplify', when: (c) => c.lines.some(flatLine), run: (c) => simplifyLines(c, px) })),
+  ...[['points', 'Points to grid', 'points'], ['tidy', 'Points to grid, tidy', 'tidy'], ['topleft', 'Position: top left', 'topleft'], ['center', 'Position: centre', 'center'], ['q2', 'Quantize 2× grid', 'tidy', 2], ['q4', 'Quantize 4× grid', 'tidy', 4]].map((d) => ({ id: 'snap.' + d[0], title: `Snap: ${d[1]}`, short: d[1], icon: 'grid', group: 'edit', menu: 'Snap', when: (c) => (d[2] === 'topleft' || d[2] === 'center' ? c.sel.some((o) => !o.bind && vis.get(o.id)?.xf) : c.lines.some(flatLine)), run: (c) => snapSelection(c, d[2], d[3]) })),
+  { id: 'front', title: 'Bring to front', icon: 'front', keys: 'mod+shift+]', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'front' }) },
+  { id: 'forward', title: 'Bring forward', icon: 'front', keys: 'mod+]', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'forward' }) },
+  { id: 'backward', title: 'Send backward', icon: 'back', keys: 'mod+[', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'backward' }) },
+  { id: 'back', title: 'Send to back', icon: 'back', keys: 'mod+shift+[', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'back' }) },
   { id: 'hide', title: 'Hide', icon: 'hide', keys: 'shift+h', group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.flag', { ids: ids(c.sel), hidden: true }) },
   { id: 'lock', title: 'Lock', icon: 'lock', keys: 'shift+l', group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.flag', { ids: ids(c.sel), locked: true }) },
   { id: 'showall', title: 'Show and unlock everything', icon: 'clean', group: 'edit', when: () => [...state.objects.values()].some((o) => o.hidden || o.locked), run: () => call('object.flag', { ids: [...state.objects.values()].filter((o) => o.hidden || o.locked).map((o) => o.id), hidden: false, locked: false }) },
   { id: 'points.remove', title: 'Delete points', icon: 'remove', keys: ['backspace', 'delete'], group: 'edit', hidden: true, when: () => tool === 'points' && handles.picked.size, run: removePoints },
-  { id: 'remove', title: 'Delete', icon: 'remove', keys: ['backspace', 'delete'], group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.remove', { ids: ids(c.sel) }) },
+  { id: 'showcode', title: 'Show code', icon: 'code', group: 'show', menu: true, when: (c) => c.one && hasCode(c.one), run: () => panels.show('code') },
+  { id: 'showprops', title: 'Show properties', icon: 'props', group: 'show', menu: true, when: (c) => c.sel.length, run: () => panels.show('properties') },
+  { id: 'showtree', title: 'Show in outliner', icon: 'tree', group: 'show', menu: true, when: (c) => c.sel.length, run: () => panels.show('outliner') },
+  { id: 'remove', title: 'Delete', icon: 'remove', keys: ['backspace', 'delete'], group: 'delete', menu: true, when: (c) => c.sel.length, run: (c) => call('object.remove', { ids: ids(c.sel) }) },
   // drawing plane of a target
   ...['view', 'front', 'top', 'side'].map((plane) => ({
-    id: 'plane.' + plane, title: `Draw on the ${plane} plane`, icon: 'plane', group: 'plane', menu: true,
+    id: 'plane.' + plane, title: `Draw on the ${plane} plane`, short: plane, icon: 'plane', group: 'plane', menu: 'Drawing plane', on: (c) => (c.target?.plane ?? 'view') === plane,
     when: (c) => c.target && (c.target.plane ?? 'view') !== plane, run: (c) => call('target.set', { id: c.target.id, plane }),
   })),
   ...[['front', '1', 0, 0], ['side', '3', Math.PI / 2, 0], ['top', '7', 0, 1.55]].map(([name, key, az, el]) => ({
-    id: 'view3d.' + name, title: `View from the ${name}`, icon: 'target', keys: key, group: 'plane', menu: true,
+    id: 'view3d.' + name, title: `View from the ${name}`, short: name, icon: 'target', keys: key, group: 'plane', menu: 'View',
     when: (c) => c.here.kind === 'scene' || c.one?.role === 'target', run: (c) => call('target.set', { id: c.target.id, az, el }),
   })),
-  { id: 'view3d.home', title: 'Reset the view', icon: 'target', keys: 'home', group: 'plane', menu: true, when: (c) => c.target, run: (c) => call('target.set', { id: c.target.id, az: 0.5, el: 0.3, dist: 13, center: [0, 0, 0] }) },
+  { id: 'view3d.home', title: 'Reset the view', short: 'reset', icon: 'target', keys: 'home', group: 'plane', menu: 'View', when: (c) => c.target, run: (c) => call('target.set', { id: c.target.id, az: 0.5, el: 0.3, dist: 13, center: [0, 0, 0] }) },
   ...['origin', 'cursor', 'stroke'].map((anchor) => ({
-    id: 'anchor.' + anchor, title: `Draw from the ${anchor === 'stroke' ? 'nearest stroke' : anchor === 'cursor' ? '3D cursor' : 'origin'}`, icon: 'plane', group: 'plane', menu: true,
+    id: 'anchor.' + anchor, title: `Draw from the ${anchor === 'stroke' ? 'nearest stroke' : anchor === 'cursor' ? '3D cursor' : 'origin'}`, short: anchor === 'stroke' ? 'nearest stroke' : anchor === 'cursor' ? '3D cursor' : 'origin', icon: 'plane', group: 'plane', menu: 'Draw from',
     when: (c) => c.target && (c.target.anchor ?? 'origin') !== anchor, run: (c) => call('target.set', { id: c.target.id, anchor }),
   })),
   { id: 'plane.next', title: 'Next drawing plane', icon: 'plane', keys: 'p', group: 'plane', when: (c) => c.target, run: (c) => { const all = ['view', 'front', 'top', 'side']; call('target.set', { id: c.target.id, plane: all[(all.indexOf(c.target.plane ?? 'view') + 1) % 4] }); } },
   // adding, at the pointer
-  { id: 'add.code', title: 'Add code container', icon: 'box', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => addHere(c, MAKE.code) },
-  { id: 'add.target', title: 'Add render target', icon: 'target', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => addHere(c, MAKE.target) },
-  { id: 'add.rect', title: 'Add rectangle', icon: 'rect', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => addHere(c, MAKE.rect) },
-  { id: 'add.score', title: 'Add score', icon: 'score', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => addHere(c, MAKE.score) },
-  { id: 'add.note', title: 'Add note', icon: 'note', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => { addHere(c, MAKE.note); panels.show('properties'); } },
-  { id: 'add.ellipse', title: 'Add ellipse', icon: 'ellipse', group: 'add', menu: true, when: (c) => !c.hit, run: (c) => addHere(c, MAKE.ellipse) },
+  { id: 'add.code', title: 'Add code container', icon: 'box', group: 'add', short: 'code container', menu: 'Add', when: (c) => !c.hit, run: (c) => addHere(c, MAKE.code) },
+  { id: 'add.target', title: 'Add render target', icon: 'target', group: 'add', short: 'render target', menu: 'Add', when: (c) => !c.hit, run: (c) => addHere(c, MAKE.target) },
+  { id: 'add.rect', title: 'Add rectangle', icon: 'rect', group: 'add', short: 'rectangle', menu: 'Add', when: (c) => !c.hit, run: (c) => addHere(c, MAKE.rect) },
+  { id: 'add.score', title: 'Add score', icon: 'score', group: 'add', short: 'score', menu: 'Add', when: (c) => !c.hit, run: (c) => addHere(c, MAKE.score) },
+  { id: 'add.note', title: 'Add note', icon: 'note', group: 'add', short: 'note', menu: 'Add', when: (c) => !c.hit, run: (c) => { addHere(c, MAKE.note); panels.show('properties'); } },
+  { id: 'add.ellipse', title: 'Add ellipse', icon: 'ellipse', group: 'add', short: 'ellipse', menu: 'Add', when: (c) => !c.hit, run: (c) => addHere(c, MAKE.ellipse) },
   ...Object.keys(PRESETS).filter((k) => !['path', 'wave', 'blank'].includes(k)).map((k) => ({ id: 'add.' + k, title: 'Add ' + k, icon: 'box', group: 'add', when: (c) => !c.hit, run: (c) => addHere(c, MAKE.code, { preset: k }) })),
-  ...['path', 'wave'].map((k) => ({ id: 'code.' + k, title: `Path code: ${k}`, icon: 'path', group: 'role', menu: true, when: (c) => c.lines.length && !c.lines.some((o) => o.bind), run: (c) => batch(() => c.lines.forEach((o) => { call('object.role', { id: o.id, role: 'path' }); call('object.code', { id: o.id, code: PRESETS[k] }); })) })),
+  ...['path', 'wave'].map((k) => ({ id: 'code.' + k, title: `Path code: ${k}`, short: k, icon: 'path', group: 'role', menu: 'Path code', when: (c) => c.lines.length && !c.lines.some((o) => o.bind), run: (c) => batch(() => c.lines.forEach((o) => { call('object.role', { id: o.id, role: 'path' }); call('object.code', { id: o.id, code: PRESETS[k] }); })) })),
   // navigation
   { id: 'enter', title: 'Go into', icon: 'enter', keys: 'enter', group: 'nav', menu: true, when: (c) => c.one?.rect || (c.one && blanketOf(c.one)), run: (c) => frameIds([c.one.id], 0.82) },
   { id: 'points.none', title: 'Unpick points', keys: 'escape', group: 'nav', hidden: true, when: () => tool === 'points' && handles.picked.size, run: () => handles.picked.clear() },
@@ -922,8 +1072,9 @@ const ACTIONS = [
   { id: 'palette', title: 'Command palette', icon: 'palette', keys: ['mod+k', '/'], group: 'panel', bar: 'edit', menu: true, when: (c) => !c.hit, run: () => palette.toggle() },
   { id: 'side', title: 'Side panel', icon: 'side', keys: '\\', group: 'panel', run: () => panels.toggle() },
   ...PANELS.map((d) => ({ id: 'panel.' + d.id, title: d.title, icon: d.icon, keys: d.keys, group: 'panel', run: () => panels.show(d.id) })),
-  { id: 'grid', title: 'Grid', icon: 'grid', keys: "mod+'", group: 'panel', run: () => setSetting('grid', !settings.grid) },
-  { id: 'snap', title: 'Snap to the grid', icon: 'grid', keys: "mod+shift+'", group: 'panel', run: () => setSetting('snap', !settings.snap) },
+  { id: 'paste.here', title: 'Paste here', icon: 'copy', group: 'add', menu: true, when: (c) => !c.hit && !!navigator.clipboard?.readText, run: async (c) => pasteText(await navigator.clipboard.readText(), c) },
+  { id: 'grid', title: 'Grid', icon: 'grid', keys: "mod+'", group: 'panel', menu: true, when: (c) => !c.hit, on: () => settings.grid, run: () => setSetting('grid', !settings.grid) },
+  { id: 'snap', title: 'Snap to the grid', icon: 'grid', keys: "mod+shift+'", group: 'panel', menu: true, when: (c) => !c.hit, on: () => settings.snap, run: () => setSetting('snap', !settings.snap) },
   { id: 'clean', title: 'Hide the interface', icon: 'clean', keys: ['tab', 'alt+z', 'mod+.'], group: 'panel', run: () => document.body.classList.toggle('clean') },
 ];
 for (const a of ACTIONS) if (a.tool) a.run = () => setTool(a.tool);
@@ -931,8 +1082,26 @@ for (const a of ACTIONS) if (a.tool) a.run = () => setTool(a.tool);
 const SYMBOL = { mod: '⌘', shift: '⇧', alt: '⌥', backspace: '⌫', enter: '↵', escape: 'esc', arrowleft: '←', arrowright: '→', arrowup: '↑', arrowdown: '↓', tab: 'tab' };
 const keysOf = (a) => [a.keys ?? []].flat();
 const showKey = (a) => { const k = keysOf(a)[0]; return k ? k.split('+').map((s) => SYMBOL[s] ?? s.toUpperCase()).join('') : ''; };
-const asItem = (a, c) => ({ title: a.title, icon: a.icon, keys: showKey(a), run: () => a.run(c) });
+const asItem = (a, c, short) => ({ title: short ? a.short ?? a.title : a.title, icon: a.icon, keys: showKey(a), on: a.on?.(c), run: () => a.run(c) });
+// The context menu: what can be done to what is under the pointer (after AMS's),
+// the actions marked `menu`, those with a name in submenus of that name.
 const allowed = (a, c) => !a.when || a.when(c);
+const MENU_ORDER = ['attach', 'transform', 'role', 'brush', 'play', 'edit', 'plane', 'add', 'nav', 'panel', 'show', 'delete'];
+function contextItems(c) {
+  const groups = new Map(), subs = new Map();
+  for (const a of ACTIONS) {
+    if (!a.menu || !allowed(a, c) || (a.menuWhen && !a.menuWhen(c))) continue;
+    if (!groups.has(a.group)) groups.set(a.group, []);
+    if (typeof a.menu === 'string') {
+      if (!subs.has(a.menu)) { const sub = { title: a.menu, items: [] }; subs.set(a.menu, sub); groups.get(a.group).push(sub); }
+      subs.get(a.menu).items.push(asItem(a, c, true));
+    } else groups.get(a.group).push(asItem(a, c));
+  }
+  const rank = (g) => { const i = MENU_ORDER.indexOf(g); return i < 0 ? MENU_ORDER.length : i; };
+  const items = c.sel.length ? [{ header: true, title: c.one ? c.one.name || blanketOf(c.one)?.name || c.one.role : `${c.sel.length} objects` }] : [];
+  for (const g of [...groups.keys()].sort((a, b) => rank(a) - rank(b))) items.push(null, ...groups.get(g));
+  return items;
+}
 
 function saveTake() {
   const a = document.createElement('a');
@@ -1114,14 +1283,7 @@ pad.addEventListener('contextmenu', (e) => {
     pop = showPopover(() => (sel().length ? selectionProps(app, sel()) : toolProps(app, tool)), e.clientX, e.clientY);
     return;
   }
-  const c = context(id ?? null), items = [];
-  let group = null;
-  for (const a of ACTIONS) {
-    if (!a.menu || !allowed(a, c)) continue;
-    if (group && a.group !== group) items.push(null);
-    group = a.group; items.push(asItem(a, c));
-  }
-  showMenu(items, e.clientX, e.clientY);
+  showMenu(contextItems(context(id ?? null)), e.clientX, e.clientY);
 });
 
 // Keys: the first action bound to the key whose context holds.
@@ -1130,7 +1292,7 @@ addEventListener('keydown', (e) => {
   if (e.target.closest?.('input, textarea, select, .menu')) return;
   if (e.key === ' ') { if (!spaceKey) { spaceUsed = false; spaceAt0 = performance.now(); } spaceKey = true; pad.dataset.pan = '1'; e.preventDefault(); return; }
   const k = keyOf(e), c = context();
-  if (k === 'mod+c' && !(c.one && hasCode(c.one))) return; // let the browser copy
+  if (k === 'mod+c' && !c.sel.length) return; // let the browser copy
   const a = ACTIONS.find((x) => keysOf(x).includes(k) && allowed(x, c));
   if (a) { e.preventDefault(); a.run(c, e); }
 });
@@ -1144,16 +1306,35 @@ addEventListener('keyup', (e) => {
 // A whole p5.js or three.js sketch runs as it is.
 addEventListener('paste', (e) => {
   if (e.target.closest?.('input, textarea')) return;
-  const code = e.clipboardData?.getData('text/plain') ?? '';
-  if (!code.trim() || !(sketchKind(code) || /\breturn\b|\/\/\s*(in|out|param)\s*:|=>|\bfunction\b/.test(code))) return;
-  e.preventDefault();
-  const c = context(), s = spaceAt(c.p[0], c.p[1], true), u = unitsPerPx(s), a = toSpace(s, c.p[0], c.p[1]);
+  if (pasteText(e.clipboardData?.getData('text/plain') ?? '', context())) e.preventDefault();
+});
+// Objects copied out (Copy, or Copy as JSON) come back at the pointer; code becomes a container.
+function pasteText(code, c) {
+  if (/^\s*\{/.test(code)) {
+    let data = null;
+    try { data = JSON.parse(code); } catch {}
+    if (data?.underspace && Array.isArray(data.objects)) {
+      const s = spaceAt(c.p[0], c.p[1], true), a = toSpace(s, c.p[0], c.p[1]), ids0 = new Set(data.objects.map((o) => o.id));
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const o of data.objects) {
+        if (ids0.has(o.space) || o.bind) continue;
+        const pts = o.rect ? [[o.rect.cx - o.rect.w / 2, o.rect.cy - o.rect.h / 2], [o.rect.cx + o.rect.w / 2, o.rect.cy + o.rect.h / 2]] : (o.points ?? []).map((p) => [p[0] + (o.off?.[0] ?? 0), p[1] + (o.off?.[1] ?? 0)]);
+        for (const p of pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+      }
+      if (x0 === Infinity) return false;
+      call('object.paste', { objects: data.objects, space: s.id, dx: round(a[0] - (x0 + x1) / 2), dy: round(a[1] - (y0 + y1) / 2) });
+      return true;
+    }
+  }
+  if (!code.trim() || !(sketchKind(code) || /\breturn\b|\/\/\s*(in|out|param)\s*:|=>|\bfunction\b/.test(code))) return false;
+  const s = spaceAt(c.p[0], c.p[1], true), u = unitsPerPx(s), a = toSpace(s, c.p[0], c.p[1]);
   const size = sketchKind(code) ? [320, 240] : [170, 110];
   batch(() => {
     const id = call('shape.add', { space: s.id, role: 'code', code, rect: { cx: round(a[0]), cy: round(a[1]), w: round(size[0] * u), h: round(size[1] * u) } });
     call('select.set', { ids: [id] });
   });
-});
+  return true;
+}
 
 // ---- the door for agents ---------------------------------------------------
 // The same registry, with the view added as commands that are not recorded.

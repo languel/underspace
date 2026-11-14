@@ -188,7 +188,9 @@ div.menu-item { cursor: default; }
 /* ---- context menu and palette ---- */
 .menu, #palette { position: fixed; z-index: 10; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
   box-shadow: 0 8px 28px color-mix(in srgb, #000 22%, transparent); }
-.menu { min-width: 200px; }
+.menu { min-width: 200px; max-height: calc(100vh - 8px); overflow-y: auto; }
+.menu-head { padding: 4px 8px 2px 32px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+#readout { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); padding: 2px 10px; border-radius: 6px; font: 12px/20px ui-monospace, monospace; white-space: pre; color: var(--ink); background: var(--panel); box-shadow: 0 0 0 1px var(--line); pointer-events: none; }
 .menu hr, .palette-list hr { height: 1px; margin: 4px 6px; border: 0; background: var(--line); }
 .menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; text-align: left; }
 .menu-item .glyph { display: grid; place-items: center; width: 16px; height: 16px; color: var(--muted); }
