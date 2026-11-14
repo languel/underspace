@@ -10,6 +10,7 @@ export function settingsPanel(el, app) {
   function build() {
     body.replaceChildren(
       section('Look', row('theme', choice([['auto', 'auto'], ['light', 'light'], ['dark', 'dark']], settings.theme, (v) => setSetting('theme', v))),
+        row('pressure', choice([['targets', 'in 3D'], ['everywhere', 'everywhere'], ['off', 'off']], settings.pressureWidth, (v) => setSetting('pressureWidth', v))),
         row('code', check('codeOverlay')),
         row('code ground', numberField(settings.codeOpacity, (v) => setSetting('codeOpacity', Math.max(0, Math.min(1, v))), { step: 0.05, min: 0, max: 1 }))),
       section('Mouse', row('wheel', choice([['auto', 'auto'], ['zoom', 'zooms'], ['pan', 'pans']], settings.wheel, (v) => setSetting('wheel', v)))),

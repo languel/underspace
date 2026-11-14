@@ -875,6 +875,18 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   marker shows what it caught (filled: a point; square: along a stroke;
   diamond: a middle; dashed: the grid). Strokes that meet this way join,
   as on the canvas.
+- **3D, third pass: grease pencil strokes.** Pen pressure is a stroke's
+  width (35% to 145% of its width), as grease pencil's radius. The line
+  renderer has one width per line, so a stroke is drawn as runs of one
+  width each, in eight steps (`pressureRuns`, from `stretches`, the smooth
+  curve stretch by stretch). By default this is on in render targets only
+  (Settings › pressure: in 3D, everywhere, off). Strokes in targets now
+  take their stroke colour, width and opacity. A closed stroke with a fill
+  is filled in 3D, triangulated in its own best-fit plane (Newell's normal)
+  and kept where it is. Rectangles, ellipses and polygons drawn in a target
+  take the fill swatch. Not taken from threegrease: its own ribbon shader
+  (round caps and joins, hardness, dots and squares), gradients, layers
+  and blend modes, onion skins, modifiers.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a

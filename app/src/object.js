@@ -189,8 +189,15 @@ export function innerXf(g) {
 // (the renderer asks for as many as the stretch is long on screen, so a curve
 // stays smooth however near it is seen, with no points added to it).
 export function smooth(points, steps = 6) {
+  if (points.length < 3) return points;
+  const out = stretches(points, steps).flat();
+  out.push(points[points.length - 1].slice(0, points[0].length > 2 ? 3 : 2));
+  return out;
+}
+// The same curve, stretch by stretch: the pieces between point i and point i + 1 (without the end).
+export function stretches(points, steps = 6) {
   const n = points.length;
-  if (n < 3) return points;
+  if (n < 3) return n === 2 ? [[points[0]]] : [];
   const dim = points[0].length > 2 ? 3 : 2, d = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1], dim > 2 ? (b[2] ?? 0) - (a[2] ?? 0) : 0);
   const closed = d(points[0], points[n - 1]) < 1e-9;
   const at = (i) => (closed ? points[((i % (n - 1)) + (n - 1)) % (n - 1)] : points[Math.max(0, Math.min(n - 1, i))]);
@@ -199,7 +206,7 @@ export function smooth(points, steps = 6) {
   for (let i = 0; i < n - 1; i++) {
     const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
     const t1 = knot(p0, p1), t2 = t1 + knot(p1, p2), t3 = t2 + knot(p2, p3);
-    const ns = typeof steps === 'function' ? Math.max(1, Math.round(steps(p1, p2))) : steps;
+    const ns = typeof steps === 'function' ? Math.max(1, Math.round(steps(p1, p2))) : steps, part = [];
     for (let s = 0; s < ns; s++) {
       const t = t1 + (t2 - t1) * (s / ns), q = [];
       for (let k = 0; k < dim; k++) {
@@ -210,11 +217,28 @@ export function smooth(points, steps = 6) {
         const b2 = a2 * (t3 - t) / (t3 - t1) + a3 * (t - t1) / (t3 - t1);
         q.push(b1 * (t2 - t) / (t2 - t1) + b2 * (t - t1) / (t2 - t1));
       }
-      out.push(q);
+      part.push(q);
     }
+    out.push(part);
   }
-  out.push(points[n - 1].slice(0, dim));
   return out;
+}
+
+// A stroke as runs of one width each, from the pressure of the hand that drew it (as grease
+// pencil's radius): width from 35% to 145% of `base`, in `levels` steps, so a run is one line.
+// -> [{ pts, width }], or null when it has no pen pressure.
+export function pressureRuns(points, pen, base, steps = 6, levels = 8) {
+  if (!pen || pen.length !== points.length || points.length < 2) return null;
+  const parts = stretches(points, steps), last = points[points.length - 1].slice(0, points[0].length > 2 ? 3 : 2);
+  const width = (i) => { const pr = Math.max(0, Math.min(1, ((pen[i][1] ?? 0.5) + (pen[i + 1][1] ?? 0.5)) / 2)); return Math.max(0.5, Math.round(base * (0.35 + 1.1 * pr) * levels / base) * base / levels); };
+  const runs = [];
+  parts.forEach((part, i) => {
+    const w = width(i), end = parts[i + 1]?.[0] ?? last, run = runs[runs.length - 1];
+    // the same width goes on: its last point is this stretch's first, so it is taken off and the stretch added
+    if (run && Math.abs(run.width - w) < 1e-9) { run.pts.pop(); run.pts.push(...part, end); }
+    else runs.push({ pts: [...part, end], width: w });
+  });
+  return runs;
 }
 // Steps for smooth() so a stretch is cut every `px` pixels on screen; pxPerUnit: screen pixels a unit.
 export const stepsOnScreen = (pxPerUnit, px = 3, most = 160) => (a, b) => Math.max(2, Math.min(most, Math.ceil((Math.hypot(b[0] - a[0], b[1] - a[1], (b[2] ?? 0) - (a[2] ?? 0)) * pxPerUnit) / px)));

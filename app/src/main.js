@@ -3,7 +3,7 @@
 
 import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, history, travel, stats, argTypes as T } from './space.js';
 import './patch.js';
-import { stepsOnScreen, TARGET_PRESETS } from './object.js';
+import { stepsOnScreen, TARGET_PRESETS, pressureRuns } from './object.js';
 import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplifyIndex, along, setDrag, setLive, setMoved, penOf, isLine, isTarget, hasCode, isWire } from './object.js';
 import { selectionProps, toolProps } from './panels/properties.js';
 import { wirePoints } from './bind.js';
@@ -130,7 +130,10 @@ function walk(space, xf) {
       const brushed = o.brush && !isWire(o);
       // A brushed line is painted on the ink layer; here it is only something to pick, and an outline while selected.
       if (brushed) inkItems.push(inkItem(o, element(raw, penOf(o), { closed: !!o.closed, color: st.stroke ?? inkColor }), xf, st));
-      lines.push({ id: o.id, pts, color: sel ? 'accent' : st.stroke ?? (isWire(o) ? 'hot' : 'ink'), width: brushed ? (sel ? 1 : 0) : st.width ?? (isWire(o) ? 1.6 : 2.2), opacity: brushed ? 1 : st.opacity, fill: o.closed && !brushed ? st.fill : null });
+      // pen pressure as width, as grease pencil does (Settings › pressure: everywhere)
+      const runs = settings.pressureWidth === 'everywhere' && !brushed && !isWire(o) && !made && !o.closed && st.path !== 'straight' ? pressureRuns(raw, penOf(o), st.width ?? 2.2, stepsOnScreen(xf.k / upp)) : null;
+      if (runs) for (const r of runs) lines.push({ id: o.id, pts: r.pts.map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'ink', width: r.width, opacity: st.opacity });
+      else lines.push({ id: o.id, pts, color: sel ? 'accent' : st.stroke ?? (isWire(o) ? 'hot' : 'ink'), width: brushed ? (sel ? 1 : 0) : st.width ?? (isWire(o) ? 1.6 : 2.2), opacity: brushed ? 1 : st.opacity, fill: o.closed && !brushed ? st.fill : null });
       // an event keeps its look; a traveler reaching it flashes it
       if (o.role === 'event' && performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160) lines.push({ pts, color: 'hot', width: (st.width ?? 2.2) + 3, opacity: 0.6 });
       if (tool === 'points' && !isWire(o) && !made) pointSrc.push({ o, pts: ptsOf(o), pen: penOf(o), xf });
@@ -175,9 +178,14 @@ function walk(space, xf) {
       const marks = [], cam0 = camOf(o), ppu = px.h / (2 * cam0.dist * Math.tan(FOV / 2)); // about how many pixels a unit is, at the centre
       for (const m of state.objects.values()) {
         if (m.space !== o.id || !m.points || m.hidden) continue;
-        const raw = ptsOf(m), pts = m.closed || m.style?.path === 'straight' ? raw : smooth(raw, stepsOnScreen(ppu));
+        const raw = ptsOf(m), mst = m.style ?? {}, pts = m.closed || mst.path === 'straight' ? raw : smooth(raw, stepsOnScreen(ppu));
         if (m.closed) pts.push(pts[0]);
-        marks.push({ pts, color: state.selection.has(m.id) ? 'accent' : m.style?.stroke ?? 'ink' });
+        const color = state.selection.has(m.id) ? 'accent' : mst.stroke ?? 'ink', width = mst.width ?? 2.2;
+        // its pen pressure as its width (grease pencil), its fill when it is closed
+        const runs = settings.pressureWidth !== 'off' && !m.closed && mst.path !== 'straight' ? pressureRuns(raw, penOf(m), width, stepsOnScreen(ppu)) : null;
+        if (m.closed && mst.fill) marks.push({ pts, color, width: 0, fill: mst.fill, opacity: mst.opacity });
+        if (runs) for (const r of runs) marks.push({ pts: r.pts, color, width: r.width, opacity: mst.opacity });
+        else marks.push({ pts, color, width, opacity: mst.opacity });
         ink3d.push({ id: m.id, scene: o.id, pts });
         if (tool === 'points') pointSrc.push({ o: m, pts: ptsOf(m), pen: penOf(m), scene: o.id });
         vis.set(m.id, { o: m, face: 'line', scene: o.id });
@@ -1241,7 +1249,7 @@ function shapeIn3d(g) {
   const dot = (p, q) => p[0] * q[0] + p[1] * q[1] + p[2] * q[2];
   const r = { cx: (dot(a, basis.u) + dot(b, basis.u)) / 2, cy: (dot(a, basis.v) + dot(b, basis.v)) / 2, w: Math.abs(dot(a, basis.u) - dot(b, basis.u)), h: Math.abs(dot(a, basis.v) - dot(b, basis.v)) };
   const points = (g.make.shape === 'polygon' ? polygonPts(r) : outline(r, g.make.shape).slice(0, -1)).map(([x, y]) => [0, 1, 2].map((i) => round(basis.u[i] * x + basis.v[i] * y)));
-  const id = call('line.add', { space: g.s.id, points, closed: true });
+  const id = call('line.add', { space: g.s.id, points, closed: true, ...newStyle(true) });
   call('select.set', { ids: [id] });
 }
 

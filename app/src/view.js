@@ -86,8 +86,17 @@ export async function createView({ canvas, stage, onFrame }) {
     line.geometry.attributes.instanceStart.data.needsUpdate = true;
     line.geometry.instanceCount = n;
   }
+  // A fill, flat or in 3D: a closed run of points is triangulated in its own plane (the best fit,
+  // by Newell's normal), and the triangles keep the points where they are.
+  function planar(pts) {
+    if (!pts.some((p) => (p[2] ?? 0) !== (pts[0][2] ?? 0))) return pts.map((p) => new THREE.Vector2(p[0], p[1]));
+    const n = [0, 0, 0], c = [0, 0, 0];
+    pts.forEach((a, i) => { const b = pts[(i + 1) % pts.length], az = a[2] ?? 0, bz = b[2] ?? 0; n[0] += (a[1] - b[1]) * (az + bz); n[1] += (az - bz) * (a[0] + b[0]); n[2] += (a[0] - b[0]) * (a[1] + b[1]); c[0] += a[0]; c[1] += a[1]; c[2] += az; });
+    const N = new THREE.Vector3(...n).normalize(), U = new THREE.Vector3(Math.abs(N.x) < 0.9 ? 1 : 0, Math.abs(N.x) < 0.9 ? 0 : 1, 0).cross(N).normalize(), V = new THREE.Vector3().crossVectors(N, U);
+    return pts.map((p) => { const q = new THREE.Vector3(p[0], p[1], p[2] ?? 0); return new THREE.Vector2(q.dot(U), q.dot(V)); });
+  }
   function writeFill(mesh, pts) {
-    const contour = pts.map((p) => new THREE.Vector2(p[0], p[1])), tris = THREE.ShapeUtils.triangulateShape(contour, []), n = tris.length * 3;
+    const contour = planar(pts), tris = THREE.ShapeUtils.triangulateShape(contour, []), n = tris.length * 3;
     let attr = mesh.geometry.attributes.position;
     if (!attr || attr.array.length < n * 3) {
       mesh.geometry.dispose();
@@ -96,7 +105,7 @@ export async function createView({ canvas, stage, onFrame }) {
       mesh.geometry.setAttribute('position', attr);
     }
     let o = 0;
-    for (const t of tris) for (const k of t) { const p = pts[k]; attr.array[o++] = p[0]; attr.array[o++] = p[1]; attr.array[o++] = 0; }
+    for (const t of tris) for (const k of t) { const p = pts[k]; attr.array[o++] = p[0]; attr.array[o++] = p[1]; attr.array[o++] = p[2] ?? 0; }
     attr.needsUpdate = true;
     mesh.geometry.setDrawRange(0, n);
   }
@@ -162,7 +171,7 @@ export async function createView({ canvas, stage, onFrame }) {
     for (const d of list) {
       const fresh = !scenes.has(d.id), s = sceneFor(d.id);
       s.px = d.px;
-      if (rebuild || fresh) fillGroup(s.lines, d.marks.map((m) => ({ pts: m.pts, color: m.color, width: 2.2 })));
+      if (rebuild || fresh) fillGroup(s.lines, d.marks.map((m) => ({ pts: m.pts, color: m.color, width: m.width ?? 2.2, opacity: m.opacity, fill: m.fill })));
       const el = Math.max(-1.55, Math.min(1.55, d.el)), dist = d.dist ?? 13, c = d.center ?? [0, 0, 0];
       s.cam.position.set(c[0] + Math.sin(d.az) * Math.cos(el) * dist, c[1] + Math.sin(el) * dist, c[2] + Math.cos(d.az) * Math.cos(el) * dist);
       s.cam.lookAt(c[0], c[1], c[2]);

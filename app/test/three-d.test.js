@@ -63,3 +63,15 @@ test('a render target has code: its ports from its header, its camera from what 
   r = step(state.objects, 0);
   assert.deepEqual(r.output(t, 'center'), [0, 0, 0]);
 });
+
+test('pen pressure as width: runs of one width, covering the curve exactly once', async () => {
+  const { pressureRuns, smooth } = await import('../src/object.js');
+  const pts = [[0, 0, 0], [1, 0, 0], [2, 1, 0], [3, 1, 1], [4, 0, 1]];
+  const pen = [[0, 0.1], [10, 0.1], [20, 0.9], [30, 0.9], [40, 0.9]];
+  const runs = pressureRuns(pts, pen, 2);
+  assert.equal(runs.length, 3, `${runs.map((r) => r.width)}`); // light, rising, heavy
+  assert.ok(runs[0].width < runs[2].width);
+  const joined = runs.flatMap((r, i) => (i ? r.pts.slice(1) : r.pts));
+  assert.deepEqual(joined, smooth(pts), 'the runs are the smooth curve, end to end');
+  assert.equal(pressureRuns(pts, null, 2), null);
+});
