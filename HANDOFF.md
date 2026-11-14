@@ -401,8 +401,9 @@ Added in a seventh pass (14 Nov 2026):
 - **One set of navigation hands for the canvas and targets.** Alt+Shift-drag
   pans both (as do middle-drag and Space-drag on the canvas); Ctrl+middle or
   Alt+Ctrl-drag zooms both. A pinch, by trackpad (Ctrl+wheel in Chrome and
-  Firefox, gesture events in Safari) or by touch, zooms the camera of a
-  target that is selected or open, and the canvas anywhere else; a touch
+  Firefox, gesture events in Safari) or by touch, zooms the camera of the
+  render target under the pointer (selected or not; the owner asked that a
+  pinch inside a frame zoom only inside it), and the canvas anywhere else; a touch
   pinch in a target also pans its camera with the fingers' midpoint.
 - **The points tool** (Shift+V, stacked with Select; `src/points.js`): the
   stored control points of the selected lines, or of every line, as

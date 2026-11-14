@@ -504,9 +504,9 @@ pad.addEventListener('pointerdown', (e) => {
     touches.set(e.pointerId, p);
     if (touches.size === 2) {
       cancelGesture();
-      // Over a target that is selected or open, two fingers move its camera: pinch zooms, moving pans.
+      // Inside a target, two fingers move its camera: pinch zooms, moving pans.
       const [a, b] = [...touches.values()], s = spaceAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
-      gesture = { kind: 'pinch', scene: s.kind === 'scene' && s.focused ? { id: s.id, h: s.px.h } : null };
+      gesture = { kind: 'pinch', scene: s.kind === 'scene' ? { id: s.id, h: s.px.h } : null };
       return;
     }
   }
@@ -803,10 +803,10 @@ function addShape(s, make, start, end, extra = {}) {
 // orbit, with Shift they pan, a pinch or the wheel zooms.
 const isMouseWheel = (e) => settings.wheel === 'zoom' || (settings.wheel === 'auto' && (e.deltaMode !== 0 || (e.deltaX === 0 && e.wheelDeltaY && Math.abs(e.wheelDeltaY) % 120 === 0)));
 let wheelTimer = 0;
-// A pinch at p by factor f (> 1 closer): a focused target's camera, else the canvas.
+// A pinch at p by factor f (> 1 closer): inside a render target, its camera; else the canvas.
 function pinchAt(p, f) {
   const s = spaceAt(p[0], p[1]);
-  if (s.kind === 'scene' && s.focused && !gesture) {
+  if (s.kind === 'scene' && !gesture) {
     const o = get(s.id), cam = camOf(o);
     orbit = { ...cam, id: o.id, dist: Math.max(0.5, Math.min(400, cam.dist / f)) };
     clearTimeout(wheelTimer); wheelTimer = setTimeout(commitCam, 250);

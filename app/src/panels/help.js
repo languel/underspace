@@ -10,7 +10,7 @@ const GESTURES = [
   ['Double-click an object', 'go into it'],
   ['Double-click the canvas', 'fit everything'],
   ['Two fingers, or middle-drag', 'pan'],
-  ['Pinch, mouse wheel, or ⌘ wheel', 'zoom; in an open or selected target, its camera'],
+  ['Pinch, mouse wheel, or ⌘ wheel', 'zoom; a pinch inside a render target zooms its camera'],
   ['In a render target: middle-drag', 'orbit; with Shift pan, with Ctrl zoom'],
   ['In a render target: Alt-drag', 'the same, without a middle button'],
   ['In an open or selected target', 'two fingers orbit, with Shift pan; pinch or wheel zooms'],
