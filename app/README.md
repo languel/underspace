@@ -141,13 +141,18 @@ is the beat it sets off on, and with `speed` above 0 it moves that many
 grid cells a beat, so distance on the grid is time (Midinous). Event and
 junction code can use `pitch(v)` (a place 0..1 as a note of the scale),
 `step(n, k)` (k degrees up the scale from n) and `snap(n)`. Event presets
-include fixed note and step up.
+include fixed note, step up and gate: `note(m, v, 'gate')` holds the note
+while the traveler is inside the event and lets go when it leaves, as
+IanniX's triggers do. A traveler's `drawn` (1 as drawn, 2 twice as fast)
+makes it go at the pace the hand drew its line: quick where the stroke
+was quick, slow where the hand lingered.
 
 The first lane, "making", is the take: every step of how the drawing was
 made, by when it was made (long pauses shortened). Drag along it to move
 through the history: the drawing shows as it was at that step. An edit
 made there continues from there, as it would after undo. Click its name
-to replay the making at the pace it was made; a press or a key stops the
+to replay the making at the pace it was made: each stroke draws itself
+out on the timing of the hand that drew it. A press or a key stops the
 replay.
 
 Recording: the notes travelers and events play while ● is on become a clip

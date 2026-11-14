@@ -17,7 +17,8 @@ import { measure, atS, tangentS, jointsOn, waysAt, nearestOn } from './joints.js
 //   ev    { x, y (where on the path's bounds, 0..1, y up), u (how far along), speed, traveler, rider, count }
 //         and what it can do to the traveler: reflect(), stop(), go(), split(), speed(k)
 //   p     the declared parameters;  mem  an object that persists
-//   note(midi, velocity, seconds) plays a note
+//   note(midi, velocity, seconds) plays a note; seconds 'gate': held while the traveler is
+//         inside the event (a shape or a closed line), as IanniX's triggers do
 //   pitch(v)  a place 0..1 as a note: across the timeline's range, on its scale
 //   step(n, k)  k degrees of the scale up from note n;  snap(n)  the nearest note of the scale
 export const EVENT = `// event
@@ -91,6 +92,10 @@ ev.speed(p.by);`,
 // out: gate count
 note(pitch(ev.y), 100, 0.3);
 ev.reflect();`,
+  gate: `// gate
+// out: gate count
+// the note sounds as long as the traveler is inside
+note(pitch(ev.y), 100, 'gate');`,
   'fixed note': `// fixed note
 // out: gate count
 // param: midi 60
@@ -117,11 +122,34 @@ function decide(r, ways) {
   return w ? { go: [w] } : ways.length ? { go: [ways[0]] } : { back: true };
 }
 
+// How fast the hand drew a line where a rider is: curve units a second, from the
+// pen time of each point (a drawn line keeps them). null for a line drawn by code.
+const paces = new WeakMap();
+function drawnSpeed(line, m, s) {
+  const pen = line.pen, pts = line.points;
+  if (!pen || pen.length !== pts.length || pts.length < 2) return null;
+  let c = paces.get(line);
+  if (!c || c.pts !== pts) {
+    const L = [0];
+    for (let i = 1; i < pts.length; i++) L.push(L[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1], (pts[i][2] ?? 0) - (pts[i - 1][2] ?? 0)));
+    const ms = Math.max(1, pen[pen.length - 1][0] - pen[0][0]);
+    c = { pts, L, avg: L[L.length - 1] / (ms / 1000) };
+    paces.set(line, c);
+  }
+  const { L, avg } = c, f = (s / (m.total || 1)) * L[L.length - 1];
+  let i = 0;
+  while (i < L.length - 2 && L[i + 1] < f) i++;
+  const dt = (pen[i + 1][0] - pen[i][0]) / 1000, raw = dt > 0 ? (L[i + 1] - L[i]) / dt : avg;
+  return Math.max(avg * 0.03, raw) * (m.total / (L[L.length - 1] || 1)); // a pause in the hand is slow, not a stop
+}
+
 const MAX_RIDERS = 64; // a traveler that splits is at most this many
 let paramsHook = () => ({});
 const plain = { note() {}, pitch: (v) => 48 + v * 36, step: (n, k) => n + k, snap: (n) => n };
 let hooksNow = plain;
 export function createPlay() {
+  const gates = new Map(); // a rider inside an event -> the notes it holds there
+  const release = (key) => { for (const g of gates.get(key) ?? []) g.stop(); gates.delete(key); };
   const latched = new Set(), firedAt = new Map(), counts = new Map(), mems = new Map(), handlers = new Map(), net = new Map();
   const hitAt = new Map(); // event or junction id -> when it last fired (ms), for the view to flash
   const compile = (key, args, code) => {
@@ -182,7 +210,9 @@ export function createPlay() {
 
   return {
     hitAt,
-    reset() { latched.clear(); firedAt.clear(); counts.clear(); net.clear(); },
+    // let go of every held note (a pause), the travelers staying where they are
+    quiet() { for (const k of [...gates.keys()]) release(k); latched.clear(); },
+    reset() { for (const k of [...gates.keys()]) release(k); latched.clear(); firedAt.clear(); counts.clear(); net.clear(); },
     // hooks: pointsOf(line) -> its points as shown, paramsOf(o) -> resolved parameters, note(midi, vel, dur)
     // -> { moved: id -> [x, y], ghosts: [{ of, pos }] (the riders a traveler split into), out, errors }
     // hooks also: spb (seconds a beat), grid (canvas units a grid cell), pitch, step, snap
@@ -207,7 +237,7 @@ export function createPlay() {
         let st = net.get(o.id);
         if ((!playing && t === 0) || !st || t < st.t || st.on !== line.id) {
           const speed = p.speed > 0 ? (p.speed * grid) / spb : start.total / Math.max(0.05, (p.dur ?? 8) * spb);
-          st = { on: line.id, t, riders: [{ n: ++o_n.n, line: line.id, s: Math.max(0, Math.min(1, p.start ?? 0)) * start.total, dir: 1, speed, skip: null, stopped: false }] };
+          st = { on: line.id, t, riders: [{ n: ++o_n.n, line: line.id, s: Math.max(0, Math.min(1, p.start ?? 0)) * start.total, dir: 1, speed, base: speed, skip: null, stopped: false }] };
           net.set(o.id, st);
         }
         // it moves only from its own beat on (IanniX: each object's time is the transport's, from its start)
@@ -216,7 +246,8 @@ export function createPlay() {
         const all = st.riders;
         for (let i = 0; i < all.length; i++) {
           const rider = all[i];
-          const left = playing && !rider.stopped ? rider.pending ?? rider.speed * dt : 0;
+          const pace = p.drawn > 0 ? drawnSpeed(objects.get(rider.line), measureOf(rider.line), rider.s) : null;
+          const left = playing && !rider.stopped ? rider.pending ?? (pace != null ? pace * p.drawn * (rider.speed / (rider.base ?? rider.speed)) : rider.speed) * dt : 0;
           delete rider.pending;
           const trail = ride(o, rider, all, left, p, objects, measureOf, out, errors);
           if (!trail.length) continue;
@@ -269,11 +300,19 @@ export function createPlay() {
                     firedAt.set(o.id + '#' + copy.n + '|' + e.id, entered); // the copy starts on the event: it has already been there
                   },
                 };
-                try { f.run(ev, hooks.paramsOf(e), hooksNow.note, memOf(e.id), hooksNow.pitch, hooksNow.step, hooksNow.snap); } catch (err) { errors.set(e.id, err.message); }
+                // 'gate': a note held until the rider leaves; where there is no inside (an open line), a short one
+              const region = e.kind !== 'line' || isClosed(e, pathOf(e));
+              const note = (m, v = 100, d = 0.3) => {
+                if (d !== 'gate') return hooksNow.note(m, v, d);
+                if (!region || !hooksNow.hold) return hooksNow.note(m, v, 0.3);
+                if (!gates.has(key)) gates.set(key, []);
+                gates.get(key).push(hooksNow.hold(m, v));
+              };
+              try { f.run(ev, hooks.paramsOf(e), note, memOf(e.id), hooksNow.pitch, hooksNow.step, hooksNow.snap); } catch (err) { errors.set(e.id, err.message); }
               }
             }
             // latched until it leaves: an event does not fire again while the traveler stays inside
-            if (now) { latched.add(key); gate.set(e.id, 1); } else latched.delete(key);
+            if (now) { latched.add(key); gate.set(e.id, 1); } else { latched.delete(key); if (gates.has(key) && !entered) release(key); }
           }
         }
         st.riders = all.filter((r, i) => i === 0 || !r.gone);

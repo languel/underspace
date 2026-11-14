@@ -619,9 +619,10 @@ function groupSteps(clips) {
   return out.map((st) => st.clips);
 }
 // Every step, done and undone, in the order they were made; `done` of them are in effect.
+// drew: how long the hand took to draw a stroke the step added (seconds), else 0.
 export function history() {
   const done = groupSteps(take.clips), all = [...done, ...take.undone.slice().reverse()];
-  return { done: done.length, steps: all.map((clips) => { const main = clips.find((c) => c.name !== 'select.set') ?? clips[0]; return { t: clips[0].t, name: main.name, by: main.by, size: clips.length }; }) };
+  return { done: done.length, steps: all.map((clips) => { const main = clips.find((c) => c.name !== 'select.set') ?? clips[0]; const pen = main.args?.pen; return { t: clips[0].t, name: main.name, by: main.by, size: clips.length, drew: Array.isArray(pen) && pen.length > 1 ? Math.max(0, (pen[pen.length - 1][0] - pen[0][0]) / 1000) : 0 }; }) };
 }
 // Go to just after step k: the steps after it are undone (redo brings them back), one rerun.
 export function travel(k) {

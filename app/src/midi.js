@@ -68,6 +68,14 @@ export function createMidiOut() {
       this.send([0x90 | c, k, Math.max(1, Math.min(127, Math.round(vel)))], now);
       this.send([0x80 | c, k, 0], now + Math.max(0.02, seconds) * 1000);
     },
+    // a note on now, off when stop() is called
+    hold(midi, vel = 100, ch = 1) {
+      const c = (ch - 1) & 15, k = Math.max(0, Math.min(127, Math.round(midi)));
+      if (!targets().length) return { stop() {} };
+      this.send([0x90 | c, k, Math.max(1, Math.min(127, Math.round(vel)))]);
+      let done = false;
+      return { stop: () => { if (!done) { done = true; this.send([0x80 | c, k, 0]); } } };
+    },
     panic() { for (const p of targets()) for (let c = 0; c < 16; c++) for (const n of [64, 120, 123]) { try { p.send([0xb0 | c, n, 0]); } catch { /* ignore */ } } },
   };
 }

@@ -628,6 +628,18 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   pace (`replay()` in `main.js`); a press or a key stops it. Ticks are
   coloured by kind: drawing in ink, joints in hot, music in accent. Hover
   names the step.
+- **Gestures in time** (a fourteenth pass): replaying the making draws
+  each stroke out point by point on its pen times; a stroke longer than
+  8 s is sped up to fit. A traveler with `drawn` above 0 moves at the pace
+  the hand drew its line (`drawnSpeed` in `play.js`, read from the line's
+  `pen`; a pause in the hand is slow, not a stop), scaled by `drawn` and by
+  any `ev.speed`.
+- **Gate notes:** `note(m, v, 'gate')` in an event's code holds the note
+  (`sound.hold`, `midiOut.hold`) while the rider is inside a shape or a
+  closed line, and lets go when it leaves. An open line has no inside, so
+  there it is a short note. Pausing lets go of every held note
+  (`playEngine.quiet()`), and a held note is recorded with the length it
+  sounded. Event preset: gate.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); audio recording; note-off at exit (IanniX's gate); scores on
   the shared transport (they still schedule their own passes); MIDI clock;

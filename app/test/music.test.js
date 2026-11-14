@@ -93,3 +93,30 @@ test('the take as a history: travel back and forward, an edit continues from the
   call('line.add', { points: [[9, 9], [9, 8]] });
   assert.equal(history().steps.length, n - 2, 'a new edit continues from there');
 });
+
+test('a gate note sounds while the traveler is inside, and a traveler can go at the drawn pace', async () => {
+  const { createPlay, EVENTS } = await import('../src/play.js');
+  call('space.clear');
+  const line = call('line.add', { points: [[0, 0], [10, 0]], style: { path: 'straight' } });
+  call('traveler.add', { on: line, dur: 10, loop: 0 });
+  const box = call('shape.add', { role: 'event', rect: { cx: 5, cy: 0, w: 2, h: 2 } });
+  call('object.code', { id: box, code: EVENTS.gate });
+  const held = [], play = createPlay();
+  const hooks = { spb: 1, pointsOf: (l) => l.points, paramsOf: (o) => ({ dur: 10, loop: 0, start: 0, at: 0, speed: 0, drawn: 0, ...o.params }), note() {}, hold: (m) => { const h = { m, on: true, stop() { h.on = false; } }; held.push(h); return h; } };
+  for (let t = 0; t <= 5; t += 0.1) play.step(state.objects, t, true, hooks);
+  assert.equal(held.length, 1); assert.equal(held[0].on, true, 'still inside at x = 5');
+  for (let t = 5.1; t <= 7; t += 0.1) play.step(state.objects, t, true, hooks);
+  assert.equal(held[0].on, false, 'let go on leaving');
+
+  // drawn: the first half took 0.2 s, the second half 2 s
+  call('space.clear');
+  const drawnLine = call('line.add', { points: [[0, 0], [5, 0], [10, 0]], pen: [[0, 0.5], [200, 0.5], [2200, 0.5]], style: { path: 'straight' } });
+  const tr = call('traveler.add', { on: drawnLine, dur: 100, loop: 0 });
+  call('object.set', { id: tr, name: 'drawn', value: 1 });
+  const p2 = createPlay();
+  let r;
+  for (let t = 0; t <= 0.2001; t += 0.01) r = p2.step(state.objects, t, true, hooks);
+  assert.ok(Math.abs(r.moved.get(tr)[0] - 5) < 0.4, `fast at first: ${r.moved.get(tr)}`);
+  for (let t = 0.21; t <= 1.2001; t += 0.01) r = p2.step(state.objects, t, true, hooks);
+  assert.ok(Math.abs(r.moved.get(tr)[0] - 7.5) < 0.4, `then slow: ${r.moved.get(tr)}`);
+});

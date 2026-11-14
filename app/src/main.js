@@ -201,7 +201,7 @@ const play = (id) => sound.start(id, () => scoreOf(id), (error) => step.report(i
 const travelers = () => [...state.objects.values()].filter((o) => o.role === 'traveler');
 const canPlay = () => scores().length || travelers().length || state.clips.size;
 function togglePlay(c = context()) {
-  if (transport.playing) { transport.pause(); sound.stopAll(); endRecording(); return; }
+  if (transport.playing) { transport.pause(); sound.stopAll(); playEngine.quiet(); endRecording(); return; }
   const chosen = c.sel.filter((o) => o.role === 'score');
   for (const o of chosen.length ? chosen : scores()) play(o.id);
   lastBeat = transport.beat;
@@ -220,12 +220,18 @@ function catchUp() {
 // What travelers, events and junctions play with: the music context, and notes that are heard, sent and recorded.
 function musicHooks() {
   const m = state.music;
-  return { pointsOf: shownPath, paramsOf, note: playNote, spb: secPerBeat(m), grid: settings.gridSize, pitch: (v) => pitchOf(v, m), step: (n, k) => stepOf(n, k, m.scale, m.root), snap: (n) => snapOf(n, m.scale, m.root) };
+  return { pointsOf: shownPath, paramsOf, note: playNote, hold: holdNote, spb: secPerBeat(m), grid: settings.gridSize, pitch: (v) => pitchOf(v, m), step: (n, k) => stepOf(n, k, m.scale, m.root), snap: (n) => snapOf(n, m.scale, m.root) };
 }
 function playNote(midi, vel = 100, seconds = 0.3) {
   if (!Number.isFinite(midi)) return;
   sound.note(midi, vel, seconds); midiOut.note(midi, vel, seconds);
   if (transport.recording && transport.playing) recNotes.push({ beat: transport.beat, midi, vel, len: seconds / transport.spb });
+}
+// A note held until it is let go (an event's gate): heard, sent, and recorded with its length.
+function holdNote(midi, vel = 100) {
+  if (!Number.isFinite(midi)) return { stop() {} };
+  const a = sound.hold(midi, vel), b = midiOut.hold(midi, vel), beat = transport.beat, rec = transport.recording && transport.playing;
+  return { stop() { a.stop(); b.stop(); if (rec) recNotes.push({ beat, midi, vel, len: Math.max(1 / 16, transport.beat - beat) }); } };
 }
 // What was recorded becomes a clip on the timeline, starting on the beat it began.
 function endRecording() {
@@ -1517,21 +1523,38 @@ const app = {
 const panels = createPanels($('tabs'), $('side'), app, PANELS);
 // Replay the making: every step again, at the pace it was made (pauses over 1.5 s shortened).
 // A press or a key stops it where it is.
-let replaying = 0;
+// A stroke a step added is drawn again as the hand drew it, point by point on its pen times.
+let replaying = 0, replayToken = 0;
+function stopReplay() { clearTimeout(replaying); replaying = 0; replayToken++; setLive(null); dragSig = ''; }
 function replay() {
-  if (replaying) { clearTimeout(replaying); replaying = 0; return; }
-  const end = history().steps.length;
+  if (replaying) { stopReplay(); return; }
+  const steps = history().steps, end = steps.length;
   if (!end) return;
   travel(0);
+  const token = ++replayToken;
   let i = 0;
   const next = () => {
+    if (token !== replayToken) return;
+    const before = new Set(state.objects.keys());
     travel(++i);
-    const st = history().steps;
-    replaying = i < end ? setTimeout(next, Math.max(0.05, Math.min(1.5, st[i].t - st[i - 1].t)) * 1000) : 0;
+    const drawn = [...state.objects.values()].filter((o) => !before.has(o.id) && isLine(o) && o.pen?.length === o.points.length && o.points.length > 1);
+    const wait = () => { replaying = i < end ? setTimeout(next, Math.max(0.05, Math.min(1.5, steps[i].t - steps[i - 1].t - steps[i].drew)) * 1000) : 0; };
+    if (!drawn.length) return wait();
+    // draw them out: each point appears at its time; a long stroke is sped up to at most 8 s
+    const t0 = performance.now(), span = Math.max(...drawn.map((o) => o.pen[o.pen.length - 1][0] - o.pen[0][0])), k = span > 8000 ? span / 8000 : 1;
+    replaying = 1;
+    const tick = () => {
+      if (token !== replayToken) return;
+      const ms = (performance.now() - t0) * k, live = new Map();
+      for (const o of drawn) { const p0 = o.pen[0][0]; let n = 1; while (n < o.points.length && o.pen[n][0] - p0 <= ms) n++; if (n < o.points.length) live.set(o.id, { points: ptsOf(o).slice(0, Math.max(2, n)), pen: o.pen.slice(0, Math.max(2, n)) }); }
+      setLive(live.size ? live : null); dragSig = 'replay' + ms;
+      if (live.size) requestAnimationFrame(tick); else { setLive(null); dragSig = ''; wait(); }
+    };
+    requestAnimationFrame(tick);
   };
   replaying = setTimeout(next, 400);
 }
-for (const type of ['pointerdown', 'keydown']) addEventListener(type, (e) => { if (replaying && !e.target.closest?.('.timeline')) { clearTimeout(replaying); replaying = 0; } }, true);
+for (const type of ['pointerdown', 'keydown']) addEventListener(type, (e) => { if (replaying && !e.target.closest?.('.timeline')) stopReplay(); }, true);
 
 timeline = createTimeline($('timeline'), {
   transport, state, call, history, travel, replay, get replaying() { return !!replaying; },
