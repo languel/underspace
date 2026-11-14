@@ -470,6 +470,76 @@ Added in a ninth pass (14 Nov 2026):
 - Fixed: simplifying a stroke whose ends meet dropped all its middle
   points (`simplifyIndex` measured from a zero-length baseline).
 
+Added in a tenth pass (14 Nov 2026), joints and constraints:
+
+- **The owner's aim:** working with lines should feel like drawing, or
+  like building with wire and solder: lines brought together connect. After
+  Sutherland's Sketchpad (github.com/alexwarth/sutherland: constraints
+  relaxed until satisfied), for curves in 2D and 3D, with the junctions of
+  Midinous (languel/midinojs: travelers choose a way at each node). It
+  brings together three earlier starts: Sketchpad's constraints;
+  threegrease's object constraints (`src/score/constraints.ts`: "traveler
+  and trigger are properties, not kinds") and Poly Build's welds; and
+  Midinous's routing.
+- `src/joints.js` holds all of it. A **joint** is an object (`kind:
+  'joint'`, role `junction`): places on two or more lines (`{ id, u,
+  slide? }`, u by length along the curve as shown; with slide, anywhere on
+  that line) that are held together. A joint with one place and `fix` is a
+  pin. A line may keep rules: `keep: { horv, length }`.
+- **Curves keep their drawn shape.** The solver (Levenberg-Marquardt over
+  each line's two handles, numerical derivatives, with a small pull back to
+  where things were, so the least change wins) moves each curve as a whole,
+  by the similarity that carries its handles. This is how a connector
+  already keeps its hand-drawn shape. It is the same in a render target
+  (3D).
+- **Kernel hook:** after every recorded command, `space.js` calls
+  `settle()` and holds what that command moved (a command may declare
+  `hold(args)`). A take therefore replays to the same drawing, and undo
+  stays exact. While something is dragged (move, G R S, points), what is
+  joined to it follows live (`follow()` in `main.js`, same solver, not a
+  command).
+- **Touch connects.** Joins happen when the end of a drawn stroke or a
+  straight line touches another line, another line's end, or a joint. They
+  also happen when a line is dropped, transformed or point-edited so that
+  its end touches. A ring at the pointer shows what will be joined while
+  drawing. Holding Ctrl or ⌘ while letting go does not join.
+- **Constrain ›** in the context menu: Join where it crosses (also in the
+  hold ring, replacing "code container"), Join where its ends touch, Pin
+  here, Keep level or plumb, Keep its length, Let go. You can click a joint
+  to select it, drag it to move what it holds, delete it, or open its code.
+- **Travelers in networks** (`play.js`): a traveler on a line that has
+  joints keeps its own state (line, distance, direction) and speed. At
+  each joint it reaches, the joint's code runs as `(ways, ev, p, mem)`;
+  ways are listed straightest first, and returning nothing goes straight
+  on. At a line's end without a joint, `loop` applies. Without joints, a
+  traveler still uses the old pure `progress(t)`.
+- **Roles leave geometry alone** (the owner: converting must not change the
+  shape). "Make it an event" makes the stroke itself an event: crossing it
+  fires it, and so does entering what it encloses if it is closed. "Travel
+  the nearest line" makes the stroke itself the traveler: it moves along
+  the line in its own shape. `traveler.attach` accepts any line or shape.
+  "Turn into the shape it looks like", "render target" and "code
+  container" still replace the stroke, because that is what they mean.
+- **Code on objects:** `;` shows or hides the code on objects you zoom into
+  (Settings → Look also has "code ground", the opacity behind it). In an
+  ellipse the code sits in the largest rectangle that fits inside it.
+- New commands: `joint.add`, `joint.free`, `line.keep`. Tests:
+  `app/test/joints.test.js` (solver in 2D and 3D, commands with undo, pins
+  and level, crossings, ways, a traveler through a junction, roles that
+  keep shape).
+- Checked in the browser by scripted pointer events: joins drawn as a T
+  and end to end, dragging a line with the joined ones following, a
+  traveler running through two joints, selecting a joint and seeing its
+  code, `;`, a joint inside a render target, and an ellipse event's code.
+  Not checked: a real pen or trackpad; many lines at once (the solver is
+  dense, so expect it to slow past a few dozen joined lines).
+- Not yet: travelers inside render targets; split routing (one traveler
+  into many) and portals from Midinous; a traveler's own code choosing its
+  way; equal-length, parallel and angle constraints; joints for shapes
+  (only lines are curves); bending, where a curve deforms instead of moving
+  rigidly; joining at crossings in 3D; the ring for the line and shape
+  tools.
+
 The owner asked to match Poliplan's functionality "for starters" without
 copying it. Not matched yet: writing your own brushes and sculpt tools in
 the app, rotate and scale of lines, the point and lasso-plane tools,

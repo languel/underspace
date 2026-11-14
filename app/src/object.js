@@ -16,6 +16,10 @@
 //             'event'      a region that fires when a traveler enters; its code says what happens
 //             'traveler'   moves along the line `on` (see play.js)
 //   kind 'group'   rect, inner (its interior frame), ports (the cut wires)
+//   kind 'joint'   where lines meet: at [{ id, u, slide? }, ...], pos, rect (see joints.js)
+//        role 'junction'   its code says which way a traveler goes on
+// A line can also be an 'event' (crossing it, or entering what it encloses,
+// fires it) or a 'traveler' (it moves along the line `on`, keeping its shape).
 //
 // Any object may carry `name`, `style` { stroke, fill, width, opacity, path }
 // (path 'straight' draws a line through its points as they are; otherwise
@@ -26,10 +30,10 @@
 // in the code's header. Coordinates are local to the object's space (y up);
 // `space` is the id of the group or target it lives in, or null for the canvas.
 
-export const ROLES = { line: ['ink', 'connector', 'path'], shape: ['visual', 'target', 'code', 'score', 'note', 'event', 'traveler'] };
+export const ROLES = { joint: ['junction'], line: ['ink', 'connector', 'path', 'event', 'traveler'], shape: ['visual', 'target', 'code', 'score', 'note', 'event', 'traveler'] };
 export const isLine = (o) => o.kind === 'line';
 export const isTarget = (o) => o.kind === 'shape' && o.role === 'target';
-export const hasCode = (o) => o.role === 'code' || o.role === 'path' || o.role === 'score' || o.role === 'event';
+export const hasCode = (o) => o.role === 'code' || o.role === 'path' || o.role === 'score' || o.role === 'event' || o.role === 'junction';
 // A traveler has no code of its own; this declares its ports and parameters.
 // loop: 0 once, 1 loop, 2 there and back. start: where on the line it begins (0..1).
 export const TRAVELER = '// traveler\n// out: x y u\n// param: dur 4\n// param: loop 1\n// param: start 0';
@@ -86,6 +90,14 @@ export const penOf = (o) => live?.get(o.id)?.pen ?? o.pen;
 export function ptsOf(o) {
   const now = live?.get(o.id);
   if (now) return now.points;
+  // A line that travels is shown where playing has carried it, keeping its own shape.
+  const go = o.role === 'traveler' ? moved?.get(o.id) : null;
+  if (go) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of o.points) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+    const dx = go[0] - (x0 + x1) / 2, dy = go[1] - (y0 + y1) / 2;
+    return o.points.map((p) => [p[0] + dx, p[1] + dy, ...p.slice(2)]);
+  }
   const d = dragOf(o), ox = (o.off?.[0] ?? 0) + (d?.dx ?? 0), oy = (o.off?.[1] ?? 0) + (d?.dy ?? 0);
   // A line drawn inside a target carries a third coordinate.
   return o.points.map((p) => (p.length > 2 ? [p[0] + ox, p[1] + oy, p[2]] : [p[0] + ox, p[1] + oy]));

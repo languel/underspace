@@ -22,10 +22,14 @@ const GESTURES = [
   ['G, R, S with a selection', 'grab, rotate, scale: X Y Z hold to an axis (Shift: the plane without it), type a number, Shift fine, Ctrl steps, click or Enter accepts, right-click or Esc cancels'],
   ['Points tool, G R S', 'the same, on the picked points'],
   ['Draw, then hold still before letting go', 'a ring: move to a glyph and let go to turn the stroke into it; in the middle it stays ink'],
+  ['Draw or drop a line so its end touches another', 'they join there and move together from then on; Ctrl or ⌘ as you let go: they do not'],
+  ['Drag a joint', 'what it holds follows; Delete lets go'],
+  ['A traveler reaches a joint', 'the joint\'s code picks its way on; straight on by default'],
+  [';', 'code on objects zoomed into, shown or hidden'],
   ['Right-click', 'what can be done here'],
   ['Paste code on the canvas', 'a code container; a p5.js or three.js sketch runs'],
 ];
-const GROUPS = { transform: 'Transform', attach: 'Paths', show: 'Panels', delete: 'Edit', brush: 'Brushes', tool2: 'Object tools', history: 'History', tool: 'Tools', role: 'Roles', play: 'Sound', edit: 'Edit', plane: 'Drawing plane', add: 'Add', nav: 'Navigate', file: 'File', panel: 'Panels' };
+const GROUPS = { transform: 'Transform', attach: 'Paths and joints', show: 'Panels', delete: 'Edit', brush: 'Brushes', tool2: 'Object tools', history: 'History', tool: 'Tools', role: 'Roles', play: 'Sound', edit: 'Edit', plane: 'Drawing plane', add: 'Add', nav: 'Navigate', file: 'File', panel: 'Panels' };
 
 export function helpPanel(el, app) {
   const search = h('input'), list = h('div', 'list');

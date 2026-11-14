@@ -33,6 +33,7 @@ import { createPoints, without } from './points.js';
 import { createModal, apply, applyRect } from './transform.js';
 import { snapPoints, snapBox, toSVG, toP5 } from './selection.js';
 import { showPie, recognize } from './pie.js';
+import { solve, crossings, measure, atU, curveOf, isCurve } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
 import { SCULPTS, sculptMark, effectiveSculpt } from './ink/sculpt.js';
@@ -84,6 +85,13 @@ function walk(space, xf) {
   for (const o of state.objects.values()) {
     if (o.space !== space || o.hidden) continue;
     const sel = state.selection.has(o.id), blanket = blanketOf(o), st = o.style ?? {};
+    if (o.kind === 'joint') {
+      // a small ring where lines meet: filled while lit by a traveler or selected; a pin is hot
+      const c = at(xf, jointAt(o)), lit = performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160, r = (sel || lit ? 5 : 3.2) * upp, q = view.toScreen(c);
+      lines.push({ id: o.id, pts: outline({ cx: c[0], cy: c[1], w: r * 2, h: r * 2 }, 'ellipse'), color: sel ? 'accent' : o.fix || lit ? 'hot' : 'ink', width: 1.3, fill: sel ? 'accent' : lit ? 'hot' : o.fix ? null : st.fill ?? 'line' });
+      vis.set(o.id, { o, face: 'joint', px: { l: q[0] - 7, t: q[1] - 7, w: 14, h: 14 }, xf, blanket });
+      continue;
+    }
     if (isLine(o)) {
       const made = run.shown.get(o.id);
       const raw = isWire(o) ? wirePoints(state.objects, o) : made ?? ptsOf(o);
@@ -91,7 +99,8 @@ function walk(space, xf) {
       const brushed = o.brush && !isWire(o);
       // A brushed line is painted on the ink layer; here it is only something to pick, and an outline while selected.
       if (brushed) inkItems.push(inkItem(o, element(raw, penOf(o), { closed: !!o.closed, color: st.stroke ?? inkColor }), xf, st));
-      lines.push({ id: o.id, pts, color: sel ? 'accent' : st.stroke ?? (isWire(o) ? 'hot' : 'ink'), width: brushed ? (sel ? 1 : 0) : st.width ?? (isWire(o) ? 1.6 : 2.2), opacity: brushed ? 1 : st.opacity, fill: o.closed && !brushed ? st.fill : null });
+      const lit = o.role === 'event' && performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160, hot = isWire(o) || o.role === 'event' || o.role === 'traveler';
+      lines.push({ id: o.id, pts, color: sel ? 'accent' : st.stroke ?? (hot ? 'hot' : 'ink'), width: brushed ? (sel ? 1 : 0) : lit ? 4 : st.width ?? (isWire(o) ? 1.6 : 2.2), opacity: brushed ? 1 : st.opacity, fill: o.closed && !brushed ? st.fill : null });
       if (tool === 'points' && !isWire(o) && !made) pointSrc.push({ o, pts: ptsOf(o), pen: penOf(o), xf });
       const cursor = run.cursors.get(o.id);
       if (cursor) dots.push(view.toScreen(at(xf, cursor)));
@@ -99,8 +108,8 @@ function walk(space, xf) {
     }
     const r = rectOf(o), [l, t] = view.toScreen(at(xf, [r.cx - r.w / 2, r.cy + r.h / 2]));
     const px = { l, t, w: r.w * xf.k / upp, h: r.h * xf.k / upp };
-    if (o.role === 'traveler') lines.push({ id: o.id, pts: outline(r, 'ellipse').map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'hot', width: 1.6, fill: st.fill ?? st.stroke ?? 'hot', opacity: st.opacity ?? 0.85 });
-    if (o.role === 'event') { const lit = performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160; lines.push({ id: o.id, pts: outline(r, o.shape).map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'hot', width: lit ? 3 : 1.4, fill: lit ? st.stroke ?? 'hot' : st.fill, opacity: lit ? 0.5 : st.opacity }); }
+    if (o.role === 'traveler' && o.kind === 'shape') lines.push({ id: o.id, pts: outline(r, 'ellipse').map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'hot', width: 1.6, fill: st.fill ?? st.stroke ?? 'hot', opacity: st.opacity ?? 0.85 });
+    if (o.role === 'event' && o.kind === 'shape') { const lit = performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160; lines.push({ id: o.id, pts: outline(r, o.shape).map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'hot', width: lit ? 3 : 1.4, fill: lit ? st.stroke ?? 'hot' : st.fill, opacity: lit ? 0.5 : st.opacity }); }
     if (o.kind === 'shape' && o.role === 'visual') {
       const edge = outline(r, o.shape);
       if (o.brush) inkItems.push(inkItem(o, element(edge.slice(0, -1), null, { closed: true, role: 'plane', color: st.fill ?? st.stroke ?? inkColor }), xf, { ...st, path: o.shape === 'rect' ? 'straight' : null }));
@@ -130,6 +139,12 @@ function walk(space, xf) {
         ink3d.push({ id: m.id, scene: o.id, pts });
         if (tool === 'points') pointSrc.push({ o: m, pts: ptsOf(m), pen: penOf(m), scene: o.id });
         vis.set(m.id, { o: m, face: 'line', scene: o.id });
+      }
+      for (const j of state.objects.values()) {
+        if (j.kind !== 'joint' || j.space !== o.id) continue;
+        const c = jointAt(j), d = 0.12, sel = state.selection.has(j.id), color = sel ? 'accent' : j.fix ? 'hot' : 'ink';
+        for (let k = 0; k < 3; k++) { const a = [c[0], c[1], c[2] ?? 0], b = a.slice(); a[k] -= d; b[k] += d; marks.push({ pts: [a, b], color }); ink3d.push({ id: j.id, scene: o.id, pts: [a, b] }); }
+        vis.set(j.id, { o: j, face: 'joint', scene: o.id });
       }
       if (guide?.scene === o.id) marks.push({ pts: [-1, 1].map((k) => guide.pivot.map((v, i) => v + guide.axis[i] * 60 * k)), color: 'hot' });
       // its 3D cursor, when the drawing plane hangs from it
@@ -166,7 +181,7 @@ function togglePlay(c = context()) {
   if (travelers().length) { playEngine.reset(); playT0 = performance.now() / 1000; }
 }
 // A line as it is shown: what a traveler follows.
-const shownPath = (l) => { const raw = run?.shown.get(l.id) ?? ptsOf(l); return l.style?.path === 'straight' || l.closed ? raw : smooth(raw); };
+const shownPath = (l) => curveOf(l, run?.shown.get(l.id) ?? ptsOf(l));
 const paramsOf = (o) => { const p = {}; for (const q of blanketOf(o)?.params ?? []) p[q.name] = o.params?.[q.name] ?? q.value; return p; };
 
 let laidOut = -1; // the state version the last layout was made from
@@ -195,7 +210,7 @@ function frame() {
   if (dirty || camKey !== lastCam) { lastCam = camKey; ink.resize(view.size.w, view.size.h); ink.draw(inkItems); }
   view.setScenes(sceneList, dirty);
   showPoints();
-  faces.update(vis, { run, selection: state.selection, w: view.size.w, h: view.size.h });
+  faces.update(vis, { run, selection: state.selection, w: view.size.w, h: view.size.h, code: settings.codeOverlay, ground: settings.codeOpacity });
   while (dotLayer.children.length < dots.length) dotLayer.append(document.createElement('i'));
   while (dotLayer.children.length > dots.length) dotLayer.lastChild.remove();
   dots.forEach((d, i) => {
@@ -247,6 +262,7 @@ const isOpen = (v) => (v.o.kind === 'group' && v.face === 'near') || (isTarget(v
 
 function pick(x, y) {
   const free = (id) => !get(id)?.locked;
+  for (const v of vis.values()) if (v.face === 'joint' && v.px && free(v.o.id) && Math.hypot(v.px.l + 7 - x, v.px.t + 7 - y) < 7) return v.o.id;
   for (const l of ink3d) if (free(l.id) && onPath(l.pts.map((p) => view.sceneToScreen(l.scene, p)), x, y)) return l.id;
   for (let i = lines.length - 1; i >= 0; i--) if (lines[i].id && free(lines[i].id) && onPath(lines[i].pts.map(view.toScreen), x, y)) return lines[i].id; // ink first: it is thin
   for (const v of [...vis.values()].reverse()) {
@@ -262,7 +278,7 @@ function pick(x, y) {
 // A port under the pointer, on any object showing its blanket.
 function portAt(x, y) {
   for (const v of vis.values()) {
-    if (!v.blanket || v.face === 'far' || !v.px) continue;
+    if (!v.blanket || v.face === 'far' || v.face === 'joint' || !v.px) continue;
     for (const s of ['outs', 'ins']) for (const name of v.blanket[s]) {
       const q = view.toScreen(at(v.xf, portPos(v.o, s, name)));
       if (Math.hypot(q[0] - x, q[1] - y) < 9) return { v, side: s, name };
@@ -270,6 +286,93 @@ function portAt(x, y) {
   }
   return null;
 }
+
+// ---- joints: lines that touch connect (joints.js) ----------------------------
+
+// Where a joint is now: on its first line as that line is shown, so it moves with a drag in progress.
+function jointAt(j) {
+  const r = rectOf(j);
+  if (j.rect && (r.cx !== j.rect.cx || r.cy !== j.rect.cy)) return [r.cx, r.cy]; // the joint itself is being dragged
+  const q = j.at?.[0], l = q && get(q.id);
+  if (!l?.points || l.space !== j.space) return j.pos;
+  const pts = ptsOf(l);
+  return atU(measure(curveOf(l, pts)), q.u).slice(0, pts[0].length > 2 ? 3 : 2);
+}
+// While something is dragged, what is joined to it follows: live, not yet a command.
+function follow(live, held) {
+  setLive(live.size ? live : null);
+  if (![...state.objects.values()].some((o) => o.kind === 'joint' || o.keep)) return;
+  const { points } = solve(state.objects, { hold: new Set(held), pts: ptsOf, rect: rectOf });
+  if (!points.size) return;
+  const all = new Map(live);
+  for (const [id, p] of points) if (!all.has(id)) all.set(id, { points: p, pen: get(id)?.pen });
+  setLive(all);
+}
+const TOUCH = 10; // pixels: this close, things touch
+// What a point of the stage touches in space s, other than the lines in `not`:
+// a joint, the end of a line, or a line anywhere along it. { joint } | { id, u, slide?, end? }, with `px` where.
+function touching(s, p, not = new Set()) {
+  const scr = s.kind === 'scene' ? (q) => view.sceneToScreen(s.id, q) : (q) => view.toScreen(at(s.xf, q));
+  let best = null;
+  const consider = (hit, q, rank) => { if (!q) return; const d = Math.hypot(q[0] - p[0], q[1] - p[1]); if (d < TOUCH && (!best || rank < best.rank || (rank === best.rank && d < best.d))) best = { ...hit, px: q, d, rank }; };
+  for (const j of state.objects.values()) if (j.kind === 'joint' && j.space === s.id && !j.fix && !j.at.every((q) => not.has(q.id))) consider({ joint: j.id }, scr(jointAt(j)), 0);
+  for (const l of state.objects.values()) {
+    if (!isCurve(l) || l.space !== s.id || l.hidden || not.has(l.id)) continue;
+    const path = shownPath(l), sp = path.map(scr);
+    if (sp.some((q) => !q)) continue;
+    if (!l.closed) { consider({ id: l.id, u: 0, end: true }, sp[0], 1); consider({ id: l.id, u: 1, end: true }, sp[sp.length - 1], 1); }
+    const m = measure(path);
+    for (let i = 1; i < sp.length; i++) {
+      const a = sp[i - 1], b = sp[i], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, k = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+      consider({ id: l.id, u: m.total ? (m.cum[i - 1] + k * (m.cum[i] - m.cum[i - 1])) / m.total : 0, slide: true }, [a[0] + dx * k, a[1] + dy * k], 2);
+    }
+  }
+  return best;
+}
+// The joint that already holds a line at u, if any.
+const jointHolding = (id, u) => [...state.objects.values()].find((j) => j.kind === 'joint' && j.at.some((q) => q.id === id && Math.abs(q.u - u) < 1e-3));
+// Join the end of line `id` at u (seen at stage point p) to what it touches. Returns the joint, or null.
+function joinEnd(s, id, u, p, not) {
+  if (jointHolding(id, u)) return null;
+  const t = touching(s, p, not ?? new Set([id]));
+  if (!t) return null;
+  const into = t.joint ?? (t.end ? jointHolding(t.id, t.u)?.id : null);
+  if (into) return call('joint.add', { into, at: [{ id, u }] });
+  return call('joint.add', { at: [{ id, u }, { id: t.id, u: round(t.u), ...(t.slide ? { slide: true } : {}) }] });
+}
+// After lines were drawn or moved: their ends join what they now touch.
+function joinTouching(list, not = new Set(list)) {
+  for (const id of list) {
+    const l = get(id);
+    if (!isCurve(l) || l.closed) continue;
+    const s = spaces.find((x) => x.id === l.space) ?? (l.space === null ? spaces[0] : null);
+    if (!s) continue;
+    const scr = s.kind === 'scene' ? (q) => view.sceneToScreen(s.id, q) : (q) => view.toScreen(at(s.xf, q)), pts = ptsOf(l);
+    for (const [u, q] of [[0, pts[0]], [1, pts[pts.length - 1]]]) { const p = scr(q); if (p) joinEnd(s, id, u, p, not); }
+  }
+}
+// Join selected lines where they cross each other or any line in their space.
+function joinCrossings(c) {
+  batch(() => {
+    const done = new Set();
+    for (const l of c.lines.filter((o) => isCurve(o) && get(o.space)?.role !== 'target')) {
+      for (const o of state.objects.values()) {
+        if (o === l || !isCurve(o) || o.space !== l.space || o.hidden || done.has(o.id + '|' + l.id)) continue;
+        done.add(l.id + '|' + o.id);
+        for (const x of crossings(shownPath(l), shownPath(o))) {
+          if (jointHolding(l.id, x.ua) && jointHolding(o.id, x.ub)) continue;
+          call('joint.add', { at: [{ id: l.id, u: round(x.ua) }, { id: o.id, u: round(x.ub) }] });
+        }
+      }
+    }
+  });
+}
+const snapMark = $('snapmark');
+function showTouch(t) {
+  snapMark.hidden = !t;
+  if (t) { snapMark.style.transform = `translate(${t.px[0].toFixed(1)}px, ${t.px[1].toFixed(1)}px)`; snapMark.dataset.kind = t.joint ? 'joint' : t.end ? 'end' : 'on'; }
+}
+const lineHasJoints = (o) => [...state.objects.values()].some((j) => j.kind === 'joint' && j.at.some((q) => q.id === o.id));
 
 // ---- the points tool --------------------------------------------------------
 
@@ -353,21 +456,21 @@ const modal = createModal({
       if (it.rect) rects.set(it.id, applyRect(t, it.rect));
       else live.set(it.id, { points: transformed(it, t), pen: it.pen ?? get(it.id)?.pen });
     }
-    setLive(live); setDrag(rects.size ? { ids: new Set(rects.keys()), rects } : null);
+    setDrag(rects.size ? { ids: new Set(rects.keys()), rects } : null); follow(live, items.map((it) => it.id));
     guide = axis ? { scene: items[0].scene, pivot: t.pivot, axis, xf: items[0].xf } : null;
     dragSig = 'transform' + (++transformN);
   },
   commit(items, t) {
     this.cancel();
     if (items.some((it) => it.idx)) {
-      batch(() => { for (const it of items) call('line.set', { id: it.id, points: transformed(it, t).map((p) => p.map(round)), ...(it.pen?.length === it.pts.length ? { pen: it.pen } : {}) }); });
+      batch(() => { for (const it of items) call('line.set', { id: it.id, points: transformed(it, t).map((p) => p.map(round)), ...(it.pen?.length === it.pts.length ? { pen: it.pen } : {}) }); if (laidOut !== state.version) frame(); joinTouching(items.map((it) => it.id)); });
       return;
     }
     const a = { ids: items.map((it) => it.id), pivot: t.pivot.map(round) };
     if (t.d.some(Boolean)) Object.assign(a, { dx: round(t.d[0]), dy: round(t.d[1]) }, t.d[2] ? { dz: round(t.d[2]) } : {});
     if (t.angle) Object.assign(a, { angle: round((t.angle * 180) / Math.PI), axis: t.axis.map(round) });
     if (t.s.some((v) => v !== 1)) Object.assign(a, { sx: round(t.s[0]), sy: round(t.s[1]) }, t.s[2] !== 1 ? { sz: round(t.s[2]) } : {});
-    if (a.dx != null || a.angle != null || a.sx != null) call('object.transform', a);
+    if (a.dx != null || a.angle != null || a.sx != null) batch(() => { call('object.transform', a); if (laidOut !== state.version) frame(); joinTouching(a.ids); });
   },
   cancel() { setLive(null); setDrag(null); guide = null; dragSig = ''; },
   readout(text) { readout.hidden = !text; readout.textContent = text ?? ''; },
@@ -449,7 +552,9 @@ const clip = (text) => navigator.clipboard?.writeText(text);
 // ---- the hold menu: hold still while drawing to turn the stroke into something --
 
 // What the ring offers, clockwise from the top; each is an action, so it also has a key, a menu entry and a palette entry.
-const PIE = ['role.path', 'attach.traveler', 'line.travelNearest', 'line.toEvent', 'line.toShape', 'line.toTarget', 'line.toCode', 'line.straighten', 'simplify.strongly'];
+const PIE = ['role.path', 'attach.traveler', 'line.travelNearest', 'line.toEvent', 'line.toShape', 'line.toTarget', 'join.crossings', 'line.straighten', 'simplify.strongly'];
+// Picks that leave the stroke a line on the drawing: its ends still join what they touch.
+const KEEPS_LINE = new Set(['role.path', 'attach.traveler', 'join.crossings', 'line.straighten', 'simplify.strongly']);
 const HOLD_MS = 450;
 let holdTimer = 0;
 function armHold(g) {
@@ -539,7 +644,7 @@ function placed(s, p) {
 function startDraw(s, p, wire = false) {
   s = placed(s, p);
   const q = toSpace(s, p[0], p[1]);
-  if (q) gesture = { kind: 'draw', s, pts: [q], last: p, wire, pen: [[0, 0.5]], t0: performance.now(), lastT: performance.now() };
+  if (q) gesture = { kind: 'draw', s, pts: [q], first: p, last: p, wire, pen: [[0, 0.5]], t0: performance.now(), lastT: performance.now() };
 }
 
 pad.addEventListener('pointerdown', (e) => {
@@ -691,6 +796,7 @@ pad.addEventListener('pointermove', (e) => {
     const press = e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : was * 0.7 + Math.max(0.15, Math.min(0.9, 0.9 - speed * 0.35)) * 0.3;
     g.pen.push([Math.round(now - g.t0), +press.toFixed(3)]); g.lastT = now;
     g.pts.push(q); g.last = p;
+    if (!g.wire) showTouch(e.ctrlKey || e.metaKey ? null : touching(g.s, p));
     if (g.s.kind === 'scene') view.setPreview(g.pts, g.s.id);
     else view.setPreview((settings.smooth ? smooth(g.pts) : g.pts).map((pt) => at(g.s.xf, pt)), null, g.wire ? 'hot' : 'accent');
   } else if (g.kind === 'line') {
@@ -699,7 +805,8 @@ pad.addEventListener('pointermove', (e) => {
     if (e.shiftKey) { const dx = p[0] - g.start[0], dy = p[1] - g.start[1], a = Math.round(Math.atan2(dy, dx) / (Math.PI / 12)) * (Math.PI / 12), d = Math.hypot(dx, dy); q = [g.start[0] + Math.cos(a) * d, g.start[1] + Math.sin(a) * d]; }
     const b = toSpace(g.s, q[0], q[1]);
     if (!b) return;
-    g.b = b;
+    g.b = b; g.end = q;
+    showTouch(e.ctrlKey || e.metaKey ? null : touching(g.s, q));
     if (g.s.kind === 'scene') view.setPreview([g.a, g.b], g.s.id); else view.setPreview([g.a, g.b].map((pt) => at(g.s.xf, pt)));
   } else if (g.kind === 'move') {
     const u = view.unitsPerPx() / g.k;
@@ -707,6 +814,7 @@ pad.addEventListener('pointermove', (e) => {
     if (!g.moved && Math.hypot(p[0] - g.start[0], p[1] - g.start[1]) < 3) return;
     g.moved = true;
     setDrag({ ids: new Set(g.ids), dx: g.dx, dy: g.dy });
+    follow(new Map(), g.ids);
     dragSig = g.dx + ',' + g.dy;
   } else if (g.kind === 'resize') {
     // The top left corner stays; the dragged corner follows the pointer.
@@ -723,7 +831,7 @@ pad.addEventListener('pointermove', (e) => {
     if (!g.moved && Math.hypot(p[0] - g.start[0], p[1] - g.start[1]) < 3) return;
     g.moved = true;
     g.next = movedPoints(g, p[0] - g.start[0], p[1] - g.start[1]);
-    setLive(g.next); dragSig = 'points' + p.join();
+    follow(g.next, [...g.next.keys()]); dragSig = 'points' + p.join();
   } else if (g.kind === 'rect' || g.kind === 'marquee' || g.kind === 'pmarquee') { g.end = p; showMarquee(g.start, g.end); }
 });
 
@@ -746,7 +854,7 @@ function commitCam() {
 
 function cancelGesture() {
   gesture?.pie?.close(); clearTimeout(holdTimer);
-  gesture = null; marquee.hidden = true; view.setPreview(null); setDrag(null); setLive(null); dragSig = ''; orbit = null;
+  gesture = null; marquee.hidden = true; view.setPreview(null); setDrag(null); setLive(null); dragSig = ''; orbit = null; showTouch(null);
 }
 
 // A rectangle or ellipse drawn inside a target: a closed line on its plane.
@@ -766,11 +874,12 @@ function endGesture(e) {
   const g = gesture;
   gesture = null;
   marquee.hidden = true;
+  showTouch(null);
   if (!g) return;
   if (g.kind === 'pinch' && g.scene) { commitCam(); return; }
   if (g.kind === 'points') {
     setLive(null); dragSig = '';
-    if (g.moved && g.next) batch(() => { for (const [id, m] of g.next) call('line.set', { id, points: m.points, ...(m.pen && m.pen.length === m.points.length ? { pen: m.pen } : {}) }); });
+    if (g.moved && g.next) batch(() => { for (const [id, m] of g.next) call('line.set', { id, points: m.points, ...(m.pen && m.pen.length === m.points.length ? { pen: m.pen } : {}) }); if (!(e.ctrlKey || e.metaKey)) joinTouching([...g.next.keys()]); });
     return;
   }
   if (g.kind === 'pmarquee') {
@@ -798,15 +907,20 @@ function endGesture(e) {
     // Held, and let go on a glyph of the ring: the stroke becomes that, in one step.
     const pick = g.pie ? PIE.map((id) => ACTIONS.find((a) => a.id === id))[g.pie.items[g.choice ?? -1] ?? -1] : null;
     g.pie?.close();
-    if (pick) batch(() => { const id = add(); call('select.set', { ids: [id] }); pick.run(context()); });
-    else if (g.pts.length > 1 || !g.wire) add();
+    // Its ends join what they touch (Ctrl or Cmd as it is let go: they do not).
+    const ends = (id) => { if (g.wire || e.ctrlKey || e.metaKey || !isCurve(get(id)) || get(id).closed) return; joinEnd(g.s, id, 0, g.first); joinEnd(g.s, id, 1, g.last); };
+    if (pick) batch(() => { const id = add(); call('select.set', { ids: [id] }); pick.run(context()); if (KEEPS_LINE.has(pick.id)) ends(id); });
+    else if (g.pts.length > 1 || !g.wire) batch(() => { const id = add(); if (id) ends(id); });
   } else if (g.kind === 'line') {
     view.setPreview(null);
     const flat = g.s.kind !== 'scene', pts = [g.a, g.b].map((q) => q.map((v, i) => round(flat && i < 2 ? snap(v) : v)));
-    if (Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1], (pts[0][2] ?? 0) - (pts[1][2] ?? 0)) > 1e-3) call('line.add', { space: g.s.id, points: pts, tol: flat ? round(14 * unitsPerPx(g.s)) : 0, ...newStyle(false) });
+    if (Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1], (pts[0][2] ?? 0) - (pts[1][2] ?? 0)) > 1e-3) batch(() => {
+      const id = call('line.add', { space: g.s.id, points: pts, tol: flat ? round(14 * unitsPerPx(g.s)) : 0, ...newStyle(false) });
+      if (id && isCurve(get(id)) && !(e.ctrlKey || e.metaKey)) { joinEnd(g.s, id, 0, g.start); joinEnd(g.s, id, 1, g.end ?? g.start); }
+    });
   } else if (g.kind === 'move') {
-    setDrag(null); dragSig = '';
-    if (g.moved) call('object.move', { ids: g.ids, dx: round(g.dx), dy: round(g.dy) });
+    setDrag(null); setLive(null); dragSig = '';
+    if (g.moved) batch(() => { call('object.move', { ids: g.ids, dx: round(g.dx), dy: round(g.dy) }); if (!(e.ctrlKey || e.metaKey)) { if (laidOut !== state.version) frame(); joinTouching(g.ids); } });
   } else if (g.kind === 'resize') {
     setDrag(null); dragSig = '';
     if (g.next) call('object.resize', { id: g.id, rect: g.next });
@@ -1036,8 +1150,15 @@ const ACTIONS = [
     run: (c) => { const l = c.lines[0], { s, at: q } = onLineAt(l, c.p), size = round(26 * unitsPerPx(s)); call('shape.add', { space: l.space, role: 'event', shape: 'ellipse', rect: { cx: round(q[0]), cy: round(q[1]), w: size, h: size } }); } },
   { id: 'attach.nearest', title: 'Attach to the nearest line', icon: 'path', group: 'attach', menu: true, when: (c) => c.shapes.length && c.shapes.every((o) => o.kind === 'shape' && get(o.space)?.role !== 'target') && [...state.objects.values()].some((l) => flatLine(l) && l.space === c.shapes[0].space), run: attachToNearest },
   { id: 'line.travelNearest', title: 'Travel the nearest line', icon: 'traveler', group: 'attach', menu: 'Turn into', when: (c) => c.lines.length === 1 && flatLine(c.lines[0]) && !!nearestLine(c.lines[0].space, boxOf(c.lines[0]).cx, boxOf(c.lines[0]).cy, c.lines[0].id),
-    run: (c) => { const l = c.lines[0], r = boxOf(l), near = nearestLine(l.space, r.cx, r.cy, l.id), v = vis.get(l.id), min = 14 * view.unitsPerPx() / (v?.xf?.k ?? 1); batch(() => { const id = call('traveler.add', { on: near.l.id, u: round(near.u), size: round(Math.max(min, Math.min(r.w, r.h) || Math.max(r.w, r.h))) }); call('object.remove', { ids: [l.id] }); if (id) call('select.set', { ids: [id] }); }); } },
-  { id: 'line.toEvent', title: 'Turn into an event', icon: 'event', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some(flatLine), run: (c) => linesTo(c, () => ({ role: 'event', shape: 'ellipse' })) },
+    run: (c) => { const l = c.lines[0], r = boxOf(l), near = nearestLine(l.space, r.cx, r.cy, l.id); call('traveler.attach', { id: l.id, on: near.l.id, u: round(near.u) }); } },
+  { id: 'line.toEvent', title: 'Make it an event', icon: 'event', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some((l) => flatLine(l) && l.role !== 'event'), run: (c) => setRole(c.lines.filter(flatLine), 'event') },
+  // Constraints, after Sketchpad: joints between lines, pins, and rules a line keeps.
+  { id: 'join.crossings', title: 'Join where it crosses', icon: 'joint', group: 'attach', menu: 'Constrain', when: (c) => c.lines.some((l) => isCurve(l) && get(l.space)?.role !== 'target'), run: joinCrossings },
+  { id: 'join.touching', title: 'Join where its ends touch', icon: 'joint', group: 'attach', menu: 'Constrain', when: (c) => c.lines.some(isCurve), run: (c) => batch(() => joinTouching(ids(c.lines.filter(isCurve)), new Set())) },
+  { id: 'join.pin', title: 'Pin here', icon: 'pin', group: 'attach', menu: 'Constrain', when: (c) => isCurve(c.hit ?? c.one), run: (c) => { const l = isCurve(c.hit) ? c.hit : c.one, { u } = onLineAt(l, c.p); call('joint.add', { at: [{ id: l.id, u: round(u) }], fix: true }); } },
+  { id: 'keep.horv', title: 'Keep level or plumb', icon: 'level', group: 'attach', menu: 'Constrain', when: (c) => c.lines.some((l) => isCurve(l) && !l.keep?.horv), run: (c) => call('line.keep', { ids: ids(c.lines.filter(isCurve)), horv: true }) },
+  { id: 'keep.length', title: 'Keep its length', icon: 'length', group: 'attach', menu: 'Constrain', when: (c) => c.lines.some((l) => isCurve(l) && !l.keep?.length), run: (c) => call('line.keep', { ids: ids(c.lines.filter(isCurve)), length: true }) },
+  { id: 'join.free', title: 'Let go', icon: 'free', group: 'attach', menu: 'Constrain', when: (c) => c.sel.some((o) => o.kind === 'joint' || o.keep || (isLine(o) && lineHasJoints(o))), run: (c) => call('joint.free', { ids: ids(c.sel) }) },
   { id: 'line.toShape', title: 'Turn into the shape it looks like', icon: 'ellipse', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some((l) => flatLine(l) && recognize(ptsOf(l))), run: (c) => linesTo(c, (l) => { const r = recognize(ptsOf(l)); return r && { role: 'visual', shape: r.shape }; }) },
   { id: 'line.toTarget', title: 'Turn into a render target', icon: 'target', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some(flatLine), run: (c) => linesTo(c, () => ({ role: 'target' })) },
   { id: 'line.toCode', title: 'Turn into a code container', icon: 'box', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some(flatLine), run: (c) => linesTo(c, () => ({ role: 'code' })) },
@@ -1080,6 +1201,7 @@ const ACTIONS = [
   { id: 'lock', title: 'Lock', icon: 'lock', keys: 'shift+l', group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.flag', { ids: ids(c.sel), locked: true }) },
   { id: 'showall', title: 'Show and unlock everything', icon: 'clean', group: 'edit', when: () => [...state.objects.values()].some((o) => o.hidden || o.locked), run: () => call('object.flag', { ids: [...state.objects.values()].filter((o) => o.hidden || o.locked).map((o) => o.id), hidden: false, locked: false }) },
   { id: 'points.remove', title: 'Delete points', icon: 'remove', keys: ['backspace', 'delete'], group: 'edit', hidden: true, when: () => tool === 'points' && handles.picked.size, run: removePoints },
+  { id: 'view.code', title: 'Code on objects', icon: 'overlay', keys: ';', group: 'show', menu: true, on: () => settings.codeOverlay, run: () => setSetting('codeOverlay', !settings.codeOverlay) },
   { id: 'showcode', title: 'Show code', icon: 'code', group: 'show', menu: true, when: (c) => c.one && hasCode(c.one), run: () => panels.show('code') },
   { id: 'showprops', title: 'Show properties', icon: 'props', group: 'show', menu: true, when: (c) => c.sel.length, run: () => panels.show('properties') },
   { id: 'showtree', title: 'Show in outliner', icon: 'tree', group: 'show', menu: true, when: (c) => c.sel.length, run: () => panels.show('outliner') },

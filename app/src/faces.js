@@ -55,11 +55,14 @@ export function createFaces(layer, { onParam, onCode }) {
   }
 
   // vis: id -> { o, face, px: { l, t, w, h }, blanket }
-  function update(vis, { run, selection, w, h: stageH }) {
+  function update(vis, { run, selection, w, h: stageH, code = true, ground = 0.85 }) {
     const seen = new Set();
+    // the code on objects zoomed into: shown or not, and how solid its ground is
+    layer.classList.toggle('no-code', !code);
+    layer.style.setProperty('--code-ground', Math.round(ground * 100) + '%');
     for (const [id, v] of vis) {
       const o = v.o, sel = selection.has(id), isNote = o.role === 'note', plain = !v.blanket && !isNote;
-      if (v.face === 'line' || !v.px) continue;
+      if (v.face === 'line' || v.face === 'joint' || !v.px) continue;
       if (plain && !(sel && o.rect)) continue;                 // a visual gets a frame only while selected
       if (v.face === 'far' && o.kind === 'line') continue;
       const p = v.px;
@@ -72,7 +75,7 @@ export function createFaces(layer, { onParam, onCode }) {
       const st = o.style ?? {}, look = (st.stroke && !sel ? `;border-color:${st.stroke}` : '') + (st.fill ? `;background:${st.fill}` : '') + (st.opacity != null ? `;opacity:${st.opacity}` : '');
       el.style.cssText = `left:${p.l.toFixed(1)}px;top:${p.t.toFixed(1)}px;width:${p.w.toFixed(1)}px;height:${p.h.toFixed(1)}px${plain ? '' : look}`;
       const error = run.errors.get(id), kind = plain || v.face === 'far' ? null : hasCode(o) && o.role !== 'score' ? sketchKind(o.code) : null;
-      el.className = `face kind-${o.kind} role-${o.role ?? 'group'} ${v.face}${sel ? ' sel' : ''}${error ? ' err' : ''}${kind ? ' is-sketch' : ''}${plain ? ' plain' : ''}${o.rect && sel && selection.size === 1 ? ' sizable' : ''}`;
+      el.className = `face kind-${o.kind} role-${o.role ?? 'group'} ${v.face}${sel ? ' sel' : ''}${error ? ' err' : ''}${kind ? ' is-sketch' : ''}${plain ? ' plain' : ''}${o.rect && sel && selection.size === 1 ? ' sizable' : ''}${o.shape === 'ellipse' ? ' shape-ellipse' : ''}`;
       if (plain || v.face === 'far') { if (el.frame) sketch(el, v, null); continue; }
       if (isNote) {
         if (el.note.textContent !== (o.text ?? '')) el.note.textContent = o.text ?? '';

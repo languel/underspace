@@ -10,6 +10,7 @@ export const DEFAULTS = {
   brush: '', planeBrush: '',            // the ink brush new lines and new shapes take ('' is a plain line)
   brushParams: {},                      // brush id -> the parameters last set for it
   sculpt: 'push', sculptRadius: 40, sculptStrength: 0.6, sculptParams: {}, // radius in pixels
+  codeOverlay: true, codeOpacity: 0.85, // the code shown on an object zoomed into: on or off (;), how solid its ground is
   smooth: true, simplify: 1.5,          // new lines: drawn smooth; points within this many pixels of the line are dropped
   codePreset: 'osc', scoreBrush: 'glissando', targetPlane: 'view', // what the object tools make
   islands: {},          // where toolbars were dragged to: id -> [x, y]

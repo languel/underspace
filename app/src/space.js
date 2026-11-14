@@ -13,6 +13,7 @@ import { PRESETS } from './presets.js';
 import { BRUSHES } from './brushes.js';
 import { BRUSHES as INK } from './ink/brushes.js';
 import { spec, apply, applyRect } from './transform.js';
+import { settle, JUNCTION, isCurve, curveOf, measure, atU } from './joints.js';
 
 export const state = {
   objects: new Map(),   // id -> object, see object.js
@@ -27,7 +28,8 @@ export const onChange = (fn) => { listeners.add(fn); return () => listeners.dele
 // ---- registry ---------------------------------------------------------------
 
 const commands = new Map();
-// spec: { name, doc, args: JSON-schema properties, required?, record = true, run(args) }
+// spec: { name, doc, args: JSON-schema properties, required?, record = true, run(args), hold?(args) }
+// hold: the ids a command has put somewhere; when constraints are solved after it, they stay and the rest gives way (default: its ids or id).
 export function define(spec) { commands.set(spec.name, { record: true, args: {}, ...spec }); }
 
 export const newId = () => 'o' + (++state.n);
@@ -119,13 +121,81 @@ define({
 });
 
 define({
-  name: 'traveler.attach', doc: 'Put a traveler on another line, starting at u (0..1).',
+  name: 'traveler.attach', doc: 'Make a line or shape a traveler on a line, starting at u (0..1), or put a traveler on another line. Its own shape is kept: it is what travels.',
   args: { id: T.id, on: { type: 'string' }, u: T.num }, required: ['id', 'on'],
   run(a) {
     const o = state.objects.get(a.id), line = state.objects.get(a.on);
-    if (o?.role !== 'traveler' || !line || line.kind !== 'line' || line.bind || line.space !== o.space) return false;
+    if (!o || o.id === a.on || !line || line.kind !== 'line' || line.bind || line.role === 'traveler' || line.space !== o.space) return false;
+    if (o.role !== 'traveler') {
+      if (o.kind === 'group' || o.bind || ['target', 'code', 'score', 'note'].includes(o.role)) return false;
+      if (o.code != null) { (o.stash ??= {})[o.role] = o.code; delete o.code; }
+      o.role = 'traveler';
+      for (const j of [...state.objects.values()]) if (j.kind === 'joint' && j.at.some((q) => q.id === o.id)) dropPlaces(j, new Set([o.id])); // a traveler is not held anywhere
+    }
     o.on = line.id; o.params = { ...o.params, start: Math.max(0, Math.min(1, a.u ?? 0)) };
     return true;
+  },
+});
+
+// ---- joints (joints.js) -----------------------------------------------------
+
+const place = { type: 'object', description: '{ id, u, slide? }: a point on a line, u how far along it (0..1); slide lets it move along that line', properties: { id: { type: 'string' }, u: { type: 'number' }, slide: { type: 'boolean' } } };
+// A joint loses the places on lines that are gone; with fewer than two (and no pin) it goes.
+function dropPlaces(j, gone) {
+  j.at = j.at.filter((q) => !gone.has(q.id));
+  if (j.at.length < (j.fix ? 1 : 2)) { state.objects.delete(j.id); state.selection.delete(j.id); }
+}
+define({
+  name: 'joint.add',
+  doc: 'Join lines where they touch: the places given are held together from now on, and moving one line carries the others (each keeps its drawn shape). The first place is the one that comes to the others. With into, the places join an existing joint. With fix and one place, a pin: that place stays at pos. A joint is also a junction: its code says which way a traveler goes on.',
+  args: { at: { type: 'array', items: place }, into: T.id, fix: { type: 'boolean' }, pos: { type: 'array', items: { type: 'number' } }, code: T.str }, required: ['at'],
+  hold: (a) => (a.into ? [a.into] : a.fix ? [] : a.at.slice(1).map((q) => q.id)),
+  run(a) {
+    const ok = (a.at ?? []).filter((q) => isCurve(state.objects.get(q.id)) && Number.isFinite(q.u));
+    const clean = (q) => ({ id: q.id, u: Math.max(0, Math.min(1, round(q.u))), ...(q.slide ? { slide: true } : {}) });
+    if (a.into) {
+      const j = state.objects.get(a.into);
+      if (j?.kind !== 'joint') return null;
+      for (const q of ok) if (state.objects.get(q.id).space === j.space && !j.at.some((p) => p.id === q.id)) j.at.push(clean(q));
+      return j.id;
+    }
+    if (!ok.length || (!a.fix && new Set(ok.map((q) => q.id)).size < 2)) return null;
+    const space = state.objects.get(ok[0].id).space;
+    if (ok.some((q) => state.objects.get(q.id).space !== space)) return null;
+    const first = state.objects.get(ok[0].id), m = measure(curveOf(first, ptsOf(first))), at = atU(m, ok[0].u);
+    const pos = (Array.isArray(a.pos) && a.pos.length >= 2 ? a.pos : at.slice(0, first.points[0].length > 2 ? 3 : 2)).map(round);
+    const j = { id: newId(), kind: 'joint', role: 'junction', space, at: (a.fix ? ok.slice(0, 1) : ok).map(clean), pos, rect: { cx: pos[0], cy: pos[1], w: 0, h: 0 }, code: a.code ?? JUNCTION, params: {} };
+    if (a.fix) j.fix = true;
+    state.objects.set(j.id, j);
+    return j.id;
+  },
+});
+
+define({
+  name: 'joint.free', doc: 'Let lines go: remove the joints and pins that hold them, and their own rules (keep).',
+  args: { ids: T.ids }, required: ['ids'], hold: (a) => a.ids,
+  run(a) {
+    const ids = new Set(a.ids);
+    for (const o of [...state.objects.values()]) {
+      if (o.kind === 'joint' && (ids.has(o.id) || o.at.some((q) => ids.has(q.id)))) { if (ids.has(o.id)) { state.objects.delete(o.id); state.selection.delete(o.id); } else dropPlaces(o, ids); }
+      if (ids.has(o.id) && o.keep) delete o.keep;
+    }
+  },
+});
+
+define({
+  name: 'line.keep', doc: 'Give lines rules they keep from now on: horv (the chord from end to end stays level or plumb, whichever it is nearer), length (the chord stays this long; true keeps the length it has). false removes a rule.',
+  args: { ids: T.ids, horv: { type: 'boolean' }, length: { type: ['number', 'boolean'] } }, required: ['ids'], hold: () => [],
+  run(a) {
+    for (const id of a.ids) {
+      const o = state.objects.get(id);
+      if (!isCurve(o)) continue;
+      const k = { ...o.keep };
+      if (a.horv === true) k.horv = true; else if (a.horv === false) delete k.horv;
+      if (a.length === false) delete k.length;
+      else if (a.length != null) { const p = ptsOf(o), e = p[p.length - 1]; k.length = a.length === true ? round(Math.hypot(e[0] - p[0][0], e[1] - p[0][1], (e[2] ?? 0) - (p[0][2] ?? 0))) : a.length; }
+      if (Object.keys(k).length) o.keep = k; else delete o.keep;
+    }
   },
 });
 
@@ -134,7 +204,7 @@ define({
   args: { objects: { type: 'array' }, space: { type: ['string', 'null'] }, dx: T.num, dy: T.num }, required: ['objects'],
   run(a) {
     const space = a.space && state.objects.has(a.space) ? a.space : null, map = new Map();
-    const list = a.objects.filter((o) => o && typeof o.id === 'string' && (o.kind === 'line' || o.kind === 'shape' || o.kind === 'group'));
+    const list = a.objects.filter((o) => o && typeof o.id === 'string' && (o.kind === 'line' || o.kind === 'shape' || o.kind === 'group' || (o.kind === 'joint' && Array.isArray(o.at))));
     for (const o of list) map.set(o.id, newId());
     const top = [];
     for (const src of list) {
@@ -147,6 +217,7 @@ define({
         if (!c.bind) top.push(c.id);
       }
       if (c.on) { if (!map.has(c.on)) continue; c.on = map.get(c.on); }
+      if (c.kind === 'joint') { if (!c.at.every((q) => map.has(q.id))) continue; c.at = c.at.map((q) => ({ ...q, id: map.get(q.id) })); if (top.at(-1) === c.id) top.pop(); }
       if (c.bind) { if (!map.has(c.bind.from.id) || !map.has(c.bind.to.id)) continue; c.bind = { from: { ...c.bind.from, id: map.get(c.bind.from.id) }, to: { ...c.bind.to, id: map.get(c.bind.to.id) } }; }
       if (c.kind === 'group') for (const side of ['ins', 'outs']) for (const p of c.ports?.[side] ?? []) if (p.inner && map.has(p.inner.id)) p.inner.id = map.get(p.inner.id);
       state.objects.set(c.id, c);
@@ -176,7 +247,7 @@ define({
     if (o.code != null) (o.stash ??= {})[o.role] = o.code;
     o.role = a.role;
     if (a.role === 'note') o.text ??= '';
-    const fresh = { path: PRESETS.path, code: PRESETS.blank, score: BRUSHES.glissando, event: EVENT }[a.role];
+    const fresh = { path: PRESETS.path, code: PRESETS.blank, score: BRUSHES.glissando, event: EVENT, junction: JUNCTION }[a.role];
     if (fresh) { o.code = o.stash?.[a.role] ?? fresh; o.params ??= {}; } else delete o.code;
     prune(o);
     return true;
@@ -188,7 +259,7 @@ define({
   args: { id: T.id, code: T.str }, required: ['id', 'code'],
   run(a) {
     const o = state.objects.get(a.id);
-    if (!o || !['code', 'path', 'score', 'event'].includes(o.role)) return false;
+    if (!o || !['code', 'path', 'score', 'event', 'junction'].includes(o.role)) return false;
     o.code = a.code; o.params ??= {};
     parseBlanket(o.code);
     prune(o);
@@ -331,6 +402,7 @@ define({
     const add = (id) => { if (map.has(id) || !state.objects.has(id)) return; map.set(id, null); order.push(id); for (const o of [...state.objects.values()]) if (o.space === id) add(o.id); };
     for (const id of a.ids) if (!state.objects.get(id)?.bind) add(id);
     for (const w of state.objects.values()) if (w.bind && !map.has(w.id) && map.has(w.bind.from.id) && map.has(w.bind.to.id)) { map.set(w.id, null); order.push(w.id); }
+    for (const j of state.objects.values()) if (j.kind === 'joint' && !map.has(j.id) && j.at.every((q) => map.has(q.id))) { map.set(j.id, null); order.push(j.id); }
     for (const id of order) map.set(id, newId());
     const top = [];
     for (const id of order) {
@@ -341,6 +413,7 @@ define({
       else { if (!c.bind) top.push(c.id); c.off = [(c.off?.[0] ?? 0) + (a.dx ?? 0), (c.off?.[1] ?? 0) + (a.dy ?? 0)]; }
       if (c.bind) { c.bind.from.id = map.get(c.bind.from.id); c.bind.to.id = map.get(c.bind.to.id); }
       if (c.on && map.has(c.on)) c.on = map.get(c.on);
+      if (c.kind === 'joint') { c.at = c.at.map((q) => ({ ...q, id: map.get(q.id) })); if (top.includes(c.id)) top.splice(top.indexOf(c.id), 1); }
       for (const side of ['ins', 'outs']) for (const p of c.ports?.[side] ?? []) p.inner.id = map.get(p.inner.id) ?? p.inner.id;
       state.objects.set(c.id, c);
     }
@@ -356,6 +429,7 @@ define({
     const take = (id) => { if (gone.has(id) || !state.objects.has(id)) return; gone.add(id); for (const o of state.objects.values()) if (o.space === id) take(o.id); };
     a.ids.forEach(take);
     for (const o of state.objects.values()) if (o.role === 'traveler' && gone.has(o.on)) gone.add(o.id); // a traveler goes with its line
+    for (const j of [...state.objects.values()]) if (j.kind === 'joint' && !gone.has(j.id) && j.at.some((q) => gone.has(q.id))) dropPlaces(j, gone);
     for (const w of state.objects.values()) {
       if (w.bind && !gone.has(w.id) && (gone.has(w.bind.from.id) || gone.has(w.bind.to.id))) unbind(w);
     }
@@ -416,12 +490,23 @@ export const take = { type: 'underspace-take', version: 1, clips: [], undone: []
 const t0 = performance.now();
 let batchId = 0, batchSeq = 0;
 
+// A command, then the constraints it may have broken are solved again, in the
+// same way on every replay, so a take gives the same drawing.
+function runCmd(cmd, args, by) {
+  const result = cmd.run(args, by);
+  if (cmd.record && cmd.name !== 'select.set') {
+    const hold = cmd.hold ? cmd.hold(args) : args.ids ?? (args.id ? [args.id] : []);
+    settle(state.objects, new Set(hold), ptsOf);
+  }
+  return result;
+}
+
 // call(name, args, by): the one way to do anything. `by` says who: 'human',
 // 'assistant', an agent or model name.
 export function call(name, args = {}, by = 'human') {
   const cmd = commands.get(name);
   if (!cmd) throw new Error(`unknown command: ${name}`);
-  const result = cmd.run(args, by);
+  const result = runCmd(cmd, args, by);
   if (cmd.record) {
     const clip = { t: +((performance.now() - t0) / 1000).toFixed(3), name, args: structuredClone(args), by };
     if (batchId) clip.batch = batchId;
@@ -444,7 +529,7 @@ function changed() { state.version++; for (const fn of listeners) fn(); }
 function rerun() {
   reset();
   for (const clip of take.clips) {
-    try { commands.get(clip.name)?.run(structuredClone(clip.args), clip.by); } catch (e) { console.warn('take:', clip.name, e.message); }
+    try { const cmd = commands.get(clip.name); if (cmd) runCmd(cmd, structuredClone(clip.args), clip.by); } catch (e) { console.warn('take:', clip.name, e.message); }
   }
   changed();
 }
