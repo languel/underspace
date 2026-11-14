@@ -29,6 +29,7 @@ import { read as readScore } from './score.js';
 import * as sound from './sound.js';
 import { createPlay, nearestU } from './play.js';
 import { icon } from './icons.js';
+import { createPoints, without } from './points.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
 import { SCULPTS, sculptMark, effectiveSculpt } from './ink/sculpt.js';
@@ -62,6 +63,7 @@ let lines = [];       // ink in canvas coordinates: { id, pts, color, width }
 let ink3d = [];       // lines inside targets: { id, scene, pts }
 let sceneList = [], dots = []; // dots: [x, y] a path's cursor, [x, y, h] a score's playhead
 let inkItems = [];    // brushed marks, for the 2D ink layer
+let pointSrc = [];    // lines whose control points the points tool shows: { o, pts, pen, xf } or { o, pts, pen, scene }
 let inkColor = '#1d1c1a', lastCam = '';
 let lastSig = '', dragSig = '', run = null, orbit = null;
 
@@ -87,6 +89,7 @@ function walk(space, xf) {
       // A brushed line is painted on the ink layer; here it is only something to pick, and an outline while selected.
       if (brushed) inkItems.push(inkItem(o, element(raw, penOf(o), { closed: !!o.closed, color: st.stroke ?? inkColor }), xf, st));
       lines.push({ id: o.id, pts, color: sel ? 'accent' : st.stroke ?? (isWire(o) ? 'hot' : 'ink'), width: brushed ? (sel ? 1 : 0) : st.width ?? (isWire(o) ? 1.6 : 2.2), opacity: brushed ? 1 : st.opacity, fill: o.closed && !brushed ? st.fill : null });
+      if (tool === 'points' && !isWire(o) && !made) pointSrc.push({ o, pts: ptsOf(o), pen: penOf(o), xf });
       const cursor = run.cursors.get(o.id);
       if (cursor) dots.push(view.toScreen(at(xf, cursor)));
       if (!blanket) { vis.set(o.id, { o, face: 'line', xf }); continue; }
@@ -122,6 +125,7 @@ function walk(space, xf) {
         if (m.closed) pts.push(pts[0]);
         marks.push({ pts, color: state.selection.has(m.id) ? 'accent' : m.style?.stroke ?? 'ink' });
         ink3d.push({ id: m.id, scene: o.id, pts });
+        if (tool === 'points') pointSrc.push({ o: m, pts: ptsOf(m), pen: penOf(m), scene: o.id });
         vis.set(m.id, { o: m, face: 'line', scene: o.id });
       }
       // its 3D cursor, when the drawing plane hangs from it
@@ -172,7 +176,7 @@ function frame() {
   for (const [id, out] of played.out) { step.report(id, { out, error: played.errors.get(id) ?? '' }); if (out.u != null) playSig += out.x * 3 + out.y * 7; }
   for (const [id, when] of playEngine.hitAt) if (performance.now() - when < 160) playSig += when + id.length;
   run = step(state.objects, performance.now() / 1000);
-  vis = new Map(); spaces = [{ id: null, kind: 'canvas', xf: ROOT }]; lines = []; ink3d = []; sceneList = []; dots = []; inkItems = [];
+  vis = new Map(); spaces = [{ id: null, kind: 'canvas', xf: ROOT }]; lines = []; ink3d = []; sceneList = []; dots = []; inkItems = []; pointSrc = [];
   walk(null, ROOT);
   // Lines that code makes can change every frame; a cheap fingerprint tells.
   let made = 0;
@@ -185,6 +189,7 @@ function frame() {
   const camKey = `${view.cam.cx},${view.cam.cy},${view.cam.zoom},${view.size.w},${view.size.h},${inkColor}`;
   if (dirty || camKey !== lastCam) { lastCam = camKey; ink.resize(view.size.w, view.size.h); ink.draw(inkItems); }
   view.setScenes(sceneList, dirty);
+  showPoints();
   faces.update(vis, { run, selection: state.selection, w: view.size.w, h: view.size.h });
   while (dotLayer.children.length < dots.length) dotLayer.append(document.createElement('i'));
   while (dotLayer.children.length > dots.length) dotLayer.lastChild.remove();
@@ -261,6 +266,53 @@ function portAt(x, y) {
   return null;
 }
 
+// ---- the points tool --------------------------------------------------------
+
+const handles = createPoints($('handles'));
+// The handles of the selected lines, or with no line selected, of every line.
+function showPoints() {
+  if (tool !== 'points') { if (handles.shown.length) handles.set([]); return; }
+  const only = pointSrc.some((l) => state.selection.has(l.o.id)), list = [];
+  for (const l of pointSrc) {
+    if (only && !state.selection.has(l.o.id)) continue;
+    l.pts.forEach((p, i) => {
+      const q = l.scene ? view.sceneToScreen(l.scene, p) : view.toScreen(at(l.xf, p));
+      if (q) list.push({ id: l.o.id, i, x: q[0], y: q[1], p, pen: l.pen?.[i], scene: l.scene, xf: l.xf });
+    });
+    if (list.length > 6000) break;
+  }
+  handles.set(list);
+}
+// Where the picked points of each line go when the pointer has moved (dx, dy) pixels.
+function movedPoints(g, dx, dy) {
+  const out = new Map();
+  for (const [id, m] of g.lines) {
+    const pts = m.pts.map((p) => p.slice()), u = m.scene ? 0 : view.unitsPerPx() / m.xf.k;
+    for (const i of m.idx) {
+      const p = m.pts[i];
+      if (!m.scene) { pts[i] = [round(snap(p[0] + dx * u)), round(snap(p[1] - dy * u)), ...p.slice(2)]; continue; }
+      // In a target a point slides on the drawing plane through where it was.
+      const q = view.sceneToScreen(m.scene, p), s = spaces.find((x) => x.id === m.scene);
+      const r = q && s && view.sceneToLocal(m.scene, q[0] + dx, q[1] + dy, s.plane, [p[0], p[1], p[2] ?? 0]);
+      if (r) pts[i] = r.map(round);
+    }
+    out.set(id, { points: pts, pen: m.pen });
+  }
+  return out;
+}
+function removePoints() {
+  batch(() => {
+    for (const [id, idx] of handles.byLine()) {
+      const o = get(id);
+      if (!o) continue;
+      const left = without(ptsOf(o), o.pen, idx);
+      if (left) call('line.set', { id, points: left.points.map((p) => p.map(round)), ...(left.pen ? { pen: left.pen } : {}) });
+      else call('object.remove', { ids: [id] });
+    }
+  });
+  handles.picked.clear();
+}
+
 // ---- gestures: what a press means depends on what is under it --------------
 
 let tool = 'select';
@@ -283,6 +335,7 @@ function setTool(name) {
     if (m && m !== st.current) { st.current = m; paintStack(st); setSetting('stacks', { ...settings.stacks, [key]: name }); }
   }
   pad.dataset.tool = name;
+  if (name !== 'points') { handles.clear(); handles.hover(null); }
   if (name !== 'sculpt') ring.hidden = true;
 }
 function showMarquee(a, b) {
@@ -317,7 +370,13 @@ pad.addEventListener('pointerdown', (e) => {
   try { pad.setPointerCapture(e.pointerId); } catch {} // a scripted pointer has nothing to capture
   if (e.pointerType === 'touch') {
     touches.set(e.pointerId, p);
-    if (touches.size === 2) { cancelGesture(); gesture = { kind: 'pinch' }; return; }
+    if (touches.size === 2) {
+      cancelGesture();
+      // Over a target that is selected or open, two fingers move its camera: pinch zooms, moving pans.
+      const [a, b] = [...touches.values()], s = spaceAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+      gesture = { kind: 'pinch', scene: s.kind === 'scene' && s.focused ? { id: s.id, h: s.px.h } : null };
+      return;
+    }
   }
   // In a render target the mouse works as in Blender: middle-drag orbits, with
   // Shift it pans, with Ctrl it zooms. Alt+left-drag stands in for the middle button.
@@ -328,8 +387,35 @@ pad.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     return;
   }
-  if (e.button === 1 || (e.button === 0 && (spaceKey || tool === 'pan'))) { gesture = { kind: 'pan', last: p }; spaceUsed = true; return; }
+  // On the canvas the same hands: Alt+Shift-drag pans, as the middle button and Space do;
+  // Ctrl+middle or Alt+Ctrl-drag zooms about where it began.
+  const zoomDrag = (e.button === 1 || (e.button === 0 && e.altKey)) && (e.ctrlKey || e.metaKey);
+  if (zoomDrag) { gesture = { kind: 'zoom', start: p, last: p }; e.preventDefault(); return; }
+  if (e.button === 1 || (e.button === 0 && (spaceKey || tool === 'pan' || (e.altKey && e.shiftKey)))) { gesture = { kind: 'pan', last: p }; spaceUsed = true; return; }
   if (e.button !== 0) return;
+
+  if (tool === 'points') {
+    handles.hover(null);
+    const h = handles.at(p[0], p[1]);
+    if (h) {
+      // Press a handle to pick it (Shift adds or takes away), then drag what is picked.
+      const k = handles.key(h.id, h.i);
+      if (e.shiftKey) { if (handles.picked.has(k)) handles.picked.delete(k); else handles.picked.add(k); }
+      else if (!handles.picked.has(k)) { handles.picked.clear(); handles.picked.add(k); }
+      const lines = new Map();
+      for (const [id, idx] of handles.byLine()) {
+        const src = pointSrc.find((l) => l.o.id === id);
+        if (src) lines.set(id, { pts: src.pts, pen: src.pen, idx, scene: src.scene, xf: src.xf });
+      }
+      gesture = { kind: 'points', lines, start: p, moved: false, next: null };
+      return;
+    }
+    // A line picks that line, so only its points show; anywhere else boxes points.
+    const id = pick(p[0], p[1]);
+    if (id && isLine(get(id))) { if (!e.shiftKey) handles.picked.clear(); call('select.set', { ids: e.shiftKey ? [...new Set([...state.selection, id])] : [id] }); }
+    else gesture = { kind: 'pmarquee', start: p, end: p, add: e.shiftKey };
+    return;
+  }
 
   const here = spaceAt(p[0], p[1]), port = portAt(p[0], p[1]);
   // A drag that starts on a port draws a connector, whatever the tool.
@@ -379,14 +465,21 @@ pad.addEventListener('pointermove', (e) => {
     if (gesture?.kind === 'pinch' && touches.size === 2) {
       const other = [...touches.entries()].find(([id]) => id !== e.pointerId)[1];
       const d0 = Math.hypot(before[0] - other[0], before[1] - other[1]), d1 = Math.hypot(p[0] - other[0], p[1] - other[1]), u = view.unitsPerPx();
-      view.cam.cx -= (p[0] - before[0]) / 2 * u; view.cam.cy += (p[1] - before[1]) / 2 * u;
-      if (d0 > 1) view.zoomAt((p[0] + other[0]) / 2, (p[1] + other[1]) / 2, d1 / d0);
+      if (gesture.scene) {
+        const { id, h } = gesture.scene;
+        let c = navigate(camOf(get(id)), 'pan', (p[0] - before[0]) / 2, (p[1] - before[1]) / 2, h);
+        if (d0 > 1 && d1 > 1) c = { ...c, dist: Math.max(0.5, Math.min(400, c.dist * d0 / d1)) };
+        orbit = { ...c, id };
+      } else {
+        view.cam.cx -= (p[0] - before[0]) / 2 * u; view.cam.cy += (p[1] - before[1]) / 2 * u;
+        if (d0 > 1) view.zoomAt((p[0] + other[0]) / 2, (p[1] + other[1]) / 2, d1 / d0);
+      }
     }
     touches.set(e.pointerId, p);
   }
   ring.hidden = tool !== 'sculpt';
   if (tool === 'sculpt') ring.style.cssText = `left:${p[0]}px;top:${p[1]}px;width:${settings.sculptRadius * 2}px;height:${settings.sculptRadius * 2}px`;
-  if (!gesture) { pad.dataset.over = portAt(p[0], p[1]) ? 'port' : ''; return; }
+  if (!gesture) { pad.dataset.over = portAt(p[0], p[1]) ? 'port' : ''; if (tool === 'points') handles.hover(handles.at(p[0], p[1])); return; }
   const g = gesture;
   if (g.kind === 'sculpt') {
     const a = toSpace(g.s, g.last[0], g.last[1]), b = toSpace(g.s, p[0], p[1]), c = toSpace(g.s, g.start[0], g.start[1]);
@@ -441,7 +534,14 @@ pad.addEventListener('pointermove', (e) => {
     dragSig = w + ',' + h;
   } else if (g.kind === 'nav3d') {
     orbit = { id: g.id, ...navigate(g.cam, g.mode, p[0] - g.start[0], p[1] - g.start[1], g.h) };
-  } else if (g.kind === 'rect' || g.kind === 'marquee') { g.end = p; showMarquee(g.start, g.end); }
+  } else if (g.kind === 'zoom') {
+    view.zoomAt(g.start[0], g.start[1], Math.exp(-(p[1] - g.last[1]) * 0.01)); g.last = p;
+  } else if (g.kind === 'points') {
+    if (!g.moved && Math.hypot(p[0] - g.start[0], p[1] - g.start[1]) < 3) return;
+    g.moved = true;
+    g.next = movedPoints(g, p[0] - g.start[0], p[1] - g.start[1]);
+    setLive(g.next); dragSig = 'points' + p.join();
+  } else if (g.kind === 'rect' || g.kind === 'marquee' || g.kind === 'pmarquee') { g.end = p; showMarquee(g.start, g.end); }
 });
 
 // A target's camera after an orbit, pan or zoom of (dx, dy) pixels. h is the target's height on screen.
@@ -482,6 +582,20 @@ function endGesture(e) {
   gesture = null;
   marquee.hidden = true;
   if (!g) return;
+  if (g.kind === 'pinch' && g.scene) { commitCam(); return; }
+  if (g.kind === 'points') {
+    setLive(null); dragSig = '';
+    if (g.moved && g.next) batch(() => { for (const [id, m] of g.next) call('line.set', { id, points: m.points, ...(m.pen && m.pen.length === m.points.length ? { pen: m.pen } : {}) }); });
+    return;
+  }
+  if (g.kind === 'pmarquee') {
+    const [x0, x1] = [Math.min(g.start[0], g.end[0]), Math.max(g.start[0], g.end[0])], [y0, y1] = [Math.min(g.start[1], g.end[1]), Math.max(g.start[1], g.end[1])];
+    if (!g.add) handles.picked.clear();
+    if (x1 - x0 > 3 || y1 - y0 > 3) for (const h of handles.within(x0, y0, x1, y1)) handles.picked.add(handles.key(h.id, h.i));
+    else if (!g.add && state.selection.size) call('select.set', { ids: [] }); // a click on nothing: all lines' points again
+    dragSig = 'picked' + handles.picked.size + Math.random();
+    return;
+  }
   if (g.kind === 'sculpt') {
     setLive(null); dragSig = '';
     const changed = [...g.marks.values()].filter((mk) => mk.changed);
@@ -557,19 +671,33 @@ function addShape(s, make, start, end, extra = {}) {
 // orbit, with Shift they pan, a pinch or the wheel zooms.
 const isMouseWheel = (e) => settings.wheel === 'zoom' || (settings.wheel === 'auto' && (e.deltaMode !== 0 || (e.deltaX === 0 && e.wheelDeltaY && Math.abs(e.wheelDeltaY) % 120 === 0)));
 let wheelTimer = 0;
+// A pinch at p by factor f (> 1 closer): a focused target's camera, else the canvas.
+function pinchAt(p, f) {
+  const s = spaceAt(p[0], p[1]);
+  if (s.kind === 'scene' && s.focused && !gesture) {
+    const o = get(s.id), cam = camOf(o);
+    orbit = { ...cam, id: o.id, dist: Math.max(0.5, Math.min(400, cam.dist / f)) };
+    clearTimeout(wheelTimer); wheelTimer = setTimeout(commitCam, 250);
+  } else view.zoomAt(p[0], p[1], f);
+}
+// Safari reports a trackpad pinch as gesture events, not as Ctrl+wheel.
+let gestureScale = 1;
+stage.addEventListener('gesturestart', (e) => { e.preventDefault(); gestureScale = 1; });
+stage.addEventListener('gesturechange', (e) => { e.preventDefault(); if (laidOut !== state.version) frame(); pinchAt(local(e), e.scale / gestureScale); gestureScale = e.scale; });
+addEventListener('gesturestart', (e) => e.preventDefault());
 function onWheel(e) {
   if (e.target.closest?.('textarea, .panel, .menu') && !(e.ctrlKey || e.metaKey)) return; // let text scroll
   e.preventDefault();
   if (laidOut !== state.version) frame();
   const p = local(e), pinch = e.ctrlKey || e.metaKey, s = spaceAt(p[0], p[1]);
+  if (pinch) { pinchAt(p, Math.exp(-e.deltaY * 0.01)); return; }
   if (s.kind === 'scene' && s.focused && !gesture) {
     const o = get(s.id), cam = camOf(o);
     orbit = { id: o.id, ...(pinch || isMouseWheel(e) ? navigate(cam, 'zoom', 0, e.deltaY * (pinch ? 1 : 0.25), s.px.h) : navigate(cam, e.shiftKey ? 'pan' : 'orbit', -e.deltaX, -e.deltaY, s.px.h)) };
     clearTimeout(wheelTimer); wheelTimer = setTimeout(commitCam, 250); // one command when the wheel rests
     return;
   }
-  if (pinch) view.zoomAt(p[0], p[1], Math.exp(-e.deltaY * 0.01));
-  else if (isMouseWheel(e)) view.zoomAt(p[0], p[1], Math.exp(-Math.sign(e.deltaY) * Math.min(0.5, Math.abs(e.deltaY) * 0.002 + 0.08)));
+  if (isMouseWheel(e)) view.zoomAt(p[0], p[1], Math.exp(-Math.sign(e.deltaY) * Math.min(0.5, Math.abs(e.deltaY) * 0.002 + 0.08)));
   else { const u = view.unitsPerPx(); view.cam.cx += e.deltaX * u; view.cam.cy -= e.deltaY * u; }
 }
 stage.addEventListener('wheel', onWheel, { passive: false });
@@ -687,7 +815,8 @@ const can = (list, role) => list.some((o) => o.role !== role);
 
 const ACTIONS = [
   // tools
-  { id: 'tool.select', title: 'Select', icon: 'select', keys: 'v', group: 'tool', bar: 'tools', tool: 'select' },
+  { id: 'tool.select', title: 'Select', icon: 'select', keys: 'v', group: 'tool', bar: 'tools', tool: 'select', stack: 'select' },
+  { id: 'tool.points', title: 'Control points', icon: 'points', keys: 'shift+v', group: 'tool', bar: 'tools', tool: 'points', stack: 'select' },
   { id: 'tool.pan', title: 'Pan', icon: 'pan', keys: 'h', group: 'tool', bar: 'tools', tool: 'pan' },
   { id: 'tool.draw', title: 'Draw', icon: 'draw', keys: 'd', group: 'tool', bar: 'tools', tool: 'draw', stack: 'line' },
   { id: 'tool.line', title: 'Straight line', icon: 'line', keys: 'l', group: 'tool', bar: 'tools', tool: 'line', stack: 'line' },
@@ -738,6 +867,7 @@ const ACTIONS = [
   { id: 'hide', title: 'Hide', icon: 'hide', keys: 'shift+h', group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.flag', { ids: ids(c.sel), hidden: true }) },
   { id: 'lock', title: 'Lock', icon: 'lock', keys: 'shift+l', group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.flag', { ids: ids(c.sel), locked: true }) },
   { id: 'showall', title: 'Show and unlock everything', icon: 'clean', group: 'edit', when: () => [...state.objects.values()].some((o) => o.hidden || o.locked), run: () => call('object.flag', { ids: [...state.objects.values()].filter((o) => o.hidden || o.locked).map((o) => o.id), hidden: false, locked: false }) },
+  { id: 'points.remove', title: 'Delete points', icon: 'remove', keys: ['backspace', 'delete'], group: 'edit', hidden: true, when: () => tool === 'points' && handles.picked.size, run: removePoints },
   { id: 'remove', title: 'Delete', icon: 'remove', keys: ['backspace', 'delete'], group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.remove', { ids: ids(c.sel) }) },
   // drawing plane of a target
   ...['view', 'front', 'top', 'side'].map((plane) => ({
@@ -765,6 +895,8 @@ const ACTIONS = [
   ...['path', 'wave'].map((k) => ({ id: 'code.' + k, title: `Path code: ${k}`, icon: 'path', group: 'role', menu: true, when: (c) => c.lines.length && !c.lines.some((o) => o.bind), run: (c) => batch(() => c.lines.forEach((o) => { call('object.role', { id: o.id, role: 'path' }); call('object.code', { id: o.id, code: PRESETS[k] }); })) })),
   // navigation
   { id: 'enter', title: 'Go into', icon: 'enter', keys: 'enter', group: 'nav', menu: true, when: (c) => c.one?.rect || (c.one && blanketOf(c.one)), run: (c) => frameIds([c.one.id], 0.82) },
+  { id: 'points.none', title: 'Unpick points', keys: 'escape', group: 'nav', hidden: true, when: () => tool === 'points' && handles.picked.size, run: () => handles.picked.clear() },
+  { id: 'points.all', title: 'Pick every point shown', keys: 'mod+a', group: 'nav', hidden: true, when: () => tool === 'points', run: () => { for (const h of handles.shown) handles.picked.add(handles.key(h.id, h.i)); } },
   { id: 'deselect', title: 'Deselect', keys: 'escape', group: 'nav', when: (c) => c.sel.length, run: () => call('select.set', { ids: [] }) },
   { id: 'up', title: 'Go up a level', icon: 'up', keys: 'escape', group: 'nav', run: goUp },
   { id: 'frame', title: 'Frame the selection', icon: 'frame', keys: ['shift+f', '2'], group: 'nav', menu: true, when: (c) => c.sel.length, run: (c) => frameIds(ids(c.sel), 0.6) },
@@ -967,6 +1099,7 @@ const palette = createPalette($('palette'), { ask, getActions: () => { const c =
 // Context menu: the actions that apply to what was clicked, grouped.
 pad.addEventListener('contextmenu', (e) => {
   e.preventDefault();
+  if (gesture?.kind === 'zoom' || gesture?.kind === 'nav3d') return; // Ctrl+click on a Mac is also a right-click
   const p = local(e), id = pick(p[0], p[1]);
   pointer = p;
   if (id && !state.selection.has(id)) call('select.set', { ids: [id] });

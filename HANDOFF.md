@@ -396,6 +396,24 @@ Added in a sixth pass (14 Nov 2026):
   targets, playing a line at the speed it was drawn, MIDI out, crossing
   events on lines, exit events, one shared clock with scores.
 
+Added in a seventh pass (14 Nov 2026):
+
+- **One set of navigation hands for the canvas and targets.** Alt+Shift-drag
+  pans both (as do middle-drag and Space-drag on the canvas); Ctrl+middle or
+  Alt+Ctrl-drag zooms both. A pinch, by trackpad (Ctrl+wheel in Chrome and
+  Firefox, gesture events in Safari) or by touch, zooms the camera of a
+  target that is selected or open, and the canvas anywhere else; a touch
+  pinch in a target also pans its camera with the fingers' midpoint.
+- **The points tool** (Shift+V, stacked with Select; `src/points.js`): the
+  stored control points of the selected lines, or of every line, as
+  handles (the first is round). Hover reads out index, position and pen
+  pressure. Press to pick (Shift adds), box to pick many, ⌘A picks all
+  shown, drag moves them (in a target, on the drawing plane through each
+  point), Delete removes them (a line left with one point goes), Escape
+  unpicks. Which points are picked is view state, not in the take; edits
+  go through `line.set`. Lines that code makes show no handles. Not yet:
+  inserting points, Bézier tangents, editing a shape's outline.
+
 The owner asked to match Poliplan's functionality "for starters" without
 copying it. Not matched yet: writing your own brushes and sculpt tools in
 the app, rotate and scale of lines, the point and lasso-plane tools,
