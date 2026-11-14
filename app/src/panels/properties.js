@@ -6,8 +6,8 @@ import { h, row, section, glyphButton, numberField, textField, colorField, syncP
 import { ROLES, blanketOf, hasCode, isTarget } from '../object.js';
 import { settings, setSetting } from '../settings.js';
 
-const ROLE_ICON = { event: 'event', traveler: 'traveler', ink: 'ink', connector: 'connector', path: 'path', visual: 'visual', target: 'target', code: 'box', score: 'score', note: 'note' };
-const ROLE_TITLE = { event: 'Event', traveler: 'Traveler', ink: 'Ink', connector: 'Connector', path: 'Path', visual: 'Visual', target: 'Render target', code: 'Code container', score: 'Score', note: 'Note' };
+const ROLE_ICON = { event: 'event', traveler: 'traveler', ink: 'ink', connector: 'connector', path: 'path', visual: 'visual', target: 'target', code: 'box', score: 'score', grid: 'grid', note: 'note' };
+const ROLE_TITLE = { event: 'Event', traveler: 'Traveler', ink: 'Ink', connector: 'Connector', path: 'Path', visual: 'Visual', target: 'Render target', code: 'Code container', score: 'Score', grid: 'Grid frame', note: 'Note' };
 // Choose an ink brush and set its parameters. `role` is 'line' or 'plane'.
 function brushSection(app, role, id, params, onBrush, onParam) {
   const rows = [row('brush', choice([['', 'plain'], ...app.brushesFor(role).map((b) => [b, app.INK[b].label])], id ?? '', (v) => onBrush(v || null)))];
@@ -48,7 +48,13 @@ export function toolProps(app, tool) {
     out.push(brushSection(app, brushKey === 'brush' ? 'line' : 'plane', id, settings.brushParams[id], (v) => setSetting(brushKey, v ?? ''), (k, v) => setSetting('brushParams', { ...settings.brushParams, [id]: { ...settings.brushParams[id], [k]: v } })));
   }
   else out.push(section(TOOL_TITLE[tool] ?? tool));
-  out.push(section('Grid', row('show', check('grid')), row('snap', check('snap')), row('size', numberField(settings.gridSize, (v) => setSetting('gridSize', Math.max(0.05, v)), { step: 0.25, min: 0.05 }))));
+  // the global grid (part of the drawing: grid.set) and how it is shown (a preference)
+  const g = app.state.grid, set = (k) => (v) => app.call('grid.set', { [k]: v });
+  out.push(section('Grid', row('show', check('grid')), row('snap', check('snap')),
+    row('cell', numberField(g.cell, set('cell'), { step: 0.25, min: 0.05 })), row('sub', numberField(g.sub, set('sub'), { step: 1, min: 1 })),
+    row('beats a cell', numberField(g.beats, set('beats'), { step: 0.25, min: 0 })), row('bars', numberField(g.bars, set('bars'), { step: 1, min: 0 })),
+    row('rows', numberField(g.rows, set('rows'), { step: 1, min: 0 })),
+    row('measure', choice([['0', 'along'], ['1', 'right angles'], ['2', 'across']], String(g.metric), (v) => app.call('grid.set', { metric: +v })))));
   return out;
 }
 

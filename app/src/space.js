@@ -15,11 +15,13 @@ import { BRUSHES as INK } from './ink/brushes.js';
 import { spec, apply, applyRect } from './transform.js';
 import { settle, JUNCTION, isCurve, curveOf, measure, atU } from './joints.js';
 import { DEFAULT_MUSIC, scaleName } from './music.js';
+import { DEFAULT_GRID, GRID, GRID_KEYS } from './grid.js';
 import { INSTRUMENTS } from './instruments.js';
 
 export const state = {
   objects: new Map(),   // id -> object, see object.js
   music: { ...DEFAULT_MUSIC }, // the context everything is heard in (music.js)
+  grid: { ...DEFAULT_GRID },   // the global grid: how space, time and pitch are quantized (grid.js)
   clips: new Map(),     // id -> a recorded clip: { id, name, at (beats), notes: [{ beat, midi, vel, len }] }
   selection: new Set(),
   n: 0,                 // ids are counted, so a replay gives the same ids
@@ -92,7 +94,7 @@ define({
 
 define({
   name: 'shape.add',
-  doc: 'Add a shape. role: "visual" (something to look at), "code" (a code container; give code, or a preset name), "target" (a render target with a 3D interior), "score" (a frame that plays the lines drawn in it; its code is a brush), "note" (text).',
+  doc: 'Add a shape. role: "visual" (something to look at), "code" (a code container; give code, or a preset name), "target" (a render target with a 3D interior), "score" (a frame that plays the lines drawn in it; its code is a brush), "grid" (a frame whose parameters quantize space, time and pitch inside it), "event", "note" (text).',
   args: { space: T.space, rect: T.rect, shape: { enum: ['rect', 'ellipse'] }, role: { enum: ROLES.shape }, code: T.str, text: T.str, style: T.style, brush: T.brush, preset: { enum: [...Object.keys(PRESETS), ...Object.keys(BRUSHES)] } },
   required: ['rect'],
   run(a) {
@@ -101,6 +103,7 @@ define({
     if (o.role === 'score') { o.code = a.code ?? BRUSHES[a.preset] ?? BRUSHES.glissando; o.params = {}; }
     if (o.role === 'note') o.text = a.text ?? '';
     if (o.role === 'event') { o.code = a.code ?? EVENT; o.params = {}; }
+    if (o.role === 'grid') { o.code = a.code ?? GRID; o.params = {}; }
     if (o.role === 'traveler') return null; // a traveler needs a line: traveler.add
     if (a.style) o.style = { ...a.style };
     if (a.brush?.id && INK[a.brush.id]) o.brush = { id: a.brush.id, params: { ...a.brush.params } };
@@ -117,7 +120,7 @@ define({
     if (!line || line.kind !== 'line' || line.bind) return null;
     const u = Math.max(0, Math.min(1, a.u ?? 0)), pts = ptsOf(line), at = along(line.style?.path === 'straight' ? pts : smooth(pts), u), size = a.size > 0 ? a.size : 0.5;
     const o = { id: newId(), kind: 'shape', role: 'traveler', shape: 'ellipse', space: line.space, on: line.id, rect: { cx: round(at[0]), cy: round(at[1]), w: size, h: size }, params: { start: round(u) } };
-    if (a.dur > 0) o.params.dur = a.dur;
+    if (Number.isFinite(a.dur) && a.dur >= 0) o.params.dur = a.dur; // 0: its time comes from the grid
     if (Number.isFinite(a.loop)) o.params.loop = a.loop;
     state.objects.set(o.id, o);
     return o.id;
@@ -255,7 +258,7 @@ define({
     if (a.role === 'visual') delete o.keeps;
     o.role = a.role;
     if (a.role === 'note') o.text ??= '';
-    const fresh = { path: PRESETS.path, code: PRESETS.blank, score: BRUSHES.glissando, event: EVENT, junction: JUNCTION }[a.role];
+    const fresh = { path: PRESETS.path, code: PRESETS.blank, score: BRUSHES.glissando, event: EVENT, junction: JUNCTION, grid: GRID }[a.role];
     if (fresh) { o.code = o.stash?.[a.role] ?? fresh; o.params ??= {}; } else delete o.code;
     prune(o);
     return true;
@@ -267,7 +270,7 @@ define({
   args: { id: T.id, code: T.str }, required: ['id', 'code'],
   run(a) {
     const o = state.objects.get(a.id);
-    if (!o || !['code', 'path', 'score', 'event', 'junction'].includes(o.role)) return false;
+    if (!o || !['code', 'path', 'score', 'event', 'junction', 'grid'].includes(o.role)) return false;
     o.code = a.code; o.params ??= {};
     parseBlanket(o.code);
     prune(o);
@@ -503,6 +506,11 @@ define({
   },
 });
 define({
+  name: 'grid.set', doc: 'Set the global grid (grid frames override it inside them): cell (canvas units), sub (snap points a cell), beats (beats a cell of path; 0: travelers keep their own dur), metric (0 along a path, 1 at right angles, 2 across only), bars (round path times to this many beats; 0 off), rows (scale degrees a cell up; 0: continuous pitch), snap (1: drawing snaps).',
+  args: Object.fromEntries(GRID_KEYS.map((k) => [k, T.num])),
+  run(a) { for (const k of GRID_KEYS) if (Number.isFinite(a[k])) state.grid[k] = k === 'cell' ? Math.max(0.01, a[k]) : k === 'sub' ? Math.max(1, Math.round(a[k])) : Math.max(0, a[k]); },
+});
+define({
   name: 'clip.add', doc: 'Add a clip of notes to the timeline (what recording makes). at: where it starts, in beats; each note { beat (from the clip\'s start), midi, vel, len (beats) }.',
   args: { notes: { type: 'array' }, at: T.num, name: T.str }, required: ['notes'],
   run(a) {
@@ -531,7 +539,7 @@ define({
 // Run a command from inside another, without recording it separately.
 export const exec = (name, args) => commands.get(name).run(args);
 
-function reset() { state.objects.clear(); state.selection.clear(); state.n = 0; state.music = { ...DEFAULT_MUSIC }; state.clips.clear(); }
+function reset() { state.objects.clear(); state.selection.clear(); state.n = 0; state.music = { ...DEFAULT_MUSIC }; state.grid = { ...DEFAULT_GRID }; state.clips.clear(); }
 
 // ---- the take ---------------------------------------------------------------
 

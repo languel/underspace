@@ -50,7 +50,7 @@ export function createRunner() {
     const next = new Map(), errors = new Map(), cursors = new Map(), shown = new Map();
     for (const o of objects.values()) {
       // Travelers, events and junctions are moved and fired by the play engine, which reports here.
-      if (o.role === 'traveler' || o.role === 'event' || o.role === 'junction') { next.set(o.id, external.get(o.id) ?? {}); if (externalErrors.get(o.id)) errors.set(o.id, externalErrors.get(o.id)); continue; }
+      if (o.role === 'traveler' || o.role === 'event' || o.role === 'junction' || o.role === 'grid') { next.set(o.id, external.get(o.id) ?? {}); if (externalErrors.get(o.id)) errors.set(o.id, externalErrors.get(o.id)); continue; }
       if (!hasCode(o) || o.code == null) continue;
       if (o.role === 'score' || sketchKind(o.code)) {
         next.set(o.id, external.get(o.id) ?? {});

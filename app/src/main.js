@@ -34,6 +34,7 @@ import { createModal, apply, applyRect } from './transform.js';
 import { snapPoints, snapBox, toSVG, toP5 } from './selection.js';
 import { showPie, recognize } from './pie.js';
 import { createTransport } from './transport.js';
+import { GRID, GRID_PRESETS, gridAt, pathBeats, snapPoint, fitScale, isGrid } from './grid.js';
 import { createTimeline } from './timeline.js';
 import { pitch as pitchOf, step as stepOf, snap as snapOf, secPerBeat, degrees } from './music.js';
 import { midiFile, readNotes, createMidiOut } from './midi.js';
@@ -50,6 +51,7 @@ const stage = $('stage'), pad = $('pad'), marquee = $('marquee'), dotLayer = $('
 const STORE = 'underspace-take';
 const round = (v) => Math.round(v * 1e4) / 1e4;
 const get = (id) => state.objects.get(id);
+const gridCell = () => state.grid.cell; // the global grid's cell, in canvas units
 
 const onParam = (id, name, value) => call('object.set', { id, name, value });
 const onCode = (id, code) => { step.restart(id); call('object.code', { id, code }); };
@@ -128,6 +130,15 @@ function walk(space, xf) {
     }
     const face = Math.max(px.w, px.h) < FAR ? 'far' : (px.w > view.size.w * 0.42 || px.h > view.size.h * 0.5) ? 'near' : 'mid';
     vis.set(o.id, { o, face, px, xf, blanket });
+    if (o.role === 'grid') {
+      // a grid frame: its outline, and its cells (sub-points as dots would be too many)
+      const g = paramsOf(o), cell = Math.max(0.01, g.cell ?? 1), x0 = r.cx - r.w / 2, y0 = r.cy - r.h / 2, nx = Math.floor(r.w / cell + 1e-6), ny = Math.floor(r.h / cell + 1e-6);
+      lines.push({ id: o.id, pts: outline(r, 'rect').map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'muted', width: 1.2 });
+      if (nx <= 200 && ny <= 200 && cell * xf.k / upp > 5) {
+        for (let i = 1; i < nx + (r.w / cell - nx > 1e-6 ? 1 : 0); i++) lines.push({ pts: [at(xf, [x0 + i * cell, y0]), at(xf, [x0 + i * cell, y0 + r.h])], color: 'muted', width: 0.6, opacity: 0.45 });
+        for (let j = 1; j < ny + (r.h / cell - ny > 1e-6 ? 1 : 0); j++) lines.push({ pts: [at(xf, [x0, y0 + j * cell]), at(xf, [x0 + r.w, y0 + j * cell])], color: 'muted', width: 0.6, opacity: 0.45 });
+      }
+    }
     if (o.role === 'score') { const pos = scorePos(o); if (pos >= 0 && face !== 'far') dots.push([px.l + px.w * pos, px.t, px.h]); }
     if (o.kind === 'group' && face === 'near') {
       const i = innerXf(o), inner = { k: xf.k * i.k, ox: xf.ox + i.ox * xf.k, oy: xf.oy + i.oy * xf.k };
@@ -269,7 +280,7 @@ function catchUp() {
 // What travelers, events and junctions play with: the music context, and notes that are heard, sent and recorded.
 function musicHooks() {
   const m = state.music;
-  return { pointsOf: shownPath, paramsOf, note: playNote, hold: holdNote, cc: (n, v, ch = 1) => midiOut.send([0xb0 | ((ch - 1) & 15), n & 127, Math.max(0, Math.min(127, Math.round(v)))]), spb: secPerBeat(m), grid: settings.gridSize, pitch: (v) => pitchOf(v, m), step: (n, k) => stepOf(n, k, m.scale, m.root), snap: (n) => snapOf(n, m.scale, m.root) };
+  return { pointsOf: shownPath, paramsOf, note: playNote, hold: holdNote, cc: (n, v, ch = 1) => midiOut.send([0xb0 | ((ch - 1) & 15), n & 127, Math.max(0, Math.min(127, Math.round(v)))]), spb: secPerBeat(m), grid: gridCell(), gridAt: (space, p) => gridHere(space, p), pitch: (v) => pitchOf(v, m), step: (n, k) => stepOf(n, k, m.scale, m.root), snap: (n) => snapOf(n, m.scale, m.root) };
 }
 // The instrument a channel plays (the timeline's choice, else the default).
 const instrumentOf = (ch = 1) => state.music.channels?.[ch] ?? DEFAULT_CHANNELS[ch] ?? 'triangle';
@@ -358,7 +369,7 @@ function frame() {
   timeline?.update();
   // The grid is the stage's own background, moved and scaled with the view.
   if (settings.grid) {
-    let cell = settings.gridSize / view.unitsPerPx();
+    let cell = gridCell() / view.unitsPerPx();
     while (cell < 14) cell *= 5;
     const o = view.toScreen([0, 0]);
     stage.style.setProperty('--g', cell.toFixed(2) + 'px');
@@ -394,7 +405,7 @@ function onPath(path, x, y, tol = 7) {
   return false;
 }
 // Open objects show what is in them: they are picked by their edge, not their middle.
-const isOpen = (v) => (v.o.kind === 'group' && v.face === 'near') || (isTarget(v.o) && v.face !== 'far') || (v.o.role === 'score' && v.face !== 'far');
+const isOpen = (v) => (v.o.kind === 'group' && v.face === 'near') || (isTarget(v.o) && v.face !== 'far') || ((v.o.role === 'score' || v.o.role === 'grid') && v.face !== 'far');
 
 function pick(x, y) {
   const free = (id) => !get(id)?.locked;
@@ -534,7 +545,7 @@ function movedPoints(g, dx, dy) {
     const pts = m.pts.map((p) => p.slice()), u = m.scene ? 0 : view.unitsPerPx() / m.xf.k;
     for (const i of m.idx) {
       const p = m.pts[i];
-      if (!m.scene) { pts[i] = [round(snap(p[0] + dx * u)), round(snap(p[1] - dy * u)), ...p.slice(2)]; continue; }
+      if (!m.scene) { pts[i] = snapHere(get(id)?.space ?? null, [p[0] + dx * u, p[1] - dy * u]).map(round).concat(p.slice(2)); continue; }
       // In a target a point slides on the drawing plane through where it was.
       const q = view.sceneToScreen(m.scene, p), s = spaces.find((x) => x.id === m.scene);
       const r = q && s && view.sceneToLocal(m.scene, q[0] + dx, q[1] + dy, s.plane, [p[0], p[1], p[2] ?? 0]);
@@ -652,7 +663,7 @@ function simplifyLines(c, px) {
   });
 }
 function snapSelection(c, mode, k = 1) {
-  const q = settings.gridSize * k;
+  const q = gridCell() * k;
   batch(() => {
     for (const o of c.sel) {
       if (o.bind || o.locked) continue;
@@ -684,6 +695,18 @@ function copyJSON(c) {
   navigator.clipboard?.writeText(JSON.stringify({ underspace: 1, objects }));
 }
 const clip = (text) => navigator.clipboard?.writeText(text);
+
+// Scale lines about their first point so each takes a whole number of bars (the grid's `bars`, else
+// whole beats) in the grid it lies in; a grid that does not time paths counts a cell a beat.
+function fitToGrid(list) {
+  batch(() => {
+    for (const l of list) {
+      const path = shownPath(l), g0 = gridHere(l.space, path[path.length >> 1]), g = g0.beats > 0 ? g0 : { ...g0, beats: 1 };
+      const unit = g.bars > 0 ? g.bars : 1, beats = (pathBeats(path, { ...g, bars: 0 })), target = Math.max(unit, Math.round(beats / unit) * unit), k = fitScale(path, g, target);
+      if (Math.abs(k - 1) > 1e-4) { const p0 = ptsOf(l)[0]; call('object.transform', { ids: [l.id], pivot: [round(p0[0]), round(p0[1])], sx: round(k), sy: round(k) }); }
+    }
+  });
+}
 
 // ---- the hold menu: hold still while drawing to turn the stroke into something --
 
@@ -741,10 +764,14 @@ let gesture = null; // what the pointer is doing between down and up
 let spaceKey = false, spaceUsed = false, spaceAt0 = 0, pointer = null;
 const ring = $('ring'); // the sculpt brush's reach
 const touches = new Map();
-const MAKE = { rect: { role: 'visual', shape: 'rect' }, ellipse: { role: 'visual', shape: 'ellipse' }, code: { role: 'code', shape: 'rect' }, target: { role: 'target', shape: 'rect' }, score: { role: 'score', shape: 'rect' }, note: { role: 'note', shape: 'rect' }, event: { role: 'event', shape: 'ellipse' } };
+const MAKE = { grid: { role: 'grid', shape: 'rect' }, rect: { role: 'visual', shape: 'rect' }, ellipse: { role: 'visual', shape: 'ellipse' }, code: { role: 'code', shape: 'rect' }, target: { role: 'target', shape: 'rect' }, score: { role: 'score', shape: 'rect' }, note: { role: 'note', shape: 'rect' }, event: { role: 'event', shape: 'ellipse' } };
 // The look new lines and shapes take, from the toolbar swatches.
 const newStyle = (fillable) => { const st = {}; if (settings.stroke) st.stroke = settings.stroke; if (fillable && settings.fill) st.fill = settings.fill; if (settings.width !== 2.2) st.width = settings.width; if (!fillable && !settings.smooth) st.path = 'straight'; return Object.keys(st).length ? { style: st } : {}; };
-const snap = (v) => (settings.snap ? Math.round(v / settings.gridSize) * settings.gridSize : v);
+const snap = (v) => (settings.snap ? Math.round(v / gridCell()) * gridCell() : v);
+// The grid in force at a point of a space (a grid frame there, else the global grid), and a point snapped to it
+// when that grid snaps (a frame's snap, or the global snap setting).
+const gridHere = (space, p) => gridAt(state.objects, space, p, state.grid, paramsOf);
+const snapHere = (space, p) => { const g = gridHere(space, p); return g.frame ? (g.snap ? snapPoint(p, g) : p) : settings.snap ? snapPoint(p, g) : p; };
 
 const stacks = new Map(); // stack -> { b, members, current }: tools of one kind share a button
 function setTool(name) {
@@ -1039,7 +1066,10 @@ function endGesture(e) {
     // Keep the points that carry the shape; the curve through them is drawn smooth.
     const keep = g.s.kind === 'scene' ? g.pts.map((_, i) => i) : simplifyIndex(g.pts, settings.simplify * unitsPerPx(g.s));
     const brush = !g.wire && settings.brush && g.s.kind !== 'scene' ? { brush: { id: settings.brush, params: settings.brushParams[settings.brush] ?? {} } } : {};
-    const add = () => call('line.add', { space: g.s.id, points: keep.map((i) => g.pts[i].map(round)), tol: round(tol), ...(g.wire ? {} : { pen: keep.map((i) => g.pen[i]), ...newStyle(false), ...brush }) });
+    // the stroke's ends land on the grid's points when its grid snaps (its middle stays as drawn)
+    const pts = keep.map((i) => g.pts[i]);
+    if (g.s.kind !== 'scene' && !g.wire && pts.length > 1) { pts[0] = snapHere(g.s.id, pts[0]); pts[pts.length - 1] = snapHere(g.s.id, pts[pts.length - 1]); }
+    const add = () => call('line.add', { space: g.s.id, points: pts.map((q) => q.map(round)), tol: round(tol), ...(g.wire ? {} : { pen: keep.map((i) => g.pen[i]), ...newStyle(false), ...brush }) });
     // Held, and let go on a glyph of the ring: the stroke becomes that, in one step.
     const pick = g.pie ? PIE.map((id) => ACTIONS.find((a) => a.id === id))[g.pie.items[g.choice ?? -1] ?? -1] : null;
     g.pie?.close();
@@ -1049,7 +1079,7 @@ function endGesture(e) {
     else if (g.pts.length > 1 || !g.wire) batch(() => { const id = add(); if (id) ends(id); });
   } else if (g.kind === 'line') {
     view.setPreview(null);
-    const flat = g.s.kind !== 'scene', pts = [g.a, g.b].map((q) => q.map((v, i) => round(flat && i < 2 ? snap(v) : v)));
+    const flat = g.s.kind !== 'scene', pts = [g.a, g.b].map((q) => (flat ? snapHere(g.s.id, q) : q).map(round));
     if (Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1], (pts[0][2] ?? 0) - (pts[1][2] ?? 0)) > 1e-3) batch(() => {
       const id = call('line.add', { space: g.s.id, points: pts, tol: flat ? round(14 * unitsPerPx(g.s)) : 0, ...newStyle(false) });
       if (id && isCurve(get(id)) && !(e.ctrlKey || e.metaKey)) { joinEnd(g.s, id, 0, g.start); joinEnd(g.s, id, 1, g.end ?? g.start); }
@@ -1092,10 +1122,10 @@ pad.addEventListener('pointercancel', endGesture);
 // A shape in a flat space, from a drag or (end = null) at a default size.
 function addShape(s, make, start, end, extra = {}) {
   const a = toSpace(s, start[0], start[1]), u = unitsPerPx(s);
-  const size = make.role === 'target' ? [360, 260] : make.role === 'score' ? [460, 240] : make.role === 'code' ? [170, 110] : make.role === 'note' ? [180, 70] : make.role === 'event' ? [90, 90] : [120, 120];
+  const size = make.role === 'target' ? [360, 260] : make.role === 'score' || make.role === 'grid' ? [460, 240] : make.role === 'code' ? [170, 110] : make.role === 'note' ? [180, 70] : make.role === 'event' ? [90, 90] : [120, 120];
   let rect = { cx: a[0], cy: a[1], w: size[0] * u, h: size[1] * u };
   if (end) { const b = toSpace(s, end[0], end[1]); rect = { cx: (a[0] + b[0]) / 2, cy: (a[1] + b[1]) / 2, w: Math.abs(a[0] - b[0]), h: Math.abs(a[1] - b[1]) }; }
-  if (settings.snap && end) { const x0 = snap(rect.cx - rect.w / 2), x1 = snap(rect.cx + rect.w / 2), y0 = snap(rect.cy - rect.h / 2), y1 = snap(rect.cy + rect.h / 2); rect = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(settings.gridSize, x1 - x0), h: Math.max(settings.gridSize, y1 - y0) }; }
+  if (settings.snap && end) { const x0 = snap(rect.cx - rect.w / 2), x1 = snap(rect.cx + rect.w / 2), y0 = snap(rect.cy - rect.h / 2), y1 = snap(rect.cy + rect.h / 2); rect = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(gridCell(), x1 - x0), h: Math.max(gridCell(), y1 - y0) }; }
   for (const k in rect) rect[k] = round(rect[k]);
   return batch(() => {
     const id = call('shape.add', { space: s.id, rect, shape: make.shape, role: make.role, ...(make.role === 'code' ? { preset: settings.codePreset } : make.role === 'score' ? { preset: settings.scoreBrush } : {}), ...(make.role === 'visual' ? { ...newStyle(true), ...(settings.planeBrush ? { brush: { id: settings.planeBrush, params: settings.brushParams[settings.planeBrush] ?? {} } } : {}) } : {}), ...extra });
@@ -1282,6 +1312,10 @@ const ACTIONS = [
   { id: 'tool.target', title: 'Render target', icon: 'target', keys: 't', group: 'tool2', bar: 'tools', tool: 'target', stack: 'object' },
   { id: 'role.score', title: 'Make score', icon: 'score', group: 'role', menu: 'Convert to', when: (c) => c.shapes.length && can(c.shapes, 'score'), run: (c) => setRole(c.shapes, 'score') },
   { id: 'tool.score', title: 'Score', icon: 'score', keys: 's', group: 'tool2', bar: 'tools', tool: 'score', stack: 'object' },
+  { id: 'tool.grid', title: 'Grid frame', icon: 'grid', group: 'tool2', bar: 'tools', tool: 'grid', stack: 'object' },
+  { id: 'role.grid', title: 'Make grid frame', icon: 'grid', group: 'role', menu: 'Convert to', when: (c) => c.shapes.length && can(c.shapes, 'grid') && c.shapes.every((o) => o.kind === 'shape' && !['traveler', 'note'].includes(o.role)), run: (c) => setRole(c.shapes, 'grid') },
+  { id: 'add.grid', title: 'Add grid frame', icon: 'grid', group: 'add', short: 'grid', menu: 'Add', when: (c) => !c.hit, run: (c) => addHere(c, MAKE.grid) },
+  { id: 'grid.fit', title: 'Fit its length to the bars', icon: 'length', group: 'attach', menu: 'Constrain', when: (c) => c.lines.some((l) => isCurve(l) && get(l.space)?.role !== 'target'), run: (c) => fitToGrid(c.lines.filter(isCurve)) },
   { id: 'tool.event', title: 'Event', icon: 'event', keys: 'y', group: 'tool2', bar: 'tools', tool: 'event', stack: 'object' },
   // Make event: the mark itself becomes the event, looking as it did (crossing a line, entering a closed one or a shape, fires it)
   { id: 'role.event', title: 'Make event', icon: 'event', group: 'role', menu: 'Convert to', when: (c) => eventable(c).length > 0, run: (c) => setRole(eventable(c), 'event') },
@@ -1302,7 +1336,7 @@ const ACTIONS = [
   { id: 'line.toCode', title: 'Turn into a code container', icon: 'box', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some(flatLine), run: (c) => linesTo(c, () => ({ role: 'code' })) },
   { id: 'line.straighten', title: 'Straighten', icon: 'straighten', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some((o) => !o.bind && o.points.length > 2), run: (c) => batch(() => { for (const l of c.lines.filter((o) => !o.bind && o.points.length > 2)) { const pts = ptsOf(l); call('line.set', { id: l.id, points: [pts[0], pts[pts.length - 1]].map((p) => p.map(round)), ...(l.pen?.length === pts.length ? { pen: [l.pen[0], l.pen[l.pen.length - 1]] } : {}) }); } }) },
   { id: 'attach.traveler', title: 'Attach a traveler here', icon: 'traveler', keys: 'a', group: 'attach', menu: true, when: (c) => c.lines.length === 1 && !c.lines[0].bind && get(c.lines[0].space)?.role !== 'target', // not inside a 3D space, for now
-    run: (c) => { const l = c.lines[0], s = spaces.find((x) => x.id === l.space) ?? spaces[0], q = toSpace(s, c.p[0], c.p[1]); const id = call('traveler.add', { on: l.id, u: round(nearestU(shownPath(l), q[0], q[1])), size: round(22 * unitsPerPx(s)) }); if (id) call('select.set', { ids: [id] }); } },
+    run: (c) => { const l = c.lines[0], s = spaces.find((x) => x.id === l.space) ?? spaces[0], q = toSpace(s, c.p[0], c.p[1]); const path = shownPath(l), g = gridHere(l.space, path[path.length >> 1]); const id = call('traveler.add', { on: l.id, u: round(nearestU(path, q[0], q[1])), size: round(22 * unitsPerPx(s)), ...(g.beats > 0 ? { dur: 0 } : {}) }); if (id) call('select.set', { ids: [id] }); } },
   { id: 'role.code', title: 'Make code container', icon: 'code', keys: 'c', group: 'role', menu: 'Convert to', when: (c) => c.shapes.length && can(c.shapes, 'code'), run: (c) => setRole(c.shapes, 'code') },
   { id: 'role.path', title: 'Make path', icon: 'path', keys: 'c', group: 'role', menu: 'Convert to', when: (c) => c.lines.length && can(c.lines, 'path'), run: (c) => setRole(c.lines, 'path') },
   { id: 'role.connector', title: 'Make connector', icon: 'connector', keys: 'w', group: 'role', menu: 'Convert to', when: (c) => c.lines.some((o) => !o.bind), run: (c) => setRole(c.lines, 'connector') },
@@ -1568,7 +1602,7 @@ onSettings(() => settingsVersion++);
 const app = {
   state, call, batch, get, tools, PRESETS, BRUSHES, INK, SCULPTS, brushesFor, actions: ACTIONS, onParam, onCode, frameIds, runAction,
   run: () => run, setRole, keysShown: (a) => showKey(a), tool: () => tool, settingsVersion: () => settingsVersion,
-  presetsFor: (o) => (o.role === 'score' ? BRUSHES : o.role === 'junction' ? JUNCTIONS : o.role === 'event' ? EVENTS : PRESETS),
+  presetsFor: (o) => (o.role === 'score' ? BRUSHES : o.role === 'junction' ? JUNCTIONS : o.role === 'event' ? EVENTS : o.role === 'grid' ? GRID_PRESETS : PRESETS),
   addExample(ex) {
     const s = spaces[0], before = new Set(state.objects.keys());
     batch(() => {
@@ -1624,7 +1658,7 @@ timeline = createTimeline($('timeline'), {
   transport, state, call, history, travel, replay, get replaying() { return !!replaying; }, runAction: (id) => runAction(id), get metronome() { return settings.metronome; },
   lanes() {
     const m = state.music, spb = secPerBeat(m), out = [];
-    for (const o of travelers()) { const p = paramsOf(o), line = get(o.on), len = p.speed > 0 && line ? measure(shownPath(line)).total / (p.speed * settings.gridSize) : p.dur; out.push({ id: o.id, kind: 'traveler', name: o.name || 'traveler ' + o.id, at: p.at ?? 0, len: Math.max(0.25, len), repeat: p.loop !== 0 }); }
+    for (const o of travelers()) { const p = paramsOf(o), line = get(o.on), path = line && shownPath(line), len = p.speed > 0 && line ? measure(path).total / (p.speed * gridCell()) : !(p.dur > 0) && line ? pathBeats(path, gridHere(line.space, path[path.length >> 1])) || 8 : p.dur; out.push({ id: o.id, kind: 'traveler', name: o.name || 'traveler ' + o.id, at: p.at ?? 0, len: Math.max(0.25, len), repeat: p.loop !== 0 }); }
     for (const o of scores()) out.push({ id: o.id, kind: 'score', name: o.name || 'score ' + o.id, at: 0, len: passLen(o) / spb, repeat: true, muted: !scorePlaying(o) });
     for (const c of state.clips.values()) { const len = Math.max(1, ...c.notes.map((n) => n.beat + n.len)); out.push({ id: c.id, kind: 'clip', name: c.name, at: clipDrag?.id === c.id ? clipDrag.at : c.at, len, notes: c.notes, muted: c.muted }); }
     return out;
@@ -1730,7 +1764,7 @@ nousInput.addEventListener('change', async () => {
   nousInput.value = '';
   if (!f) return;
   try {
-    const plan = nousPlan(await f.text(), { cell: settings.gridSize, at: view.toWorld(...centre()) });
+    const plan = nousPlan(await f.text(), { cell: gridCell(), at: view.toWorld(...centre()) });
     if (!plan.nodes.length) throw new Error(plan.warnings[0] ?? 'no nodes');
     batch(() => {
       const m = plan.settings, ctx = {};

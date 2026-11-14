@@ -12,6 +12,7 @@
 
 import { along, smooth, rectOf } from './object.js';
 import { measure, atS, tangentS, jointsOn, waysAt, nearestOn } from './joints.js';
+import { pathBeats, cellOf } from './grid.js';
 
 // An event's code runs when a traveler enters it:
 //   ev    { x, y (where on the path's bounds, 0..1, y up), u (how far along), speed, traveler, rider, count }
@@ -25,6 +26,8 @@ import { measure, atS, tangentS, jointsOn, waysAt, nearestOn } from './joints.js
 //   note(midi, vel, seconds, channel): channel 1..16 picks the instrument (the timeline's)
 //   ev.type 'enter', 'cross' (an open line; ev.dir which way) or 'exit' (with the parameter exit 1);
 //   ev.launch(line, dir) sets a new rider off on a line (its id or name).
+//   ev.col, ev.row: the cell of its grid it was reached in; in a grid with rows, pitch() is the row's note.
+// A traveler with dur 0 takes its time from the grid its line lies in (grid.js), line by line.
 //   The parameter lockout (seconds) keeps an event from firing again so soon.
 export const EVENT = `// event
 // out: gate count
@@ -173,7 +176,7 @@ export function createPlay() {
   // One rider of a traveler moves on by `left` (a distance) along its lines.
   // At a joint, the joint's code chooses; the rider may turn, split, go back or stop.
   // Returns the trail it left: points, for events to test against; null where it jumped.
-  function ride(o, rider, all, left, p, objects, measureOf, out, errors) {
+  function ride(o, rider, all, left, p, objects, measureOf, out, errors, speedOf = () => null) {
     let m = measureOf(rider.line);
     const trail = m ? [atS(m, rider.s)] : [];
     for (let hop = 0; hop < 16 && left > 1e-9 && m && !rider.stopped; hop++) {
@@ -203,9 +206,11 @@ export function createPlay() {
         if (d.stop) { rider.stopped = true; break; }
         if (d.back) { rider.dir = -rider.dir; continue; }
         trail.push(null, atS(measureOf(d.go[0].line), d.go[0].u * measureOf(d.go[0].line).total));
-        d.go.slice(1).forEach((w) => { if (all.length < MAX_RIDERS) all.push({ ...rider, n: ++o_n.n, line: w.line, dir: w.dir, s: w.u * measureOf(w.line).total, spawned: true, pending: left }); });
+        // a rider timed by the grid takes each line in that line's own time
+        const sp = (id) => (rider.byGrid ? speedOf(id) ?? rider.speed : rider.speed);
+        d.go.slice(1).forEach((w) => { if (all.length < MAX_RIDERS) all.push({ ...rider, n: ++o_n.n, line: w.line, dir: w.dir, s: w.u * measureOf(w.line).total, speed: sp(w.line), spawned: true, pending: left }); });
         const w = d.go[0];
-        rider.line = w.line; rider.dir = w.dir; m = measureOf(w.line); rider.s = w.u * m.total;
+        rider.line = w.line; rider.dir = w.dir; m = measureOf(w.line); rider.s = w.u * m.total; rider.speed = sp(w.line);
         continue;
       }
       if (s1 >= 0 && s1 <= m.total) { walk(s1); rider.s = s1; break; }
@@ -240,6 +245,9 @@ export function createPlay() {
         return measures.get(id);
       };
       const shownOf = new Map(), pathOf = (l) => { if (!shownOf.has(l.id)) shownOf.set(l.id, hooks.pointsOf(l)); return shownOf.get(l.id); };
+      // The grid a line lies in times it: its length in cells, beats a cell, rounded to bars (grid.js).
+      const gridOf = (l) => { const pts = pathOf(l), mid = pts[pts.length >> 1]; return hooks.gridAt?.(l.space, mid) ?? null; };
+      const gridSpeed = (id) => { const l = objects.get(id), m = measureOf(id), g = l && gridOf(l), b = g && pathBeats(pathOf(l), g); return b > 0 ? m.total / (b * spb) : null; };
       for (const o of objects.values()) {
         if (o.role !== 'traveler') continue;
         const line = objects.get(o.on), start = line && measureOf(line.id);
@@ -249,8 +257,10 @@ export function createPlay() {
         // At rest at the start (not playing, at 0), or sent back in time: it starts afresh.
         let st = net.get(o.id);
         if ((!playing && t === 0) || !st || t < st.t || st.on !== line.id) {
-          const speed = p.speed > 0 ? (p.speed * grid) / spb : start.total / Math.max(0.05, (p.dur ?? 8) * spb);
-          st = { on: line.id, t, riders: [{ n: ++o_n.n, line: line.id, s: Math.max(0, Math.min(1, p.start ?? 0)) * start.total, dir: 1, speed, base: speed, skip: null, stopped: false }] };
+          // dur 0: the time comes from the grid the line lies in (else 8 beats)
+          const byGrid = !(p.speed > 0) && (p.dur ?? 8) <= 0, gs = byGrid ? gridSpeed(line.id) : null;
+          const speed = p.speed > 0 ? (p.speed * grid) / spb : gs ?? start.total / Math.max(0.05, (p.dur > 0 ? p.dur : 8) * spb);
+          st = { on: line.id, t, riders: [{ n: ++o_n.n, line: line.id, s: Math.max(0, Math.min(1, p.start ?? 0)) * start.total, dir: 1, speed, base: speed, byGrid, skip: null, stopped: false }] };
           net.set(o.id, st);
         }
         // it moves only from its own beat on (IanniX: each object's time is the transport's, from its start)
@@ -262,7 +272,7 @@ export function createPlay() {
           const pace = p.drawn > 0 ? drawnSpeed(objects.get(rider.line), measureOf(rider.line), rider.s) : null;
           const left = playing && !rider.stopped ? rider.pending ?? (pace != null ? pace * p.drawn * (rider.speed / (rider.base ?? rider.speed)) : rider.speed) * dt : 0;
           delete rider.pending;
-          const trail = ride(o, rider, all, left, p, objects, measureOf, out, errors);
+          const trail = ride(o, rider, all, left, p, objects, measureOf, out, errors, gridSpeed);
           if (!trail.length) continue;
           const m = measureOf(rider.line), pos = atS(m, rider.s), u = m.total ? rider.s / m.total : 0;
           if (i === 0) { moved.set(o.id, [pos[0], pos[1]]); out.set(o.id, { x: pos[0], y: pos[1], u }); } else if (!rider.gone) ghosts.push({ of: o.id, pos: [pos[0], pos[1]] });
@@ -312,7 +322,7 @@ export function createPlay() {
                   launch(on, dir = 1) {
                     const l = objects.get(on) ?? [...objects.values()].find((x) => x.name === on && x.kind === 'line'), mm = l && measureOf(l.id);
                     if (!mm || all.length >= MAX_RIDERS) return false;
-                    all.push({ n: ++o_n.n, line: l.id, s: dir < 0 ? mm.total : 0, dir: dir < 0 ? -1 : 1, speed: rider.speed, base: rider.base, skip: null, stopped: false, spawned: true });
+                    all.push({ n: ++o_n.n, line: l.id, s: dir < 0 ? mm.total : 0, dir: dir < 0 ? -1 : 1, speed: rider.byGrid ? gridSpeed(l.id) ?? rider.speed : rider.speed, base: rider.base, byGrid: rider.byGrid, skip: null, stopped: false, spawned: true });
                     return true;
                   },
                   reflect() { back(); rider.dir = -rider.dir; rider.skip = null; },
@@ -335,7 +345,11 @@ export function createPlay() {
                 if (!gates.has(key)) gates.set(key, []);
                 gates.get(key).push(hooksNow.hold(m, v, ch));
               };
-              try { f.run(ev, ep, note, memOf(e.id), hooksNow.pitch, hooksNow.step, hooksNow.snap, rng, hooksNow.cc); } catch (err) { errors.set(e.id, err.message); }
+              // where in its grid it was reached: ev.col, ev.row; a grid with rows gives pitch by row
+              const g = hooks.gridAt?.(e.space, fireAt);
+              let pitch = hooksNow.pitch;
+              if (g) { [ev.col, ev.row] = cellOf(fireAt, g); if (g.rows > 0) pitch = () => hooksNow.step(hooksNow.pitch(0), ev.row * g.rows); }
+              try { f.run(ev, ep, note, memOf(e.id), pitch, hooksNow.step, hooksNow.snap, rng, hooksNow.cc); } catch (err) { errors.set(e.id, err.message); }
               }
             }
             // latched until it leaves: an event does not fire again while the traveler stays inside

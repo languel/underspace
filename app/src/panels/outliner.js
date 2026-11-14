@@ -5,7 +5,7 @@ import { h, glyphButton } from '../controls.js';
 import { blanketOf } from '../object.js';
 import { icon } from '../icons.js';
 
-const ICON = { event: 'event', traveler: 'traveler', ink: 'ink', connector: 'connector', path: 'path', visual: 'visual', target: 'target', code: 'box', score: 'score', note: 'note' };
+const ICON = { event: 'event', traveler: 'traveler', ink: 'ink', connector: 'connector', path: 'path', visual: 'visual', target: 'target', code: 'box', score: 'score', grid: 'grid', note: 'note', junction: 'joint' };
 
 export function outlinerPanel(el, app) {
   const list = h('div', 'tree');

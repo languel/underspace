@@ -179,6 +179,22 @@ The instrument glyph on the timeline's head sets what each channel plays
 `note(m, v, seconds, channel)` picks the channel. "Send notes to MIDI" connects Web MIDI, after which notes also go to your
 instruments.
 
+## Grids
+
+A grid says how space, time and pitch are quantized: `cell` (canvas units),
+`sub` (snap points a cell), `beats` (beats a cell of path), `metric` (a path
+measured along it, at right angles, or across only), `bars` (path times
+rounded to whole groups of beats), `rows` (scale degrees a cell up), `snap`.
+The global grid is in Properties with nothing selected. A grid frame (the
+object tools, or right-click › Add › grid frame) is a grid for what lies
+inside it; its presets are in the Code panel (a cell a beat, midinous,
+whole bars, score rows, half beats, triplets). In a frame that times paths,
+a traveler with `dur 0` takes each line in the line's own time, so a curve
+three cells long takes three beats, or with `bars 4` a whole bar. An event
+in a frame with rows plays the row's degree of the scale; `ev.col` and
+`ev.row` say which cell. Constrain › Fit its length to the bars scales a
+curve to whole bars. The Examples panel has a Music › Grids collection.
+
 ## Scores
 
 Draw a score frame (S) and draw lines in it: across is time, up is pitch.

@@ -1,8 +1,14 @@
 // Examples: small things to start from. Each is built through commands, at
 // a point the app chooses, so adding one is one step for undo.
 //   build(c, at): c(name, args) runs a command; at is [x, y], the centre.
+//   path: where it sits in the collection, 'Music/Grids' (categories nest).
 
 import { PRESETS } from './presets.js';
+import { GRID_PRESETS } from './grid.js';
+import { JUNCTIONS } from './joints.js';
+import { EVENTS } from './play.js';
+import { iannixPlan, applyPlan } from './iannix.js';
+import { nousPlan, applyNous } from './nous.js';
 
 const wave = (x, y, n, step, f) => Array.from({ length: n }, (_, i) => [+(x + i * step).toFixed(3), +(y + f(i)).toFixed(3)]);
 
@@ -41,33 +47,165 @@ renderer.setAnimationLoop(() => {
 });`;
 
 export const EXAMPLES = [
-  { title: 'An oscillator turns a view', icon: 'target', build: (c, at) => c('patch.add', { at, nodes: [{ key: 'osc', preset: 'osc' }, { key: 'scale', preset: 'scale' }, { key: 'view', role: 'target' }], links: ['osc.y -> scale.x', 'scale.y -> view.spin'] }) },
-  { title: 'A score: lines as sound', icon: 'score', build: (c, at) => {
+  { path: 'Patching', title: 'An oscillator turns a view', icon: 'target', build: (c, at) => c('patch.add', { at, nodes: [{ key: 'osc', preset: 'osc' }, { key: 'scale', preset: 'scale' }, { key: 'view', role: 'target' }], links: ['osc.y -> scale.x', 'scale.y -> view.spin'] }) },
+  { path: 'Music/Scores', title: 'A score: lines as sound', icon: 'score', build: (c, at) => {
     c('shape.add', { role: 'score', rect: { cx: at[0], cy: at[1], w: 11, h: 4 } });
     for (let k = 0; k < 3; k++) c('line.add', { points: wave(at[0] - 5 + k * 0.8, at[1] - 1.4 + k * 0.9, 24, 0.36, (i) => Math.sin(i * 0.45 + k) * 0.7 + i * 0.04) });
   } },
-  { title: 'A path sends itself to a follower', icon: 'path', build: (c, at) => {
+  { path: 'Patching/Paths', title: 'A path sends itself to a follower', icon: 'path', build: (c, at) => {
     const r = c('patch.add', { at: [at[0] + 3, at[1]], nodes: [{ key: 'follow', preset: 'follow' }] });
     const line = c('line.add', { points: wave(at[0] - 6, at[1], 30, 0.12, (i) => Math.sin(i * 0.5) * 0.9), role: 'path' });
     return { connect: [[line, 'path', r.ids.follow, 'path']] };
   } },
-  { title: 'A path made by code', icon: 'path', build: (c, at) => {
+  { path: 'Patching/Paths', title: 'A path made by code', icon: 'path', build: (c, at) => {
     const id = c('line.add', { points: [[at[0] - 4, at[1]], [at[0] + 4, at[1]]], role: 'path' });
     c('object.code', { id, code: PRESETS.wave });
   } },
-  { title: 'A traveler rings events', icon: 'traveler', build: (c, at) => {
+  { path: 'Music/Travelers and events', title: 'A traveler rings events', icon: 'traveler', build: (c, at) => {
     const loop = Array.from({ length: 48 }, (_, i) => { const a = (i / 48) * Math.PI * 2; return [+(at[0] + Math.cos(a) * 4).toFixed(3), +(at[1] + Math.sin(a) * 2.2 + Math.sin(a * 3) * 0.5).toFixed(3)]; });
     const line = c('line.add', { points: [...loop, loop[0]] });
     c('traveler.add', { on: line, u: 0, dur: 6 });
     c('traveler.add', { on: line, u: 0.5, dur: 9 });
     for (const i of [3, 11, 20, 29, 40]) c('shape.add', { role: 'event', shape: 'ellipse', rect: { cx: loop[i][0], cy: loop[i][1], w: 0.9, h: 0.9 } });
   } },
-  { title: 'A p5.js sketch', icon: 'box', build: (c, at) => c('shape.add', { role: 'code', code: P5, rect: { cx: at[0], cy: at[1], w: 6, h: 4.5 } }) },
-  { title: 'A three.js sketch', icon: 'box', build: (c, at) => c('shape.add', { role: 'code', code: THREE, rect: { cx: at[0], cy: at[1], w: 6, h: 4.5 } }) },
-  { title: 'One reusable group', icon: 'collapse', build: (c, at) => c('patch.add', { at, nodes: [{ key: 'osc', preset: 'osc' }, { key: 'smooth', preset: 'smooth' }, { key: 'out', preset: 'scale' }], links: ['osc -> smooth', 'smooth -> out'], collapse: true, name: 'lfo' }) },
-  { title: 'Shapes with colour', icon: 'visual', build: (c, at) => {
+  { path: 'Sketches', title: 'A p5.js sketch', icon: 'box', build: (c, at) => c('shape.add', { role: 'code', code: P5, rect: { cx: at[0], cy: at[1], w: 6, h: 4.5 } }) },
+  { path: 'Sketches', title: 'A three.js sketch', icon: 'box', build: (c, at) => c('shape.add', { role: 'code', code: THREE, rect: { cx: at[0], cy: at[1], w: 6, h: 4.5 } }) },
+  { path: 'Patching', title: 'One reusable group', icon: 'collapse', build: (c, at) => c('patch.add', { at, nodes: [{ key: 'osc', preset: 'osc' }, { key: 'smooth', preset: 'smooth' }, { key: 'out', preset: 'scale' }], links: ['osc -> smooth', 'smooth -> out'], collapse: true, name: 'lfo' }) },
+  { path: 'Drawing', title: 'Shapes with colour', icon: 'visual', build: (c, at) => {
     c('shape.add', { rect: { cx: at[0] - 2.2, cy: at[1], w: 3, h: 3 }, style: { fill: '#c2410c', stroke: '#1d1c1a' } });
     c('shape.add', { shape: 'ellipse', rect: { cx: at[0] + 0.4, cy: at[1] + 0.4, w: 3.4, h: 3.4 }, style: { fill: '#0f766e', opacity: 0.8 } });
     c('shape.add', { role: 'note', text: 'a note', rect: { cx: at[0] + 3.6, cy: at[1] - 1, w: 2.6, h: 1.2 } });
+  } },
+
+  // ---- grids: how space, time and pitch are quantized ----------------------------
+
+  { path: 'Music/Grids', title: 'A cell a beat: rhythm from length', icon: 'grid', build: (c, at) => {
+    // four lines, one to four cells long, in a grid where a cell of path is a beat: each traveler's
+    // lap is its line's length in beats, so together they make a 1 : 2 : 3 : 4 polyrhythm
+    const [x0, y0] = at;
+    c('shape.add', { role: 'grid', rect: { cx: x0, cy: y0, w: 10, h: 6 }, code: GRID_PRESETS['a cell a beat'] });
+    for (let k = 0; k < 4; k++) {
+      const y = y0 - 2.5 + k * 1.5 + 0.5, line = c('line.add', { points: [[x0 - 4, y], [x0 - 4 + k + 1, y]], style: { path: 'straight' } });
+      c('traveler.add', { on: line, dur: 0, loop: 1, size: 0.3 });
+      const ev = c('line.add', { points: [[x0 - 4 + (k + 1) * 0.5, y - 0.35], [x0 - 4 + (k + 1) * 0.5, y + 0.35]] });
+      c('object.role', { id: ev, role: 'event' });
+      c('object.code', { id: ev, code: `// tick\n// out: gate count\nnote(${[36, 38, 42, 46][k]}, 110, 0.1, 10);` });
+    }
+  } },
+  { path: 'Music/Grids', title: 'Whole bars: a curve takes whole bars', icon: 'grid', build: (c, at) => {
+    // the same frame rounds every path's time to whole bars of 4: three free curves of different
+    // lengths come out at one, two and three bars, and so stay in step
+    const [x0, y0] = at;
+    c('shape.add', { role: 'grid', rect: { cx: x0, cy: y0, w: 14, h: 8 }, code: GRID_PRESETS['whole bars'] });
+    const curves = [0.9, 1.7, 2.6].map((amp, k) => Array.from({ length: 28 }, (_, i) => [+(x0 - 6 + i * (0.16 + k * 0.08)).toFixed(3), +(y0 - 2.5 + k * 2.4 + Math.sin(i * 0.5) * amp * 0.4).toFixed(3)]));
+    curves.forEach((pts, k) => {
+      const line = c('line.add', { points: pts });
+      c('traveler.add', { on: line, dur: 0, loop: 1, size: 0.35 });
+      const mid = pts[pts.length >> 1], ev = c('shape.add', { role: 'event', shape: 'ellipse', rect: { cx: mid[0], cy: mid[1], w: 0.7, h: 0.7 } });
+      c('object.code', { id: ev, code: `// bell\n// out: gate count\nnote(${[72, 67, 60][k]}, 90, 0.8, 3);` });
+    });
+  } },
+  { path: 'Music/Grids', title: 'Rows are degrees: pitch from the grid', icon: 'grid', build: (c, at) => {
+    // a smooth wave crosses event lines; where it crosses, the row of the grid is the note (a degree
+    // of the scale each row up), so a continuous drawing plays stepped, in tune
+    const [x0, y0] = at;
+    c('music.set', { scale: 'Pentatonic Minor', root: 57, low: 57 });
+    c('shape.add', { role: 'grid', rect: { cx: x0, cy: y0, w: 12, h: 7 }, code: GRID_PRESETS['score rows'] });
+    const wave = Array.from({ length: 49 }, (_, i) => [+(x0 - 6 + i * 0.25).toFixed(3), +(y0 + Math.sin(i * 0.22) * 2.8 + Math.sin(i * 0.61) * 0.5).toFixed(3)]);
+    const line = c('line.add', { points: wave });
+    c('traveler.add', { on: line, dur: 0, loop: 1, size: 0.3 });
+    for (let k = 1; k < 12; k++) {
+      const ev = c('line.add', { points: [[x0 - 6 + k, y0 - 3.4], [x0 - 6 + k, y0 + 3.4]], style: { path: 'straight', stroke: '#8a8a8a', width: 0.8 } });
+      c('object.role', { id: ev, role: 'event' }); // its code: note(pitch(ev.y)), and pitch is the row's note here
+    }
+  } },
+  { path: 'Music/Grids', title: 'Two grids, two speeds', icon: 'grid', build: (c, at) => {
+    // the same drawing in two frames: a cell a beat on the left, a cell half a beat on the right
+    const [x0, y0] = at;
+    for (const [dx, preset] of [[-4, 'a cell a beat'], [4, 'half beats']]) {
+      c('shape.add', { role: 'grid', rect: { cx: x0 + dx, cy: y0, w: 7, h: 6 }, code: GRID_PRESETS[preset] });
+      const ring = Array.from({ length: 33 }, (_, i) => { const a = (i / 32) * Math.PI * 2; return [+(x0 + dx + Math.cos(a) * 2.2).toFixed(3), +(y0 + Math.sin(a) * 2.2).toFixed(3)]; });
+      const line = c('line.add', { points: ring, closed: true });
+      c('traveler.add', { on: line, dur: 0, loop: 1, size: 0.3 });
+      for (const i of [0, 8, 16, 24]) { const ev = c('shape.add', { role: 'event', shape: 'ellipse', rect: { cx: ring[i][0], cy: ring[i][1], w: 0.6, h: 0.6 } }); c('object.code', { id: ev, code: `// tap\n// out: gate count\nnote(${dx < 0 ? 60 : 67} + ${i / 4}, 90, 0.15, 1);` }); }
+    }
+  } },
+  { path: 'Music/Grids', title: 'A Midinous grid', icon: 'grid', build: (c, at) => {
+    // nodes on grid points, paths at right angles, a cell a beat: routing is time
+    c('shape.add', { role: 'grid', rect: { cx: at[0], cy: at[1], w: 10, h: 6 }, code: GRID_PRESETS.midinous });
+    const plan = nousPlan({ settings: { tempo: 110 }, points: [
+      { id: 1, x: 0, y: 0, type: 'note', note: 62, isStart: true, to: [2] },
+      { id: 2, x: 432, y: 0, type: 'note', note: 65, playMode: 'robin', to: [3, 4] },
+      { id: 3, x: 432, y: -288, type: 'note', note: 69, to: [5] },
+      { id: 4, x: 864, y: 288, type: 'note', note: 72, pathMode: 'vert', to: [5] },
+      { id: 5, x: 1152, y: -288, type: 'note', note: 74, to: [1] }] }, { cell: 1, at: [at[0] + 0.5, at[1]] });
+    applyNous(plan, c);
+  } },
+  { path: 'Music/Grids', title: 'The pace a line was drawn', icon: 'draw', build: (c, at) => {
+    // a stroke keeps the time of the hand: drawn 1 makes the traveler go fast and slow as it was drawn
+    const pts = Array.from({ length: 30 }, (_, i) => [+(at[0] - 5 + i * 0.34).toFixed(3), +(at[1] + Math.sin(i * 0.4) * 1.2).toFixed(3)]);
+    let t = 0;
+    const pen = pts.map((_, i) => [Math.round((t += i < 10 ? 30 : i < 20 ? 160 : 50)), 0.5]);
+    const line = c('line.add', { points: pts, pen });
+    const tr = c('traveler.add', { on: line, loop: 1, size: 0.35 });
+    c('object.set', { id: tr, name: 'drawn', value: 1 });
+    for (const i of [4, 9, 14, 19, 24]) { const ev = c('line.add', { points: [[pts[i][0], pts[i][1] - 0.5], [pts[i][0], pts[i][1] + 0.5]] }); c('object.role', { id: ev, role: 'event' }); }
+  } },
+
+  // ---- joints: lines that touch connect, and route travelers -------------------------
+
+  { path: 'Space/Joints', title: 'Lines that touch connect', icon: 'joint', build: (c, at) => {
+    const [x0, y0] = at;
+    const a = c('line.add', { points: [[x0 - 5, y0], [x0 + 5, y0]], style: { path: 'straight' } });
+    const b = c('line.add', { points: [[x0 - 1, y0 + 3], [x0 - 1, y0]], style: { path: 'straight' } });
+    const d = c('line.add', { points: [[x0 + 5, y0], [x0 + 7, y0 - 3]], style: { path: 'straight' } });
+    c('joint.add', { at: [{ id: b, u: 1 }, { id: a, u: 0.4, slide: true }] });
+    c('joint.add', { at: [{ id: d, u: 0 }, { id: a, u: 1 }] });
+    c('line.keep', { ids: [a], horv: true });
+  } },
+  { path: 'Space/Joints', title: 'Travelers through junctions', icon: 'joint', build: (c, at) => {
+    // a loop with a branch: the junction takes turns (round robin), so the traveler alternates
+    const [x0, y0] = at;
+    const top = c('line.add', { points: [[x0 - 4, y0 + 2], [x0 + 4, y0 + 2]], style: { path: 'straight' } });
+    const right = c('line.add', { points: [[x0 + 4, y0 + 2], [x0 + 4, y0 - 2]], style: { path: 'straight' } });
+    const bottom = c('line.add', { points: [[x0 + 4, y0 - 2], [x0 - 4, y0 - 2]], style: { path: 'straight' } });
+    const left = c('line.add', { points: [[x0 - 4, y0 - 2], [x0 - 4, y0 + 2]], style: { path: 'straight' } });
+    const cut = c('line.add', { points: [[x0, y0 + 2], [x0, y0 - 2]], style: { path: 'straight' } });
+    c('joint.add', { at: [{ id: top, u: 1 }, { id: right, u: 0 }] });
+    c('joint.add', { at: [{ id: right, u: 1 }, { id: bottom, u: 0 }] });
+    c('joint.add', { at: [{ id: bottom, u: 1 }, { id: left, u: 0 }] });
+    c('joint.add', { at: [{ id: left, u: 1 }, { id: top, u: 0 }] });
+    const j1 = c('joint.add', { at: [{ id: top, u: 0.5 }, { id: cut, u: 0 }] });
+    c('joint.add', { at: [{ id: bottom, u: 0.5 }, { id: cut, u: 1 }] });
+    c('object.code', { id: j1, code: JUNCTIONS['round robin'] });
+    c('traveler.add', { on: top, dur: 4, loop: 1, size: 0.35 });
+    for (const [x, y] of [[x0 - 4, y0], [x0 + 4, y0], [x0, y0]]) { const ev = c('shape.add', { role: 'event', shape: 'ellipse', rect: { cx: x, cy: y, w: 0.8, h: 0.8 } }); c('object.code', { id: ev, code: EVENTS['step up'] }); }
+  } },
+  { path: 'Music/Travelers and events', title: 'Events that act: reflect and split', icon: 'event', build: (c, at) => {
+    const [x0, y0] = at;
+    const line = c('line.add', { points: [[x0 - 6, y0], [x0 + 6, y0]], style: { path: 'straight' } });
+    c('traveler.add', { on: line, dur: 6, loop: 1, size: 0.35 });
+    const wall = c('line.add', { points: [[x0 + 4, y0 - 1.2], [x0 + 4.2, y0 + 1.2]] });
+    c('object.role', { id: wall, role: 'event' }); c('object.code', { id: wall, code: EVENTS['note and reflect'] });
+    const fork = c('line.add', { points: [[x0 - 1, y0 - 1.2], [x0 - 0.8, y0 + 1.2]] });
+    c('object.role', { id: fork, role: 'event' }); c('object.code', { id: fork, code: EVENTS.split });
+    const box = c('shape.add', { role: 'event', rect: { cx: x0 - 4, cy: y0, w: 1.2, h: 1.6 } });
+    c('object.code', { id: box, code: EVENTS.gate });
+  } },
+
+  // ---- imports and scales ---------------------------------------------------------------
+
+  { path: 'Music/Imports', title: 'IanniX: a rosette', icon: 'open', build: (c, at) => {
+    const plan = iannixPlan(`function makeWithScript() { title("Rosette");
+      for (var k = 0; k < 4; k++) { run("add curve " + (100 + k)); run("setPointsEllipse current " + (2 + k) + " " + (1 + k * 0.6)); run("add cursor " + (200 + k)); run("setCurve current lastCurve"); run("setSpeed current auto " + (3 + k * 1.5)); run("setPattern current 0 0 1"); }
+      for (var i = 0; i < 16; i++) { run("add trigger " + (300 + i)); run("setPos current " + (Math.cos(i / 16 * TWO_PI) * 4) + " " + (Math.sin(i / 16 * TWO_PI) * 2.8)); }
+    }`, { width: 12, at });
+    applyPlan(plan, c, 0.5);
+  } },
+  { path: 'Music/Scales', title: 'Just intonation in a score', icon: 'score', build: (c, at) => {
+    // a scale as steps in semitones, fractional: near just intonation; the score follows the timeline's
+    c('music.set', { scale: [0, 2.04, 3.86, 4.98, 7.02, 8.84, 10.88], root: 60, low: 55, high: 79 });
+    c('shape.add', { role: 'score', rect: { cx: at[0], cy: at[1], w: 11, h: 4 } });
+    for (let k = 0; k < 3; k++) c('line.add', { points: wave(at[0] - 5 + k * 0.6, at[1] - 1.2 + k * 0.9, 26, 0.38, (i) => Math.sin(i * 0.3 + k) * 0.6) });
   } },
 ];

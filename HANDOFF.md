@@ -716,6 +716,34 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   (`sound.renderAudio`, `sound.wav`). A clip's menu adds Duplicate after
   it (on the next bar) and Rename, and Delete removes the picked clip
   while the pointer is over the timeline.
+- **Grids** (`src/grid.js`, a twenty-fourth pass, after AMS's `pathTime`
+  in `src/score/compile.js` and Midinous): a grid quantizes space (`cell`,
+  snap points `sub`, `snap`), time (`beats` a cell of path, measured by
+  `metric`: along it, at right angles or across only, rounded to `bars`)
+  and pitch (`rows`: scale degrees a cell up). There is one global grid,
+  now document state (`state.grid`, `grid.set`; the old grid size setting
+  is gone, its cell is the global grid's) and any number of grid frames
+  (role `grid`, drawn like a score frame, its settings its parameters;
+  presets in the Code panel: a cell a beat, midinous, whole bars, score
+  rows, half beats, triplets). What lies in a frame uses the smallest frame
+  holding it (`gridAt`).
+  - A traveler with `dur 0` takes its time from its line's grid, line by
+    line through junctions (`pathBeats`). Attaching a traveler in a
+    timing grid gives it `dur 0`.
+  - An event knows `ev.col` and `ev.row`; in a grid with rows, `pitch()`
+    is the row's note (that many degrees above the lowest note).
+  - The line tool's ends, a stroke's ends and dragged points snap to the
+    grid they are in, when it snaps.
+  - Constrain › Fit its length to the bars scales a curve so its time is
+    whole bars.
+  - Global grid fields are in Properties (with nothing selected).
+- **Examples in a collection:** each example has a `path`
+  ('Music/Grids'), and the Examples panel shows nested folding categories
+  with a search. New examples: rhythm from length, curves in whole bars,
+  rows as degrees, two grids at two speeds, a Midinous grid, the drawn
+  pace, lines that touch connect, travelers through junctions, events that
+  reflect and split, an IanniX rosette, just intonation in a score. A test
+  builds every example and plays the grid ones.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a
