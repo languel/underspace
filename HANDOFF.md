@@ -691,6 +691,17 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   wide as the widest cursor's bar. Not carried over: OSC, cursor messages,
   textures, 3D. There is no IanniX example folder on this machine, so it
   was tested with hand-written scores.
+- **Midinous import** (`src/nous.js`, a twenty-first pass): a midinojs or
+  original Midinous project becomes joints and lines. Each node is a joint
+  holding its paths' ends, whose code is the node: note (with chance, and
+  relative notes as `step(ev.last, p.by)`), cc, counter (every nth),
+  terminator; then robin, split, random or portal over the paths leaving
+  it. Paths are lines drawn across first, up first or straight, so their
+  length in cells is their time. Start nodes set a traveler off at one grid
+  cell a beat (speed 1). The project's tempo, scale and root go to the
+  timeline. Junction code now gets `ev.last` (the rider's last note) and
+  `ev.spb`. Robin goes the straightest way first, not in the file's order.
+  Gates and LEDs only pass travelers on.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); audio recording; note-off at exit (IanniX's gate); scores on
   the shared transport (they still schedule their own passes); MIDI clock;

@@ -29,7 +29,8 @@ import { smooth } from './object.js';
 // What a junction does when a traveler arrives. Its code gets
 //   ways  where the traveler can go on, straightest first:
 //         { line, dir (1 forward, -1 back), turn (radians, left is +) }
-//   ev    { traveler, rider, from, count }   p  its parameters   mem  what it keeps
+//   ev    { traveler, rider, from, count, last (the last note this rider played), spb (seconds a beat) }
+//   p  its parameters   mem  what it keeps
 // and returns a way or its index; several (an array) to split the traveler;
 // 'back' to send it back the way it came; 'stop' to stop it; nothing: straight on.
 export const JUNCTIONS = {

@@ -38,6 +38,7 @@ import { createTimeline } from './timeline.js';
 import { pitch as pitchOf, step as stepOf, snap as snapOf, secPerBeat, degrees } from './music.js';
 import { midiFile, readNotes, createMidiOut } from './midi.js';
 import { iannixPlan, applyPlan } from './iannix.js';
+import { nousPlan, applyNous } from './nous.js';
 import { INSTRUMENTS, DEFAULT_CHANNELS } from './instruments.js';
 import { solve, crossings, measure, atU, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
@@ -1305,6 +1306,7 @@ const ACTIONS = [
   { id: 'transport.loop', title: 'Loop', icon: 'loop', keys: 'alt+l', group: 'play', on: () => transport.loop.on, run: () => { transport.loop = { ...transport.loop, on: !transport.loop.on }; } },
   { id: 'render.clip', title: 'Render to a clip', icon: 'record', group: 'play', menu: true, when: (c) => !c.hit && (travelers().length || scores().length), run: () => renderToClip() },
   { id: 'iannix.import', title: 'Import an IanniX score', icon: 'open', group: 'play', menu: true, when: (c) => !c.hit, run: () => iannixInput.click() },
+  { id: 'nous.import', title: 'Import a Midinous project', icon: 'open', group: 'play', menu: true, when: (c) => !c.hit, run: () => nousInput.click() },
   { id: 'midi.import', title: 'Import a MIDI file', icon: 'open', group: 'play', menu: true, when: (c) => !c.hit, run: () => midiInput.click() },
   { id: 'midi.export', title: 'Export recorded clips as MIDI', icon: 'save', group: 'play', menu: true, when: (c) => !c.hit && state.clips.size > 0, run: () => exportMidi() },
   { id: 'midi.connect', title: 'Send notes to MIDI', icon: 'connector', group: 'play', run: () => connectMidi() },
@@ -1678,6 +1680,28 @@ iannixInput.addEventListener('change', async () => {
     readout.hidden = false; readout.textContent = `${plan.title} · ${plan.stats.curves} ⌇ ${plan.stats.cursors} ● ${plan.stats.triggers} ◦`;
     setTimeout(() => { readout.hidden = true; }, 3000);
     return made;
+  } catch (e) { readout.hidden = false; readout.textContent = e.message; setTimeout(() => { readout.hidden = true; }, 3000); }
+});
+
+// A Midinous or midinojs project (.nous or .json): its nodes become joints whose code plays and
+// routes, its paths lines a grid cell a beat long each, its start nodes travelers.
+const nousInput = Object.assign(document.createElement('input'), { type: 'file', accept: '.nous,.json', hidden: true });
+document.body.append(nousInput);
+nousInput.addEventListener('change', async () => {
+  const f = nousInput.files?.[0];
+  nousInput.value = '';
+  if (!f) return;
+  try {
+    const plan = nousPlan(await f.text(), { cell: settings.gridSize, at: view.toWorld(...centre()) });
+    if (!plan.nodes.length) throw new Error(plan.warnings[0] ?? 'no nodes');
+    batch(() => {
+      const m = plan.settings, ctx = {};
+      if (m.bpm) ctx.bpm = m.bpm; if (m.scale) ctx.scale = m.scale; if (m.root != null) ctx.root = m.root;
+      if (Object.keys(ctx).length) call('music.set', ctx);
+      call('select.set', { ids: applyNous(plan, call) });
+    });
+    if (plan.warnings.length) console.info('Midinous import:', plan.warnings.join('; '));
+    readout.hidden = false; readout.textContent = `${f.name} · ${plan.stats.nodes} ◦ ${plan.stats.paths} ⌇`; setTimeout(() => { readout.hidden = true; }, 3000);
   } catch (e) { readout.hidden = false; readout.textContent = e.message; setTimeout(() => { readout.hidden = true; }, 3000); }
 });
 

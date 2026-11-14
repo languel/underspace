@@ -193,7 +193,11 @@ export function createPlay() {
         let r;
         const f = chooser(j.code ?? '');
         if (f.error) errors.set(j.id, f.error);
-        else try { const h = hooksNow; r = f.run(ways, { traveler: o.id, rider: rider.n, from: rider.line, count: counts.get(j.id) }, paramsHook(j), memOf(j.id), h.note, h.pitch, h.step, h.snap, rng, h.cc); } catch (err) { errors.set(j.id, err.message); }
+        else try {
+          // the note a node plays is remembered by the rider: ev.last (Midinous's relative notes)
+          const h = hooksNow, note = (m, v, d, ch) => { if (Number.isFinite(m)) rider.last = m; return h.note(m, v, d, ch); };
+          r = f.run(ways, { traveler: o.id, rider: rider.n, from: rider.line, count: counts.get(j.id), last: rider.last ?? 60, spb: h.spb ?? 0.5 }, paramsHook(j), memOf(j.id), note, h.pitch, h.step, h.snap, rng, h.cc);
+        } catch (err) { errors.set(j.id, err.message); }
         const d = decide(r, ways);
         rider.skip = j.id;
         if (d.stop) { rider.stopped = true; break; }

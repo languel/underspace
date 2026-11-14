@@ -223,3 +223,26 @@ test('an IanniX score comes in as lines, travelers and events, and plays its mes
   // the default notef trigger at x = 1 (on the curve's middle: pitch 36 + 0.5 * 60), then 60, 61, 62 on channel 2
   assert.deepEqual(notes, [[66, 1], [60, 2], [61, 2], [62, 2]]);
 });
+
+test('a midinojs project: nodes play and send travelers on, a grid cell a beat', async () => {
+  const { nousPlan, applyNous, nodeCode } = await import('../src/nous.js');
+  const { createPlay } = await import('../src/play.js');
+  const project = { settings: { tempo: 60, scale: 'Ionian', rootNote: 0 }, points: [
+    { id: 1, x: 0, y: 0, type: 'note', note: 60, isStart: true, to: [2] },
+    { id: 2, x: 288, y: 0, type: 'note', note: 64, playMode: 'robin', to: [3, 4] },
+    { id: 3, x: 288, y: 288, type: 'note', note: 67, to: [] },
+    { id: 4, x: 576, y: 0, type: 'note', note: 72, to: [] },
+  ] };
+  const plan = nousPlan(project, { cell: 1 });
+  assert.deepEqual(plan.stats, { nodes: 4, paths: 3 });
+  assert.equal(plan.settings.bpm, 60);
+  assert.match(nodeCode({ type: 'note', note: 60, velocity: 100, channel: 1, duration: 1, mode: 1, to: [] }), /return out\.map/);
+  call('space.clear');
+  applyNous(plan, call);
+  const notes = [], play = createPlay(), hooks = { spb: 1, grid: 1, pointsOf: (l) => l.points, paramsOf: (o) => { const p = {}; for (const m of (o.code ?? '// traveler\n// param: dur 8\n// param: loop 1\n// param: start 0\n// param: at 0\n// param: speed 0\n// param: drawn 0').matchAll(/\/\/ param: (\w+) (-?[\d.]+)/g)) p[m[1]] = +m[2]; return { ...p, ...o.params }; }, note: (m, v, d) => notes.push([m, d]) };
+  for (let t = 0; t <= 6; t += 1 / 60) play.step(state.objects, t, true, hooks);
+  // the start node plays as play starts (as in Midinous); two cells on, node 2, which sends it on
+  // (robin: the straightest way first) two cells across to node 4
+  assert.deepEqual(notes.map((n) => n[0]), [60, 64, 72]);
+  assert.equal(notes[1][1], 1, 'a beat long');
+});
