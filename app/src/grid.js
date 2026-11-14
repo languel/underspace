@@ -81,7 +81,8 @@ export function lengthBy(pts, metric = 0) {
 export function pathBeats(pts, g) {
   if (!(g.beats > 0)) return 0;
   const beats = (lengthBy(pts, g.metric) / g.cell) * g.beats;
-  return g.bars > 0 ? Math.max(g.bars, Math.round(beats / g.bars) * g.bars) : Math.max(1e-3, beats);
+  // a path the grid measures as nothing (a vertical line measured across) still takes a sixteenth
+  return g.bars > 0 ? Math.max(g.bars, Math.round(beats / g.bars) * g.bars) : Math.max(0.25, beats);
 }
 
 // A point on the grid's lattice (cell / sub apart, from its origin), nearest p. A third coordinate stays.

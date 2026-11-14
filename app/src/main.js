@@ -1,7 +1,7 @@
 // Wiring: layout by zoom, gestures, and the action table that the toolbar,
 // keys, context menus and palette all read.
 
-import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, history, travel, argTypes as T } from './space.js';
+import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, history, travel, stats, argTypes as T } from './space.js';
 import './patch.js';
 import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplifyIndex, along, setDrag, setLive, setMoved, penOf, isLine, isTarget, hasCode, isWire } from './object.js';
 import { selectionProps, toolProps } from './panels/properties.js';
@@ -34,6 +34,7 @@ import { createModal, apply, applyRect } from './transform.js';
 import { snapPoints, snapBox, toSVG, toP5 } from './selection.js';
 import { showPie, recognize } from './pie.js';
 import { createTransport } from './transport.js';
+import { createDebug } from './debug.js';
 import { GRID, GRID_PRESETS, gridAt, pathBeats, snapPoint, fitScale, isGrid } from './grid.js';
 import { createTimeline } from './timeline.js';
 import { pitch as pitchOf, step as stepOf, snap as snapOf, secPerBeat, degrees } from './music.js';
@@ -62,6 +63,8 @@ const playEngine = createPlay();
 // One clock for everything that plays (transport.js); notes played while recording become a clip.
 const transport = createTransport(), midiOut = createMidiOut();
 let recNotes = [], lastBeat = 0, lastWrap = 0, clipDrag = null, timeline = null;
+// Performance and errors (debug.js): created before the first frame, so it can catch that frame's errors.
+const dbg = createDebug($('debug'), () => ({ objects: state.objects.size, riders: playEngine.riders(), steps: take.clips.length, settle: stats.settleMs.toFixed(1) + 'ms' }));
 const view = await createView({ canvas: $('gl'), stage, onFrame: frame });
 addEventListener('message', (e) => { if (e.data?.underspace) step.report(e.data.underspace, e.data); });
 
@@ -246,6 +249,7 @@ function scoreTick() {
       if (sc) sound.schedulePass(o.id, sc, aNow - into, into, report);
       plan = { k: k + 1, L };
     }
+    if (plan.k * L < now - L) plan.k = Math.floor(now / L) + 1; // back from a hidden tab: the passes it missed are gone
     while (plan.k * L - now < 0.25) { const sc = scoreOf(o.id); if (sc) sound.schedulePass(o.id, sc, aNow + (plan.k * L - now), 0, report); plan.k++; }
     scorePlan.set(o.id, plan);
   }
@@ -325,24 +329,28 @@ const shownPath = (l) => curveOf(l, run?.shown.get(l.id) ?? ptsOf(l));
 const paramsOf = (o) => { const p = {}; for (const q of blanketOf(o)?.params ?? []) p[q.name] = o.params?.[q.name] ?? q.value; return p; };
 
 let laidOut = -1; // the state version the last layout was made from
+// One frame. An error in it is noted (debug.js) and the next frame tries again, rather than
+// the drawing stopping for good.
 function frame() {
+  try { frameInner(); } catch (e) { dbg.error(e, 'frame'); } finally { dbg.frame(); }
+}
+function frameInner() {
   laidOut = state.version;
   for (const o of scores()) { const pos = scorePos(o); if (pos >= 0) step.report(o.id, { out: { pos } }); }
   // Travelers move and events fire before the code objects run, so their outputs are this frame's.
   transport.spb = secPerBeat(state.music);
   const t = transport.t;
   if ((transport.wrapped ?? 0) !== lastWrap) { lastWrap = transport.wrapped; catchUp(); } // the loop came round
-  const played = playEngine.step(state.objects, t, transport.playing, musicHooks());
+  const played = dbg.time('play', () => playEngine.step(state.objects, t, transport.playing, musicHooks()));
   playClips();
   setMoved(played.moved);
   let playSig = 0;
   for (const [id, out] of played.out) { step.report(id, { out, error: played.errors.get(id) ?? '' }); if (out.u != null) playSig += out.x * 3 + out.y * 7; }
   for (const g of played.ghosts) playSig += g.pos[0] * 5 + g.pos[1] * 11;
   for (const [id, when] of playEngine.hitAt) if (performance.now() - when < 160) playSig += when + id.length;
-  run = step(state.objects, performance.now() / 1000);
+  run = dbg.time('code', () => step(state.objects, performance.now() / 1000));
   vis = new Map(); spaces = [{ id: null, kind: 'canvas', xf: ROOT }]; lines = []; ink3d = []; sceneList = []; dots = []; inkItems = []; pointSrc = [];
-  walk(null, ROOT);
-  ghostsOf(played.ghosts);
+  dbg.time('layout', () => { walk(null, ROOT); ghostsOf(played.ghosts); });
   if (guide && !guide.scene) lines.push({ pts: [-1, 1].map((k) => at(guide.xf, [guide.pivot[0] + guide.axis[0] * 1e4 * k, guide.pivot[1] + guide.axis[1] * 1e4 * k])), color: 'hot', width: 1 });
   // Lines that code makes can change every frame; a cheap fingerprint tells.
   let made = 0;
@@ -350,13 +358,13 @@ function frame() {
   const sig = `${state.version}|${dragSig}|${spaces.map((s) => s.id).join()}|${made}|${playSig}`;
   const dirty = sig !== lastSig;
   lastSig = sig;
-  if (dirty) view.setLines(lines);
+  if (dirty) dbg.time('lines', () => view.setLines(lines));
   // The ink layer is repainted when the drawing or the view changes.
   const camKey = `${view.cam.cx},${view.cam.cy},${view.cam.zoom},${view.size.w},${view.size.h},${inkColor}`;
-  if (dirty || camKey !== lastCam) { lastCam = camKey; ink.resize(view.size.w, view.size.h); ink.draw(inkItems); }
-  view.setScenes(sceneList, dirty);
+  if (dirty || camKey !== lastCam) dbg.time('ink', () => { lastCam = camKey; ink.resize(view.size.w, view.size.h); ink.draw(inkItems); });
+  dbg.time('scenes', () => view.setScenes(sceneList, dirty));
   showPoints();
-  faces.update(vis, { run, selection: state.selection, w: view.size.w, h: view.size.h, code: settings.codeOverlay, ground: settings.codeOpacity });
+  dbg.time('faces', () => faces.update(vis, { run, selection: state.selection, w: view.size.w, h: view.size.h, code: settings.codeOverlay, ground: settings.codeOpacity }));
   while (dotLayer.children.length < dots.length) dotLayer.append(document.createElement('i'));
   while (dotLayer.children.length > dots.length) dotLayer.lastChild.remove();
   dots.forEach((d, i) => {
@@ -364,9 +372,8 @@ function frame() {
     el.className = d[2] ? 'bar' : '';
     el.style.cssText = `transform:translate(${d[0].toFixed(1)}px,${d[1].toFixed(1)}px)` + (d[2] ? `;height:${d[2].toFixed(1)}px` : '');
   });
-  panels.update();
+  dbg.time('panels', () => { panels.update(); timeline?.update(); });
   zoomLabel.textContent = Math.round(view.cam.zoom * 100) + '%';
-  timeline?.update();
   // The grid is the stage's own background, moved and scaled with the view.
   if (settings.grid) {
     let cell = gridCell() / view.unitsPerPx();
@@ -572,6 +579,8 @@ function removePoints() {
 
 let guide = null; // the axis a transform is held to: { scene, pivot, axis, xf }
 const readout = $('readout');
+// The last session died (a crash, or the page was killed): say so, briefly; ⌥D shows what was logged.
+if (dbg.crashed) { readout.hidden = false; readout.textContent = '⚠ the last session ended without closing · ⌥D'; setTimeout(() => { readout.hidden = true; }, 5000); }
 // What G, R and S move: the picked points (points tool), or the selected objects; one space at a time.
 function transformItems() {
   if (laidOut !== state.version) frame();
@@ -1349,6 +1358,9 @@ const ACTIONS = [
   // The timeline: the transport, the musical context, and what plays on it (timeline.js).
   { id: 'timeline', title: 'Timeline', icon: 'timeline', keys: 'alt+t', group: 'play', bar: 'edit', on: () => !!timeline?.visible, run: () => timeline.show() },
   { id: 'take.replay', title: 'Replay the making', icon: 'play', group: 'history', when: () => history().steps.length > 0, run: () => replay() },
+  { id: 'debug.show', title: 'Performance and errors', icon: 'fit', keys: 'alt+d', group: 'panel', menu: false, on: () => dbg.visible, run: () => dbg.show() },
+  { id: 'debug.copy', title: 'Copy a debug report', icon: 'copy', group: 'panel', run: () => { const r = { ...dbg.report(), objects: state.objects.size, takeSteps: take.clips.length, takeKB: Math.round(JSON.stringify(take).length / 1024), music: state.music, grid: state.grid }; navigator.clipboard?.writeText(JSON.stringify(r, null, 2)); console.info('underspace debug report', r); } },
+  { id: 'debug.clear', title: 'Clear the error log', icon: 'clear', group: 'panel', run: () => dbg.clearErrors() },
   { id: 'transport.rewind', title: 'Back to the start', icon: 'rewind', keys: 'alt+,', group: 'play', run: () => rewind() },
   { id: 'transport.record', title: 'Record what plays', icon: 'record', keys: 'alt+r', group: 'play', on: () => transport.recording, run: () => { const was = transport.recording; if (was) { transport.record(false); endRecording(); return; } transport.record(true); if (!transport.playing) countIn(() => togglePlay()); } },
   { id: 'transport.metronome', title: 'Metronome', icon: 'metronome', group: 'play', on: () => settings.metronome, run: () => setSetting('metronome', !settings.metronome) },

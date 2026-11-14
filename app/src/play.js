@@ -228,6 +228,8 @@ export function createPlay() {
 
   return {
     hitAt,
+    // how many riders there are now (the debug display)
+    riders() { let n = 0; for (const st of net.values()) n += st.riders.length; return n; },
     // let go of every held note (a pause), the travelers staying where they are
     quiet() { for (const k of [...gates.keys()]) release(k); latched.clear(); },
     reset() { for (const k of [...gates.keys()]) release(k); latched.clear(); firedAt.clear(); lastFire.clear(); counts.clear(); net.clear(); mems.clear(); rng = seeded(1); },
@@ -357,6 +359,7 @@ export function createPlay() {
           }
         }
         st.riders = all.filter((r, i) => i === 0 || !r.gone);
+        if (firedAt.size > 4000) firedAt.clear(); // riders that are gone leave their marks: do not let them pile up
       }
       for (const e of events) out.set(e.id, { gate: gate.get(e.id) ?? 0, count: counts.get(e.id) ?? 0 });
       return { moved, ghosts, out, errors };

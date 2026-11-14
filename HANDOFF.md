@@ -744,6 +744,25 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   pace, lines that touch connect, travelers through junctions, events that
   reflect and split, an IanniX rosette, just intonation in a score. A test
   builds every example and plays the grid ones.
+- **Debugging and the reported crash** (a twenty-fifth pass). The crash
+  could not be reproduced: every example on one canvas plays at 60 fps,
+  and undo or a history scrub takes a few ms. Fixed what could bring a page
+  down:
+  - an error in a frame stopped drawing for good: `frame()` now catches,
+    logs and goes on;
+  - a score back from a hidden tab scheduled every pass it missed at once:
+    those are now skipped;
+  - a traveler timed by a grid that measures its line as nothing got a
+    near-infinite speed: a path now takes at least a quarter beat;
+  - riders that split leave crossing marks that piled up: these are now
+    capped.
+  `src/debug.js`: ⌥D shows the frame rate and what each part of a frame
+  costs (play, code, layout, lines, ink, scenes, faces, panels), with
+  objects, riders, take steps, the last settle's time and the error count.
+  Errors (from frames, `window.onerror`, rejected promises) are kept in
+  localStorage across reloads. A heartbeat marks a session that ended
+  without closing, which the next load reports. "Copy a debug report" puts
+  it all on the clipboard as JSON; "Clear the error log" empties it.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a

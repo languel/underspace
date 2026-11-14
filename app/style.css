@@ -247,3 +247,6 @@ body.with-timeline #zoom { bottom: calc(8px + var(--tl-h, 96px)); }
 /* a line made an event or a traveler keeps its look: no frame or ports until it is selected */
 .face.kind-line.role-event:not(.sel), .face.kind-line.role-traveler:not(.sel) { border-color: transparent; }
 .face.kind-line.role-event:not(.sel) > *, .face.kind-line.role-traveler:not(.sel) > * { display: none; }
+#debug { position: absolute; right: 8px; bottom: 8px; z-index: 9; margin: 0; padding: 6px 8px; font: 10.5px/1.45 ui-monospace, monospace; color: var(--ink); background: color-mix(in srgb, var(--panel) 92%, transparent); border-radius: 6px; box-shadow: 0 0 0 1px var(--line); pointer-events: none; white-space: pre; }
+#debug[hidden] { display: none; }
+body.with-timeline #debug { bottom: calc(8px + var(--tl-h, 96px)); }

@@ -547,13 +547,18 @@ export const take = { type: 'underspace-take', version: 1, clips: [], undone: []
 const t0 = performance.now();
 let batchId = 0, batchSeq = 0;
 
+// How long solving constraints took (the debug display reads it).
+export const stats = { settleMs: 0, settles: 0 };
+
 // A command, then the constraints it may have broken are solved again, in the
 // same way on every replay, so a take gives the same drawing.
 function runCmd(cmd, args, by) {
   const result = cmd.run(args, by);
   if (cmd.record && cmd.name !== 'select.set') {
     const hold = cmd.hold ? cmd.hold(args) : args.ids ?? (args.id ? [args.id] : []);
+    const t0 = performance.now();
     settle(state.objects, new Set(hold), ptsOf);
+    stats.settleMs = performance.now() - t0; stats.settles++;
   }
   return result;
 }
