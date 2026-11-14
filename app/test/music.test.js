@@ -246,3 +246,12 @@ test('a midinojs project: nodes play and send travelers on, a grid cell a beat',
   assert.deepEqual(notes.map((n) => n[0]), [60, 64, 72]);
   assert.equal(notes[1][1], 1, 'a beat long');
 });
+
+test('a WAV holds the samples, 16-bit', async () => {
+  const { wav } = await import('../src/sound.js');
+  const buf = { numberOfChannels: 1, length: 3, sampleRate: 8000, getChannelData: () => Float32Array.from([0, 1, -1]) };
+  const b = new Uint8Array(await wav(buf).arrayBuffer()), dv = new DataView(b.buffer);
+  assert.equal(String.fromCharCode(...b.slice(8, 12)), 'WAVE');
+  assert.equal(dv.getUint32(24, true), 8000);
+  assert.deepEqual([dv.getInt16(44, true), dv.getInt16(46, true), dv.getInt16(48, true)], [0, 32767, -32768]);
+});

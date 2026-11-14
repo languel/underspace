@@ -709,10 +709,18 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   The metronome glyph (a setting) clicks each beat on the audio clock, the
   bar's first beat higher. With it on, recording from rest begins after a
   bar of clicks.
+- **Sound out and clips** (a twenty-third pass): "Export the sound" renders
+  the loop range (or 8 bars) offline: travelers, events, junctions,
+  recorded clips through the instruments, and scores through their own
+  brushes, in an OfflineAudioContext, into a 16-bit WAV
+  (`sound.renderAudio`, `sound.wav`). A clip's menu adds Duplicate after
+  it (on the next bar) and Rename, and Delete removes the picked clip
+  while the pointer is over the timeline.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
-  drawn); audio recording; note-off at exit (IanniX's gate); scores on
-  the shared transport (they still schedule their own passes); MIDI clock;
-  a nested space with its own context; editing notes inside a clip.
+  drawn); live audio recording (offline export exists); MIDI clock; a
+  nested space with its own context; continuous cursor messages (a
+  traveler sending CC as it moves); tracks and compositions of clips as
+  in AMS; free travelers, gas and physics.
 
 The owner asked to match Poliplan's functionality "for starters" without
 copying it. Not matched yet: writing your own brushes and sculpt tools in

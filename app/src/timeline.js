@@ -241,6 +241,7 @@ export function createTimeline(el, host) {
     else if (k === '-' || k === '_') { const at = tr.beat; ppb = Math.max(2, ppb / 1.4); scroll = Math.max(0, at - (el.clientWidth - GUTTER) / ppb / 2); }
     else if (k === 'ArrowLeft' || k === 'ArrowRight') { const d = (k === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? per : 1), b = Math.max(0, Math.round(tr.beat) + d); host.seek(b * tr.spb); }
     else if (k === 'Home') host.actions.stop();
+    else if ((k === 'Delete' || k === 'Backspace') && host.selected && host.state.clips.has(host.selected)) { host.call('clip.set', { id: host.selected, remove: true }); host.selected = null; }
     else return;
     e.preventDefault(); e.stopImmediatePropagation(); lastSig = '';
   }, true);

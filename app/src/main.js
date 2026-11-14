@@ -1323,6 +1323,7 @@ const ACTIONS = [
   { id: 'iannix.import', title: 'Import an IanniX score', icon: 'open', group: 'play', menu: true, when: (c) => !c.hit, run: () => iannixInput.click() },
   { id: 'nous.import', title: 'Import a Midinous project', icon: 'open', group: 'play', menu: true, when: (c) => !c.hit, run: () => nousInput.click() },
   { id: 'midi.import', title: 'Import a MIDI file', icon: 'open', group: 'play', menu: true, when: (c) => !c.hit, run: () => midiInput.click() },
+  { id: 'audio.export', title: 'Export the sound', icon: 'save', group: 'play', menu: true, when: (c) => !c.hit && canPlay(), run: () => exportAudio() },
   { id: 'midi.export', title: 'Export recorded clips as MIDI', icon: 'save', group: 'play', menu: true, when: (c) => !c.hit && state.clips.size > 0, run: () => exportMidi() },
   { id: 'midi.connect', title: 'Send notes to MIDI', icon: 'connector', group: 'play', run: () => connectMidi() },
   // ink brushes: on the selection, or with nothing selected, for the lines drawn next
@@ -1638,7 +1639,7 @@ timeline = createTimeline($('timeline'), {
   actions: { play: () => togglePlay(), stop: () => rewind(), record: () => runAction('transport.record'), loop: () => runAction('transport.loop') },
   clipMenu(id, x, y) {
     const c = state.clips.get(id);
-    showMenu([{ header: true, title: c.name }, { title: c.muted ? 'Unmute' : 'Mute', icon: 'hide', run: () => call('clip.set', { id, muted: !c.muted }) }, { title: timeline.editing === id ? 'Close the notes' : 'Edit the notes', icon: 'points', run: () => timeline.edit(timeline.editing === id ? null : id) }, { title: 'Export as MIDI', icon: 'save', run: () => exportMidi([c]) }, null, { title: 'Delete', icon: 'remove', run: () => call('clip.set', { id, remove: true }) }], x, y);
+    showMenu([{ header: true, title: c.name }, { title: c.muted ? 'Unmute' : 'Mute', icon: 'hide', run: () => call('clip.set', { id, muted: !c.muted }) }, { title: timeline.editing === id ? 'Close the notes' : 'Edit the notes', icon: 'points', run: () => timeline.edit(timeline.editing === id ? null : id) }, { title: 'Export as MIDI', icon: 'save', run: () => exportMidi([c]) }, { title: 'Duplicate after it', icon: 'copy', run: () => { const len = Math.max(1, ...c.notes.map((n) => n.beat + n.len)), per = state.music.meter[0]; call('clip.add', { at: c.at + Math.ceil(len / per) * per, notes: c.notes, name: c.name }); } }, { title: 'Rename', icon: 'note', run: () => { const name = prompt('Name', c.name); if (name) call('clip.set', { id, name }); } }, null, { title: 'Delete', icon: 'remove', run: () => call('clip.set', { id, remove: true }) }], x, y);
   },
 });
 // Render the drawing to a clip, offline: travelers, events and junctions are played from the
@@ -1661,6 +1662,28 @@ function renderToClip() {
   const id = call('clip.add', { at: a, notes: inside, name: 'render' });
   timeline?.show(true);
   return id;
+}
+// The performance as sound, rendered offline over the loop range (or 8 bars): travelers, events,
+// junctions, scores' brushes and the recorded clips, through the built-in instruments, as a WAV.
+async function exportAudio() {
+  const m = state.music, spb = secPerBeat(m), per = m.meter[0];
+  const [a, b] = transport.loop.on && transport.loop.b > transport.loop.a ? [transport.loop.a, transport.loop.b] : [0, 8 * per];
+  const notes = renderNotes(state.objects, b * spb, musicHooks()).filter((n) => n.sec >= a * spb).map((n) => ({ ...n, sec: n.sec - a * spb, instrument: instrumentOf(n.ch) }));
+  for (const c of state.clips.values()) if (!c.muted) for (const n of c.notes) { const beat = c.at + n.beat; if (beat >= a && beat < b) notes.push({ sec: (beat - a) * spb, midi: n.midi, vel: n.vel, len: n.len * spb, instrument: instrumentOf(n.ch) }); }
+  const passes = [];
+  for (const o of scores()) {
+    if (o.hidden) continue;
+    const L = passLen(o);
+    for (let k = Math.floor((a * spb) / L); k * L < b * spb; k++) { const sc = scoreOf(o.id); if (sc) passes.push({ at: k * L - a * spb, score: sc }); }
+  }
+  readout.hidden = false; readout.textContent = '◌';
+  try {
+    const blob = await sound.renderAudio(notes, passes, (b - a) * spb);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob); link.download = 'underspace.wav'; link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 2000);
+    readout.hidden = true;
+  } catch (e) { readout.textContent = e.message; setTimeout(() => { readout.hidden = true; }, 2500); }
 }
 // A MIDI file as clips: one clip, at the playhead's bar; its tempo is offered to the timeline.
 const midiInput = Object.assign(document.createElement('input'), { type: 'file', accept: '.mid,.midi,audio/midi', hidden: true });

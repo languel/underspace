@@ -128,3 +128,30 @@ export function position(id) {
   for (let i = s.passes.length - 1; i >= 0; i--) if (s.passes[i].t0 <= now) return Math.min(1, (now - s.passes[i].t0) / s.passes[i].duration);
   return 0;
 }
+
+// ---- audio out: a performance rendered offline, as a WAV file ---------------------
+// notes: [{ sec, midi, vel, len, instrument }]; passes: [{ at (s), score }] scores' passes.
+// Played through the same instruments and brushes into an OfflineAudioContext.
+export async function renderAudio(notes, passes, seconds, rate = 44100) {
+  const ac = new OfflineAudioContext(2, Math.max(1, Math.ceil((seconds + 1.5) * rate)), rate);
+  const comp = ac.createDynamicsCompressor(), out = ac.createGain();
+  out.gain.value = 0.8; out.connect(comp).connect(ac.destination);
+  for (const n of notes) voice(ac, out, n.instrument, n.midi, n.vel, n.sec + 0.01, Math.max(0.05, n.len));
+  for (const { at, score } of passes) {
+    const brush = compileBrush(score.source);
+    if (brush.error) continue;
+    try { brush.run(score.voices, { audio: ac, out, t0: at + 0.01, duration: Math.max(0.25, score.duration), bpm: score.bpm }); } catch { /* a brush that fails is left out */ }
+  }
+  return wav(await ac.startRendering());
+}
+// 16-bit PCM WAV of an AudioBuffer.
+export function wav(buf) {
+  const ch = buf.numberOfChannels, n = buf.length, bytes = new DataView(new ArrayBuffer(44 + n * ch * 2));
+  const w = (o, s) => [...s].forEach((c, i) => bytes.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); bytes.setUint32(4, 36 + n * ch * 2, true); w(8, 'WAVE'); w(12, 'fmt '); bytes.setUint32(16, 16, true); bytes.setUint16(20, 1, true); bytes.setUint16(22, ch, true);
+  bytes.setUint32(24, buf.sampleRate, true); bytes.setUint32(28, buf.sampleRate * ch * 2, true); bytes.setUint16(32, ch * 2, true); bytes.setUint16(34, 16, true); w(36, 'data'); bytes.setUint32(40, n * ch * 2, true);
+  const data = [...Array(ch)].map((_, c) => buf.getChannelData(c));
+  let o = 44;
+  for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++) { const v = Math.max(-1, Math.min(1, data[c][i])); bytes.setInt16(o, v < 0 ? v * 0x8000 : v * 0x7fff, true); o += 2; }
+  return new Blob([bytes], { type: 'audio/wav' });
+}
