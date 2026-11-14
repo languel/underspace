@@ -19,9 +19,13 @@ unit tests.
 
 | Kind | Roles |
 | --- | --- |
-| line | ink, connector (bound to two ports), path (code that reads or makes the line) |
-| shape | visual, code container, render target (a 3D space inside), score (plays the lines drawn in it) |
+| line | ink, connector (bound to two ports), path (code that reads or makes the line), event, traveler |
+| shape | visual, code container, render target (a 3D space inside), score (plays the lines drawn in it), note, event, traveler |
+| joint | where lines meet: holds them together; its code routes travelers |
 | group | made by collapsing; its ports are the connectors that were cut |
+
+Making something an event or a traveler keeps its shape and look: the mark
+itself fires or travels.
 
 Code is plain JS. A code container holds either a function body with a
 header that declares its ports,
@@ -46,13 +50,16 @@ or with a shape selected, makes it a render target.
 | --- | --- |
 | V H D L R O N | select, pan, draw, straight line (Shift: 15° steps), rectangle, ellipse, note |
 | B T S | code container, render target, score |
+| ⇧V | points tool: the control points of lines |
+| G R S (with a selection) | grab, rotate, scale, as in Blender: X Y Z axis, type a number, Enter or click accepts, Esc cancels |
+| ⇧D | duplicate and grab |
 | U | sculpt: reshape lines under the ring; `[` `]` radius, `{` `}` strength, Alt inverts |
 | Space (tap) | play or stop the selected scores, or all of them; hold and drag to pan |
-| C / T / S / X | selection becomes code (a line: a path) / a render target / a score / plain |
+| C / T / X | selection becomes code (a line: a path) / a render target / plain |
 | W | selected line becomes a connector to the nearest ports |
 | drag from a port | draw a connector, in any tool |
-| G / E | collapse into a group / expand |
-| ⌘D | duplicate |
+| ⌘G / ⌘⇧G or E | collapse into a group / expand |
+| ⌘D, ⌘C, ⌘V | duplicate, copy as JSON, paste at the pointer |
 | Enter, Esc | go into the selection / deselect, then go up a level |
 | F or 1, ⇧F or 2, + − | fit all, frame the selection, zoom |
 | arrows | nudge the selection, or pan |
@@ -73,6 +80,9 @@ or with a shape selected, makes it a render target.
 | in a target: ⇧+right-click | set the 3D cursor |
 | Y, A | event tool; attach a traveler to the selected line |
 | ⇧S | selected lines: smooth or straight strokes |
+| ; | code on objects you zoom into: show or hide |
+| draw, then hold still | a ring of glyphs: let go on one to turn the stroke into it |
+| Alt+Shift-drag, Alt+Ctrl-drag | pan, zoom (canvas and targets) |
 | right-click a tool | the other tools of its kind, or its settings |
 
 ## Brushes
@@ -83,11 +93,36 @@ more. Choose one in Properties, in the draw tool's settings (right-click
 the tool), or from the palette ("Brush: charcoal"). Brushed marks are
 painted on a 2D layer, so they do not appear inside render targets.
 
+## Joints
+
+Lines that touch connect. When the end of a stroke lands on another line,
+on another line's end, or on a joint, the two are joined there, and from
+then on moving one carries the other. Each line keeps its drawn shape: it
+moves, turns and scales as a whole. A ring at the pointer shows the join
+before you let go; hold Ctrl or ⌘ as you let go to draw without joining.
+Dropping or transforming a line so its end touches another joins them too.
+It works the same in render targets (3D).
+
+Right-click › Constrain: join where it crosses, join where its ends touch,
+pin here, keep level or plumb, keep its length, let go. A joint is an
+object: click it, drag it, delete it, or edit its code.
+
 ## Travelers and events
 
-Select a line and press A: a traveler sits on it. Draw events (Y) where it
-passes. Tap Space and travelers move; each event they enter fires its code,
-by default a note whose pitch is how high on the line the traveler was.
+Select a line and press A: a traveler sits on it. Make any mark an event
+(right-click › Convert to › Make event, or the hold ring), or draw one
+with Y. Tap Space and travelers move. An event fires when a traveler
+crosses it (an open line) or enters it (a closed line or a shape). By
+default it plays a note whose pitch is how high up the traveler was.
+An event's code can also act on the traveler: `ev.reflect()`, `ev.stop()`,
+`ev.split()`, `ev.speed(k)`.
+
+At a joint, the joint's code chooses the traveler's way on. Presets (the
+menu at the top of the Code panel) are round robin (the default), chance
+(weights for straight, left, right, back), random, straight, split,
+reflect, stop and every nth. The code is given `ways`, straightest first,
+and returns a way or its index, an array of them to split, `'back'` or
+`'stop'`.
 
 ## Scores
 
