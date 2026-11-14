@@ -570,6 +570,59 @@ Added in an eleventh pass (14 Nov 2026), branching and events that act:
   crossed, and a line it crossed waits until the rider is clear of that
   spot (`firedAt` in `play.js`). A copy made by split starts out latched.
 
+Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
+
+- **References** (the owner): IanniX scores, as carried into underscores
+  (`~/dev/underscores/notes/iannix.md`: one transport, and each object
+  reads its local time from it), and midinojs (Midinous: named scales,
+  distance as time in beats, junction nodes). The scales and the MIDI file
+  writer come from Artist Model Studio, which took them from Midinous.
+- `src/music.js`: the musical context `{ bpm, meter, scale, root, low, high }`.
+  It is document state, set by the `music.set` command and reset with the
+  space. It provides the 37 Midinous scales or your own list of steps (fractional
+  semitones for other tunings), `degrees`, `snap`, `step` (an interval in
+  degrees), `pitch(v)` (0..1 to a note of the scale across the range),
+  note names, `bbt` (bar.beat.sixteenth) and `beatsOf` ('8n', '2 bars',
+  '1.5s').
+- `src/transport.js`: one clock (seconds) with play, pause, seek, stop,
+  a loop range in beats and a record flag. It is view state, not in the
+  take. `main.js` keeps `spb` in step with the tempo. Seeking, rewinding or
+  coming round the loop reruns the travelers silently from 0 to the new
+  time (`catchUp`), because riders carry state.
+- **Travelers run on beats:** `dur` is now in beats (default 8), `at` is
+  the beat a traveler sets off on, and `speed` (grid cells a beat) is
+  Midinous's distance-as-time. A traveler paused partway keeps its place.
+  Event and junction code also receive `pitch`, `step` and `snap`. The
+  default event is `note(pitch(ev.y), 100, p.dur)`; new presets are fixed
+  note and step up.
+- **Recording:** while ● is on, every note played (by events and
+  junctions) is collected. When recording stops it becomes a clip
+  (`clip.add`, in `state.clips`: `{ at, notes: [{ beat, midi, vel, len }]
+  }`). Clips play on the transport and move with `clip.set` (at, name,
+  muted, remove). `src/midi.js` writes a .mid file of them and sends notes
+  to Web MIDI.
+- `src/timeline.js`: the strip along the bottom (⌥T). Its head holds the
+  transport and the musical context; below are the ruler (click or drag to
+  seek, Shift-drag to loop) and lanes for each traveler (its passes),
+  score (its passes) and clip (its notes, drawn as a small piano roll).
+  Clips can be dragged; right-click a clip to mute, export or delete it.
+- Keys: with Alt (Option) the physical key is read, because a Mac types
+  another character (Alt+T is †). This also fixes the earlier `alt+;`
+  and `alt+z`.
+- Fixed: a looping traveler's jump from the end back to the start was
+  treated as travel and fired every event it passed over. The trail is
+  now broken at a jump.
+- Checked in the browser: recording a looping traveler across two line
+  events on a pentatonic minor scale made a clip, and the timeline showed
+  the traveler's passes, the clip's notes and the playhead. Tests: scales,
+  time, a MIDI file, the transport's pause and loop, music and clip
+  commands with undo, `at` and `speed`, the loop jump. 66 in all.
+- Not yet: the process take as a timeline lane (scrub how the drawing was
+  made); gestures recorded in time (a stroke replayed at the speed it was
+  drawn); audio recording; note-off at exit (IanniX's gate); scores on
+  the shared transport (they still schedule their own passes); MIDI clock;
+  a nested space with its own context; editing notes inside a clip.
+
 The owner asked to match Poliplan's functionality "for starters" without
 copying it. Not matched yet: writing your own brushes and sculpt tools in
 the app, rotate and scale of lines, the point and lasso-plane tools,

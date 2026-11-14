@@ -176,7 +176,7 @@ test('a traveler follows its line, and an event fires once when it enters', asyn
   assert.equal(call('object.role', { id: ev, role: 'traveler' }), false, 'a shape cannot become a traveler without a line');
 
   const play = createPlay(), notes = [];
-  const hooks = { pointsOf: (l) => l.points, paramsOf: (o) => ({ dur: 10, loop: 0, start: 0, low: 48, high: 84, ...o.params }), note: (m) => notes.push(m) };
+  const hooks = { spb: 1, pointsOf: (l) => l.points, paramsOf: (o) => ({ dur: 10, loop: 0, start: 0, low: 48, high: 84, ...o.params }), note: (m) => notes.push(m) };
   let r = play.step(state.objects, 0, true, hooks);
   assert.deepEqual(r.moved.get(tr), [0, 0]);
   r = play.step(state.objects, 8, true, hooks); // from 0 to 8: it jumped the thin event, the sweep still finds it

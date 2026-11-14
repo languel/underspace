@@ -124,6 +124,32 @@ reflect, stop and every nth. The code is given `ways`, straightest first,
 and returns a way or its index, an array of them to split, `'back'` or
 `'stop'`.
 
+## Timeline and music
+
+⌥T shows the timeline along the bottom, IanniX's transport and Midinous's
+musical grid in one place. Its head has rewind (⌥,), play or pause
+(Space), record (⌥R), loop (⌥L), the position in bars, beats and
+sixteenths, and the musical context everything plays in: tempo, meter,
+scale (Midinous's 37, or your own steps in semitones, fractions allowed,
+for other tunings), root, and the range of notes that heights map to.
+Below it is a ruler: click or drag it to move the playhead, and Shift-drag
+it to mark the loop. Under the ruler there is a lane for each traveler,
+score and recorded clip.
+
+Travelers run on beats. `dur` is how many beats the whole line takes, `at`
+is the beat it sets off on, and with `speed` above 0 it moves that many
+grid cells a beat, so distance on the grid is time (Midinous). Event and
+junction code can use `pitch(v)` (a place 0..1 as a note of the scale),
+`step(n, k)` (k degrees up the scale from n) and `snap(n)`. Event presets
+include fixed note and step up.
+
+Recording: the notes travelers and events play while ● is on become a clip
+on the timeline. A clip plays back with the transport, can be dragged
+along it, and has a right-click menu: mute, export as MIDI, delete.
+"Export recorded clips as MIDI" writes a .mid file of every unmuted clip.
+"Send notes to MIDI" connects Web MIDI, after which notes also go to your
+instruments.
+
 ## Scores
 
 Draw a score frame (S) and draw lines in it: across is time, up is pitch.

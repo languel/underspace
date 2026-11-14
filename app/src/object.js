@@ -36,7 +36,9 @@ export const isTarget = (o) => o.kind === 'shape' && o.role === 'target';
 export const hasCode = (o) => o.role === 'code' || o.role === 'path' || o.role === 'score' || o.role === 'event' || o.role === 'junction';
 // A traveler has no code of its own; this declares its ports and parameters.
 // loop: 0 once, 1 loop, 2 there and back. start: where on the line it begins (0..1).
-export const TRAVELER = '// traveler\n// out: x y u\n// param: dur 4\n// param: loop 1\n// param: start 0';
+// dur: beats for the whole line (at the music context's tempo); at: the beat it sets off on;
+// speed: grid cells a beat (Midinous: distance is time), 0 to use dur instead.
+export const TRAVELER = '// traveler\n// out: x y u\n// param: dur 8\n// param: loop 1\n// param: start 0\n// param: at 0\n// param: speed 0';
 export const isWire = (o) => o.role === 'connector' && !!o.bind;
 
 const parsed = new Map();

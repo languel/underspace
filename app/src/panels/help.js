@@ -26,6 +26,8 @@ const GESTURES = [
   ['Drag a joint', 'what it holds follows; Delete lets go'],
   ['A traveler reaches a joint', 'the joint\'s code picks its way on; straight on by default'],
   [';', 'code on objects zoomed into, shown or hidden'],
+  ['Timeline ruler: click, drag; Shift-drag', 'move the playhead; mark the loop'],
+  ['Timeline clip: drag; right-click', 'move it by sixteenths (Shift: freely); mute, export as MIDI, delete'],
   ['Right-click', 'what can be done here'],
   ['Paste code on the canvas', 'a code container; a p5.js or three.js sketch runs'],
 ];

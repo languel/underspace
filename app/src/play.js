@@ -18,12 +18,13 @@ import { measure, atS, tangentS, jointsOn, waysAt, nearestOn } from './joints.js
 //         and what it can do to the traveler: reflect(), stop(), go(), split(), speed(k)
 //   p     the declared parameters;  mem  an object that persists
 //   note(midi, velocity, seconds) plays a note
+//   pitch(v)  a place 0..1 as a note: across the timeline's range, on its scale
+//   step(n, k)  k degrees of the scale up from note n;  snap(n)  the nearest note of the scale
 export const EVENT = `// event
 // out: gate count
-// param: low 48
-// param: high 84
 // param: dur 0.3
-note(p.low + ev.y * (p.high - p.low), 100, p.dur);`;
+// how high it was reached, as a note of the scale (set on the timeline)
+note(pitch(ev.y), 100, p.dur);`;
 
 // How far along (0..1) a traveler is at time t. loop: 0 once, 1 loop, 2 there and back.
 export function progress(t, { dur = 4, loop = 1, start = 0 } = {}) {
@@ -88,10 +89,21 @@ ev.stop();`,
 ev.speed(p.by);`,
   'note and reflect': `// note and reflect
 // out: gate count
-// param: low 48
-// param: high 84
-note(p.low + ev.y * (p.high - p.low), 100, 0.3);
+note(pitch(ev.y), 100, 0.3);
 ev.reflect();`,
+  'fixed note': `// fixed note
+// out: gate count
+// param: midi 60
+// param: vel 100
+// param: dur 0.3
+note(p.midi, p.vel, p.dur);`,
+  'step up': `// step up
+// out: gate count
+// param: from 60
+// param: by 1
+// each time it fires, the next note up the scale, by an interval in degrees
+mem.k = (mem.k ?? -1) + 1;
+note(step(p.from, (mem.k * p.by) % 15), 100, 0.3);`,
 };
 
 // What a junction's code returned, as what the rider does:
@@ -107,6 +119,8 @@ function decide(r, ways) {
 
 const MAX_RIDERS = 64; // a traveler that splits is at most this many
 let paramsHook = () => ({});
+const plain = { note() {}, pitch: (v) => 48 + v * 36, step: (n, k) => n + k, snap: (n) => n };
+let hooksNow = plain;
 export function createPlay() {
   const latched = new Set(), firedAt = new Map(), counts = new Map(), mems = new Map(), handlers = new Map(), net = new Map();
   const hitAt = new Map(); // event or junction id -> when it last fired (ms), for the view to flash
@@ -115,13 +129,13 @@ export function createPlay() {
     if (!f) { try { f = { run: new Function(...args, code) }; } catch (e) { f = { error: e.message }; } if (handlers.size > 200) handlers.clear(); handlers.set(key, f); }
     return f;
   };
-  const handler = (code) => compile(code, ['ev', 'p', 'note', 'mem'], code);
-  const chooser = (code) => compile('junction\n' + code, ['ways', 'ev', 'p', 'mem'], code);
+  const handler = (code) => compile(code, ['ev', 'p', 'note', 'mem', 'pitch', 'step', 'snap'], code);
+  const chooser = (code) => compile('junction\n' + code, ['ways', 'ev', 'p', 'mem', 'note', 'pitch', 'step', 'snap'], code);
   const memOf = (id) => { if (!mems.has(id)) mems.set(id, {}); return mems.get(id); };
 
   // One rider of a traveler moves on by `left` (a distance) along its lines.
   // At a joint, the joint's code chooses; the rider may turn, split, go back or stop.
-  // Returns the trail it left: points, for events to test against.
+  // Returns the trail it left: points, for events to test against; null where it jumped.
   function ride(o, rider, all, left, p, objects, measureOf, out, errors) {
     let m = measureOf(rider.line);
     const trail = m ? [atS(m, rider.s)] : [];
@@ -142,11 +156,12 @@ export function createPlay() {
         let r;
         const f = chooser(j.code ?? '');
         if (f.error) errors.set(j.id, f.error);
-        else try { r = f.run(ways, { traveler: o.id, rider: rider.n, from: rider.line, count: counts.get(j.id) }, paramsHook(j), memOf(j.id)); } catch (err) { errors.set(j.id, err.message); }
+        else try { const h = hooksNow; r = f.run(ways, { traveler: o.id, rider: rider.n, from: rider.line, count: counts.get(j.id) }, paramsHook(j), memOf(j.id), h.note, h.pitch, h.step, h.snap); } catch (err) { errors.set(j.id, err.message); }
         const d = decide(r, ways);
         rider.skip = j.id;
         if (d.stop) { rider.stopped = true; break; }
         if (d.back) { rider.dir = -rider.dir; continue; }
+        trail.push(null, atS(measureOf(d.go[0].line), d.go[0].u * measureOf(d.go[0].line).total));
         d.go.slice(1).forEach((w) => { if (all.length < MAX_RIDERS) all.push({ ...rider, n: ++o_n.n, line: w.line, dir: w.dir, s: w.u * measureOf(w.line).total, spawned: true, pending: left }); });
         const w = d.go[0];
         rider.line = w.line; rider.dir = w.dir; m = measureOf(w.line); rider.s = w.u * m.total;
@@ -157,7 +172,7 @@ export function createPlay() {
       const end = rider.dir > 0 ? m.total : 0;
       walk(end); left -= Math.abs(end - rider.s); rider.s = end; rider.skip = null;
       const loop = p.loop ?? 1;
-      if (objects.get(rider.line)?.closed || (loop === 1 && !rider.spawned)) rider.s = rider.dir > 0 ? 0 : m.total; // round again
+      if (objects.get(rider.line)?.closed || (loop === 1 && !rider.spawned)) { rider.s = rider.dir > 0 ? 0 : m.total; trail.push(null, atS(m, rider.s)); } // round again: a jump, not a stretch travelled
       else if (loop === 2) rider.dir = -rider.dir;                                                                   // there and back
       else { rider.stopped = true; if (rider.spawned) rider.gone = true; }                                           // a copy that runs out goes
     }
@@ -170,8 +185,11 @@ export function createPlay() {
     reset() { latched.clear(); firedAt.clear(); counts.clear(); net.clear(); },
     // hooks: pointsOf(line) -> its points as shown, paramsOf(o) -> resolved parameters, note(midi, vel, dur)
     // -> { moved: id -> [x, y], ghosts: [{ of, pos }] (the riders a traveler split into), out, errors }
+    // hooks also: spb (seconds a beat), grid (canvas units a grid cell), pitch, step, snap
     step(objects, t, playing, hooks) {
       paramsHook = hooks.paramsOf;
+      hooksNow = { ...plain, ...hooks };
+      const spb = hooks.spb ?? 0.5, grid = hooks.grid ?? 1;
       const moved = new Map(), out = new Map(), errors = new Map(), gate = new Map(), ghosts = [];
       const events = [...objects.values()].filter((o) => o.role === 'event' && !o.hidden);
       const measures = new Map(), measureOf = (id) => {
@@ -185,12 +203,15 @@ export function createPlay() {
         if (!start) continue;
         const p = hooks.paramsOf(o);
         // A traveler keeps its riders (one, until it splits): each a line, a distance along it, a direction.
+        // At rest at the start (not playing, at 0), or sent back in time: it starts afresh.
         let st = net.get(o.id);
-        if (!playing || !st || t < st.t || st.on !== line.id) {
-          st = { on: line.id, t, riders: [{ n: ++o_n.n, line: line.id, s: Math.max(0, Math.min(1, p.start ?? 0)) * start.total, dir: 1, speed: start.total / Math.max(0.05, p.dur ?? 4), skip: null, stopped: false }] };
+        if ((!playing && t === 0) || !st || t < st.t || st.on !== line.id) {
+          const speed = p.speed > 0 ? (p.speed * grid) / spb : start.total / Math.max(0.05, (p.dur ?? 8) * spb);
+          st = { on: line.id, t, riders: [{ n: ++o_n.n, line: line.id, s: Math.max(0, Math.min(1, p.start ?? 0)) * start.total, dir: 1, speed, skip: null, stopped: false }] };
           net.set(o.id, st);
         }
-        const dt = Math.max(0, t - st.t);
+        // it moves only from its own beat on (IanniX: each object's time is the transport's, from its start)
+        const from = Math.max(st.t, (p.at ?? 0) * spb), dt = Math.max(0, t - from);
         st.t = t;
         const all = st.riders;
         for (let i = 0; i < all.length; i++) {
@@ -211,17 +232,17 @@ export function createPlay() {
             let entered = null, now = false;
             if (e.kind === 'line') {
               const path = pathOf(e);
-              if (isClosed(e, path)) { for (let k = 1; k < trail.length && !entered; k++) if (enclosed(path, trail[k][0], trail[k][1])) entered = trail[k]; now = enclosed(path, pos[0], pos[1]); }
+              if (isClosed(e, path)) { for (let k = 1; k < trail.length && !entered; k++) if (trail[k] && enclosed(path, trail[k][0], trail[k][1])) entered = trail[k]; now = enclosed(path, pos[0], pos[1]); }
               else {
                 // a line crossed: where, exactly. After it has fired, it waits until the rider is clear of
                 // that spot, so a rider sent back from it does not cross it again at once.
                 const at = firedAt.get(key);
                 if (at && Math.hypot(pos[0] - at[0], pos[1] - at[1]) > Math.max(1e-3, rider.speed * 0.05)) firedAt.delete(key);
-                if (!firedAt.has(key)) for (let k = 1; k < trail.length && !entered; k++) entered = crosses(path, trail[k - 1], trail[k]);
+                if (!firedAt.has(key)) for (let k = 1; k < trail.length && !entered; k++) if (trail[k - 1] && trail[k]) entered = crosses(path, trail[k - 1], trail[k]);
               }
             } else {
               const r = rectOf(e);
-              for (let k = 1; k < trail.length && !entered; k++) if (inside(e, r, trail[k][0], trail[k][1])) entered = trail[k];
+              for (let k = 1; k < trail.length && !entered; k++) if (trail[k] && inside(e, r, trail[k][0], trail[k][1])) entered = trail[k];
               now = inside(e, r, pos[0], pos[1]);
             }
             if (entered && !latched.has(key)) {
@@ -248,7 +269,7 @@ export function createPlay() {
                     firedAt.set(o.id + '#' + copy.n + '|' + e.id, entered); // the copy starts on the event: it has already been there
                   },
                 };
-                try { f.run(ev, hooks.paramsOf(e), hooks.note, memOf(e.id)); } catch (err) { errors.set(e.id, err.message); }
+                try { f.run(ev, hooks.paramsOf(e), hooksNow.note, memOf(e.id), hooksNow.pitch, hooksNow.step, hooksNow.snap); } catch (err) { errors.set(e.id, err.message); }
               }
             }
             // latched until it leaves: an event does not fire again while the traveler stays inside

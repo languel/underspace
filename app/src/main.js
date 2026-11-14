@@ -33,6 +33,10 @@ import { createPoints, without } from './points.js';
 import { createModal, apply, applyRect } from './transform.js';
 import { snapPoints, snapBox, toSVG, toP5 } from './selection.js';
 import { showPie, recognize } from './pie.js';
+import { createTransport } from './transport.js';
+import { createTimeline } from './timeline.js';
+import { pitch as pitchOf, step as stepOf, snap as snapOf, secPerBeat } from './music.js';
+import { midiFile, createMidiOut } from './midi.js';
 import { solve, crossings, measure, atU, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
@@ -50,7 +54,9 @@ const faces = createFaces($('faces'), { onParam, onCode });
 const step = createRunner();
 const ink = createInk($('ink'));
 const playEngine = createPlay();
-let playT0 = null; // when the travelers set off (seconds), or null while they rest
+// One clock for everything that plays (transport.js); notes played while recording become a clip.
+const transport = createTransport(), midiOut = createMidiOut();
+let recNotes = [], lastBeat = 0, lastWrap = 0, clipDrag = null, timeline = null;
 const view = await createView({ canvas: $('gl'), stage, onFrame: frame });
 addEventListener('message', (e) => { if (e.data?.underspace) step.report(e.data.underspace, e.data); });
 
@@ -190,13 +196,54 @@ function scoreOf(id) {
 }
 const scores = () => [...state.objects.values()].filter((o) => o.role === 'score');
 const play = (id) => sound.start(id, () => scoreOf(id), (error) => step.report(id, { error: error ?? '' }));
-// Space: stop what is playing; otherwise play the selected scores, or all of them.
+// Space: pause what is playing; otherwise play from where the transport is: the selected scores
+// (or all of them), the travelers and the recorded clips.
 const travelers = () => [...state.objects.values()].filter((o) => o.role === 'traveler');
+const canPlay = () => scores().length || travelers().length || state.clips.size;
 function togglePlay(c = context()) {
-  if (sound.playing().length || playT0 != null) { sound.stopAll(); playT0 = null; playEngine.reset(); return; }
+  if (transport.playing) { transport.pause(); sound.stopAll(); endRecording(); return; }
   const chosen = c.sel.filter((o) => o.role === 'score');
   for (const o of chosen.length ? chosen : scores()) play(o.id);
-  if (travelers().length) { playEngine.reset(); playT0 = performance.now() / 1000; }
+  lastBeat = transport.beat;
+  transport.play();
+}
+// Back to the start (or the loop's start), everything at rest.
+function rewind() { sound.stopAll(); endRecording(); transport.stop(); playEngine.reset(); catchUp(); }
+// Move the playhead: travelers are run there from the start, silently, so they are where they would be.
+function seek(sec) { transport.seek(sec); catchUp(); }
+function catchUp() {
+  playEngine.reset();
+  const t = transport.t, h = { ...musicHooks(), note() {} }, dt = Math.max(1 / 30, t / 3000);
+  if (t > 0) for (let x = 0; x <= t + 1e-9; x += dt) playEngine.step(state.objects, Math.min(x, t), true, h);
+  lastBeat = transport.beat;
+}
+// What travelers, events and junctions play with: the music context, and notes that are heard, sent and recorded.
+function musicHooks() {
+  const m = state.music;
+  return { pointsOf: shownPath, paramsOf, note: playNote, spb: secPerBeat(m), grid: settings.gridSize, pitch: (v) => pitchOf(v, m), step: (n, k) => stepOf(n, k, m.scale, m.root), snap: (n) => snapOf(n, m.scale, m.root) };
+}
+function playNote(midi, vel = 100, seconds = 0.3) {
+  if (!Number.isFinite(midi)) return;
+  sound.note(midi, vel, seconds); midiOut.note(midi, vel, seconds);
+  if (transport.recording && transport.playing) recNotes.push({ beat: transport.beat, midi, vel, len: seconds / transport.spb });
+}
+// What was recorded becomes a clip on the timeline, starting on the beat it began.
+function endRecording() {
+  if (!recNotes.length) return;
+  const at = Math.floor(Math.min(...recNotes.map((n) => n.beat)));
+  call('clip.add', { at, notes: recNotes.map((n) => ({ ...n, beat: n.beat - at })) });
+  recNotes = [];
+}
+// Recorded clips play on the transport: the notes the playhead has passed since the last frame.
+function playClips() {
+  const b = transport.beat;
+  if (!transport.playing || b < lastBeat) { lastBeat = b; return; }
+  for (const c of state.clips.values()) {
+    if (c.muted) continue;
+    const at = clipDrag?.id === c.id ? clipDrag.at : c.at;
+    for (const n of c.notes) { const nb = at + n.beat; if (nb > lastBeat && nb <= b) { sound.note(n.midi, n.vel, n.len * transport.spb); midiOut.note(n.midi, n.vel, n.len * transport.spb); } }
+  }
+  lastBeat = b;
 }
 // A line as it is shown: what a traveler follows.
 const shownPath = (l) => curveOf(l, run?.shown.get(l.id) ?? ptsOf(l));
@@ -207,7 +254,11 @@ function frame() {
   laidOut = state.version;
   for (const id of sound.playing()) { if (get(id)?.role === 'score') step.report(id, { out: { pos: sound.position(id) } }); else sound.stop(id); }
   // Travelers move and events fire before the code objects run, so their outputs are this frame's.
-  const now = performance.now() / 1000, played = playEngine.step(state.objects, playT0 == null ? 0 : now - playT0, playT0 != null, { pointsOf: shownPath, paramsOf, note: sound.note });
+  transport.spb = secPerBeat(state.music);
+  const t = transport.t;
+  if ((transport.wrapped ?? 0) !== lastWrap) { lastWrap = transport.wrapped; catchUp(); } // the loop came round
+  const played = playEngine.step(state.objects, t, transport.playing, musicHooks());
+  playClips();
   setMoved(played.moved);
   let playSig = 0;
   for (const [id, out] of played.out) { step.report(id, { out, error: played.errors.get(id) ?? '' }); if (out.u != null) playSig += out.x * 3 + out.y * 7; }
@@ -240,6 +291,7 @@ function frame() {
   });
   panels.update();
   zoomLabel.textContent = Math.round(view.cam.zoom * 100) + '%';
+  timeline?.update();
   // The grid is the stage's own background, moved and scaled with the view.
   if (settings.grid) {
     let cell = settings.gridSize / view.unitsPerPx();
@@ -1195,7 +1247,14 @@ const ACTIONS = [
   { id: 'path.smooth', title: 'Smooth strokes', icon: 'draw', keys: 'shift+s', group: 'role', menu: true, when: (c) => c.lines.some((o) => o.style?.path === 'straight'), run: (c) => call('object.style', { ids: ids(c.lines), style: { path: null } }) },
   { id: 'role.visual', title: 'Make visual', icon: 'visual', keys: 'x', group: 'role', menu: 'Convert to', when: (c) => c.shapes.length && can(c.shapes, 'visual'), run: (c) => setRole(c.shapes, 'visual') },
   // sound: a tap of Space plays or stops (holding it and dragging pans)
-  { id: 'play', title: 'Play or stop', icon: 'play', keys: 'mod+enter', group: 'play', bar: 'edit', menu: true, when: () => scores().length || travelers().length, run: (c) => togglePlay(c) },
+  { id: 'play', title: 'Play or pause', icon: 'play', keys: 'mod+enter', group: 'play', bar: 'edit', menu: true, when: () => canPlay(), run: (c) => togglePlay(c) },
+  // The timeline: the transport, the musical context, and what plays on it (timeline.js).
+  { id: 'timeline', title: 'Timeline', icon: 'timeline', keys: 'alt+t', group: 'play', bar: 'edit', on: () => !!timeline?.visible, run: () => timeline.show() },
+  { id: 'transport.rewind', title: 'Back to the start', icon: 'rewind', keys: 'alt+,', group: 'play', run: () => rewind() },
+  { id: 'transport.record', title: 'Record what plays', icon: 'record', keys: 'alt+r', group: 'play', on: () => transport.recording, run: () => { const was = transport.recording; transport.record(); if (was) endRecording(); else if (!transport.playing) togglePlay(); } },
+  { id: 'transport.loop', title: 'Loop', icon: 'loop', keys: 'alt+l', group: 'play', on: () => transport.loop.on, run: () => { transport.loop = { ...transport.loop, on: !transport.loop.on }; } },
+  { id: 'midi.export', title: 'Export recorded clips as MIDI', icon: 'save', group: 'play', menu: true, when: (c) => !c.hit && state.clips.size > 0, run: () => exportMidi() },
+  { id: 'midi.connect', title: 'Send notes to MIDI', icon: 'connector', group: 'play', run: () => connectMidi() },
   // ink brushes: on the selection, or with nothing selected, for the lines drawn next
   ...['', ...brushesFor('line')].map((id) => ({
     id: 'brush.' + (id || 'none'), title: id ? `Brush: ${INK[id].label}` : 'Brush: plain line', short: id ? INK[id].label : 'Plain line', icon: 'brush', group: 'brush', menu: 'Brush', menuWhen: (c) => c.lines.some((o) => !o.bind),
@@ -1455,6 +1514,35 @@ const app = {
   },
 };
 const panels = createPanels($('tabs'), $('side'), app, PANELS);
+timeline = createTimeline($('timeline'), {
+  transport, state, call,
+  lanes() {
+    const m = state.music, spb = secPerBeat(m), out = [];
+    for (const o of travelers()) { const p = paramsOf(o), line = get(o.on), len = p.speed > 0 && line ? measure(shownPath(line)).total / (p.speed * settings.gridSize) : p.dur; out.push({ id: o.id, kind: 'traveler', name: o.name || 'traveler ' + o.id, at: p.at ?? 0, len: Math.max(0.25, len), repeat: p.loop !== 0 }); }
+    for (const o of scores()) { const p = paramsOf(o); out.push({ id: o.id, kind: 'score', name: o.name || 'score ' + o.id, at: 0, len: Math.max(0.25, (p.beats ?? 8) * (60 / (p.bpm ?? 90)) / spb), repeat: true }); }
+    for (const c of state.clips.values()) { const len = Math.max(1, ...c.notes.map((n) => n.beat + n.len)); out.push({ id: c.id, kind: 'clip', name: c.name, at: clipDrag?.id === c.id ? clipDrag.at : c.at, len, notes: c.notes, muted: c.muted }); }
+    return out;
+  },
+  seek,
+  preview(id, at) { clipDrag = id ? { id, at } : null; },
+  actions: { play: () => togglePlay(), stop: () => rewind(), record: () => runAction('transport.record'), loop: () => runAction('transport.loop') },
+  clipMenu(id, x, y) {
+    const c = state.clips.get(id);
+    showMenu([{ header: true, title: c.name }, { title: c.muted ? 'Unmute' : 'Mute', icon: 'hide', run: () => call('clip.set', { id, muted: !c.muted }) }, { title: 'Export as MIDI', icon: 'save', run: () => exportMidi([c]) }, null, { title: 'Delete', icon: 'remove', run: () => call('clip.set', { id, remove: true }) }], x, y);
+  },
+});
+// The recorded clips as a Standard MIDI File, downloaded.
+function exportMidi(list = [...state.clips.values()].filter((c) => !c.muted)) {
+  const notes = list.flatMap((c) => c.notes.map((n) => ({ ...n, beat: c.at + n.beat })));
+  const bytes = midiFile(notes, { bpm: state.music.bpm, meter: state.music.meter, name: 'underspace' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([bytes], { type: 'audio/midi' })); a.download = 'underspace.mid'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+async function connectMidi() {
+  try { const ports = await midiOut.connect(); readout.hidden = false; readout.textContent = ports.length ? '⇢ ' + ports.map((p) => p.name).join(', ') : '⇢ no MIDI outputs'; setTimeout(() => { readout.hidden = true; }, 2500); }
+  catch (e) { readout.hidden = false; readout.textContent = e.message; setTimeout(() => { readout.hidden = true; }, 2500); }
+}
 $('tabs').append(document.createElement('hr'), glyph('clean', 'Hide the interface (Tab)', () => document.body.classList.toggle('clean')));
 
 // Settings that change what is on screen.
@@ -1496,7 +1584,10 @@ pad.addEventListener('contextmenu', (e) => {
 });
 
 // Keys: the first action bound to the key whose context holds.
-const keyOf = (e) => [(e.metaKey || e.ctrlKey) && 'mod', e.shiftKey && 'shift', e.altKey && 'alt', e.key === ' ' ? 'space' : e.key.toLowerCase()].filter(Boolean).join('+');
+// With Alt (Option) a Mac types another character (Alt+T is †): read the key that was pressed instead.
+const CODE_KEY = { Comma: ',', Period: '.', Semicolon: ';', Slash: '/', BracketLeft: '[', BracketRight: ']', Quote: "'", Minus: '-', Equal: '=', Backslash: '\\' };
+const baseKey = (e) => (e.altKey && /^(Key|Digit)./.test(e.code ?? '') ? e.code.slice(-1).toLowerCase() : e.altKey && CODE_KEY[e.code] ? CODE_KEY[e.code] : e.key === ' ' ? 'space' : e.key.toLowerCase());
+const keyOf = (e) => [(e.metaKey || e.ctrlKey) && 'mod', e.shiftKey && 'shift', e.altKey && 'alt', baseKey(e)].filter(Boolean).join('+');
 addEventListener('keydown', (e) => {
   if (e.target.closest?.('input, textarea, select, .menu')) return;
   if (e.key === ' ') { if (!spaceKey) { spaceUsed = false; spaceAt0 = performance.now(); } spaceKey = true; pad.dataset.pan = '1'; e.preventDefault(); return; }
@@ -1508,7 +1599,7 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => {
   if (e.key !== ' ' || !spaceKey) return;
   spaceKey = false; delete pad.dataset.pan;
-  if (!spaceUsed && performance.now() - spaceAt0 < 400 && (scores().length || travelers().length)) togglePlay(); // a tap, not a hold
+  if (!spaceUsed && performance.now() - spaceAt0 < 400 && canPlay()) togglePlay(); // a tap, not a hold
 });
 
 // Paste code onto the canvas: it becomes a code container at the pointer.

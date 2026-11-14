@@ -72,7 +72,7 @@ test('a traveler runs through a junction onto the next line', async () => {
   const b = call('line.add', { points: [[4, 0], [4, 4]], style: { path: 'straight' } });
   call('joint.add', { at: [{ id: b, u: 0 }, { id: a, u: 1 }] });
   const tr = call('traveler.add', { on: a, dur: 4, loop: 0 });
-  const play = createPlay(), hooks = { pointsOf: (l) => l.points, paramsOf: (o) => ({ dur: 4, loop: 0, start: 0, ...o.params }), note() {} };
+  const play = createPlay(), hooks = { spb: 1, pointsOf: (l) => l.points, paramsOf: (o) => ({ dur: 4, loop: 0, start: 0, ...o.params }), note() {} };
   let r;
   for (let t = 0; t <= 6; t += 0.05) r = play.step(state.objects, t, true, hooks);
   near(r.moved.get(tr), [4, 2], 0.05); // 4 units along a, then 2 up b
@@ -91,7 +91,7 @@ test('a stroke turned event or traveler keeps its shape', () => {
   assert.equal(state.objects.get(e).kind, 'line');
 });
 
-const T_HOOKS = { pointsOf: (l) => l.points, paramsOf: (o) => { const p = { dur: 2, loop: 0, start: 0 }; for (const m of (o.code ?? '').matchAll(/\/\/ param: (\w+) ([\d.]+)/g)) p[m[1]] = +m[2]; return { ...p, ...o.params }; }, note() {} };
+const T_HOOKS = { spb: 1, pointsOf: (l) => l.points, paramsOf: (o) => { const p = { dur: 2, loop: 0, start: 0 }; for (const m of (o.code ?? '').matchAll(/\/\/ param: (\w+) ([\d.]+)/g)) p[m[1]] = +m[2]; return { ...p, ...o.params }; }, note() {} };
 // A T: a stem coming down onto a bar; travelers set off down the stem.
 async function tee(junctionCode) {
   const { createPlay } = await import('../src/play.js');

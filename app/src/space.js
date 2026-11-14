@@ -14,9 +14,12 @@ import { BRUSHES } from './brushes.js';
 import { BRUSHES as INK } from './ink/brushes.js';
 import { spec, apply, applyRect } from './transform.js';
 import { settle, JUNCTION, isCurve, curveOf, measure, atU } from './joints.js';
+import { DEFAULT_MUSIC, scaleName } from './music.js';
 
 export const state = {
   objects: new Map(),   // id -> object, see object.js
+  music: { ...DEFAULT_MUSIC }, // the context everything is heard in (music.js)
+  clips: new Map(),     // id -> a recorded clip: { id, name, at (beats), notes: [{ beat, midi, vel, len }] }
   selection: new Set(),
   n: 0,                 // ids are counted, so a replay gives the same ids
   version: 0,
@@ -483,10 +486,49 @@ define({
 
 define({ name: 'space.clear', doc: 'Remove everything.', run: () => reset() });
 
+// ---- music: the context, and recorded clips (music.js) -------------------------
+
+define({
+  name: 'music.set', doc: 'Set the musical context everything plays in: bpm, meter [beats in a bar, note value], scale (a name, or a list of steps in semitones from the root, fractions allowed), root (a MIDI note), low and high (the range that heights and places 0..1 map to).',
+  args: { bpm: T.num, meter: { type: 'array', items: { type: 'number' } }, scale: { type: ['string', 'array'] }, root: T.num, low: T.num, high: T.num },
+  run(a) {
+    const m = state.music;
+    if (a.bpm > 0) m.bpm = Math.min(400, Math.max(10, a.bpm));
+    if (Array.isArray(a.meter) && a.meter[0] > 0 && a.meter[1] > 0) m.meter = [Math.round(a.meter[0]), Math.round(a.meter[1])];
+    if (Array.isArray(a.scale) && a.scale.length) m.scale = a.scale.map(Number).filter(Number.isFinite);
+    else if (typeof a.scale === 'string' && scaleName(a.scale)) m.scale = scaleName(a.scale);
+    for (const k of ['root', 'low', 'high']) if (Number.isFinite(a[k])) m[k] = Math.max(0, Math.min(127, a[k]));
+  },
+});
+define({
+  name: 'clip.add', doc: 'Add a clip of notes to the timeline (what recording makes). at: where it starts, in beats; each note { beat (from the clip\'s start), midi, vel, len (beats) }.',
+  args: { notes: { type: 'array' }, at: T.num, name: T.str }, required: ['notes'],
+  run(a) {
+    const notes = (a.notes ?? []).filter((n) => Number.isFinite(n.beat) && Number.isFinite(n.midi)).map((n) => ({ beat: round(n.beat), midi: round(n.midi), vel: Math.round(n.vel ?? 100), len: round(n.len ?? 0.25) }));
+    if (!notes.length) return null;
+    const id = 'c' + (++state.n);
+    state.clips.set(id, { id, name: a.name ?? `take ${state.clips.size + 1}`, at: round(a.at ?? 0), notes });
+    return id;
+  },
+});
+define({
+  name: 'clip.set', doc: 'Move a clip (at, in beats), rename it, mute it, or remove it (remove: true).',
+  args: { id: T.id, at: T.num, name: T.str, muted: { type: 'boolean' }, remove: { type: 'boolean' } }, required: ['id'],
+  run(a) {
+    const c = state.clips.get(a.id);
+    if (!c) return false;
+    if (a.remove) { state.clips.delete(a.id); return true; }
+    if (Number.isFinite(a.at)) c.at = round(Math.max(0, a.at));
+    if (a.name) c.name = a.name;
+    if (a.muted === true) c.muted = true; else if (a.muted === false) delete c.muted;
+    return true;
+  },
+});
+
 // Run a command from inside another, without recording it separately.
 export const exec = (name, args) => commands.get(name).run(args);
 
-function reset() { state.objects.clear(); state.selection.clear(); state.n = 0; }
+function reset() { state.objects.clear(); state.selection.clear(); state.n = 0; state.music = { ...DEFAULT_MUSIC }; state.clips.clear(); }
 
 // ---- the take ---------------------------------------------------------------
 
