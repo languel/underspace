@@ -306,6 +306,10 @@ outside the page reaches the same commands through the relay:
 
 Good first calls: `space.read` (what is drawn), `view.look` (a picture), `tools.search`
 (find a command), `action.list` and `action.run` (everything a key or menu does).
+Before writing an object's code, `code.help` says what that kind of code is given and returns
+(`ev`, `ways`, `voices`, `note()`, `pitch()`), and hands out the presets to copy. To hear without
+ears, `play.state` reads what sounds: each score's voices as pitch over time, and the last notes.
+A wrong name (a scale, an instrument, an id) is an error that lists the right ones.
 
 The built-in assistant (`⌘J`, or type a sentence in the palette) works through the same
 commands. Its brain is chosen in the panel: a model server on this machine (Ollama, LM Studio,
