@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runTurn, toolset, asText, CORE } from '../src/agent.js';
 import { state, call, tools } from '../src/space.js';
+import { parseToolCalls } from '../src/engines.js';
 
 test('the tools a model is shown: a core by name, and call for the rest', () => {
   const { defs, resolve } = toolset(tools());
@@ -37,4 +38,23 @@ test('held: an agent\'s calls are refused, and it is told why', async () => {
   await runTurn({ text: 'x', engine: { complete: async () => script.shift() }, on: (e) => events.push(e), port: { call, tools, held: () => true } });
   assert.equal(state.objects.size, 0);
   assert.match(events.find((e) => e.type === 'result').text, /stopped by the person/);
+});
+
+test('what a model in the page wrote is read as words and tool calls', () => {
+  const a = parseToolCalls('I will draw it.\n<tool_call>\n<function=line_add>\n<parameter=points>\n[[0, 0], [2, 1]]\n</parameter>\n<parameter=closed>\ntrue\n</parameter>\n</function>\n</tool_call><|im_end|>');
+  assert.equal(a.content, 'I will draw it.');
+  assert.deepEqual(a.tool_calls, [{ id: 'call0', name: 'line_add', arguments: { points: [[0, 0], [2, 1]], closed: true } }]);
+  const b = parseToolCalls('<think>hm</think><tool_call>{"name": "space_read", "arguments": {}}</tool_call>');
+  assert.deepEqual(b.tool_calls, [{ id: 'call0', name: 'space_read', arguments: {} }]);
+  assert.deepEqual(parseToolCalls('Done.<|im_end|>'), { content: 'Done.', tool_calls: [] });
+});
+
+test('a model that repeats a call is told once, then the turn ends', async () => {
+  call('space.clear');
+  const again = { tool_calls: [{ id: 'a', name: 'tools_search', arguments: { query: 'line' } }] };
+  const events = [];
+  const r = await runTurn({ text: 'x', engine: { complete: async () => structuredClone(again) }, on: (e) => events.push(e), port: { call, tools: () => [...tools(), { name: 'tools.search', description: '', inputSchema: { type: 'object', properties: {} } }], held: () => false } }).catch((e) => ({ err: e.message }));
+  assert.equal(r.say, '');
+  assert.equal(events.filter((e) => e.type === 'call').length, 3);
+  assert.match(events.filter((e) => e.type === 'result')[1].text, /already made this exact call/);
 });

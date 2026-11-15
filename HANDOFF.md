@@ -1347,6 +1347,40 @@ Also asked for:
   was learned from it. Not done: streaming, pictures to models that can see
   (a picture is named, not sent), the mark staying lit while a question
   waits, per-agent undo.
+- **Controls, step 4 done: a brain in the browser (`app/src/brain.worker.js`,
+  `browserEngine` in `engines.js`).** Transformers.js 4.3.2 is loaded
+  from jsdelivr at a fixed version when a model is first asked for (its
+  wasm comes from there too). It was vendored at first
+  (`dist/transformers.min.js`, 0.6 MB, self-contained), but GitHub's push
+  protection reads a string on line 40 of that file as a Mistral API key
+  and refuses the push. It is a false alarm (model class names), but
+  allowing it is the owner's call: to vendor it for offline use, add the
+  file under `vendor/transformers/`, allow it at the URL GitHub prints, and
+  change the import in the worker.
+  A module worker loads `onnx-community/LFM3-1.7B-ONNX` at `q4f16` (1.1 GB,
+  from Hugging Face) on WebGPU, applies the model's own chat template with
+  the tools, generates greedily, and returns the raw text; `parseToolCalls`
+  reads LFM3's `<tool_call><function=…><parameter=…>` form and the JSON
+  form. Same loop, same tools, same panel: choose "in this browser" in the
+  Assistant panel. Tried in the app's browser pane (WebGPU with shader-f16):
+  first load about 110 s, then about 1.5 s a tool call; "a triangle: one
+  closed line with three corners" gave a right `line.add` (closed, straight)
+  and then two shapes nobody asked for. So the loop now refuses an exact
+  repeat of a call once and ends the turn at the third, the prompt says to
+  do only what was asked, and `view.frame` left the core tools. The weights
+  were fetched again after a reload there (the cache held 313 MB, not the
+  1.1 GB file): check in Chrome proper whether that is the pane's quota.
+  **What was found about the outside references:** the Space
+  `webml-community/LFM3-1.7B-WebGPU-Pi` runs GGUF weights on its own WebGPU
+  runtime and takes Pi's *terminal components*, not Pi's agent loop, so
+  there was no browser Pi loop to adopt; Pi's loop and provider packages
+  would add provider SDKs for nothing the 60-line `runTurn` lacks. Pi itself
+  is served as an outside harness through the relay. LFM3's template also
+  has deferred tools (`defer_loading`, `tool_reference` results) for tool
+  search: not used yet; `tools.search` plus `call` does the same by hand.
+  Next for the brains: LFM3's native deferred tools, streaming, a smaller
+  prompt for one-line edits (AMS's flow prompt), and evaluation: a set of
+  requests with expected commands, run against each engine.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

@@ -27,7 +27,7 @@ import { createRelay } from './relay.js';
 import { showMenu, showPopover, closeMenu } from './menu.js';
 import { scripted } from './assistant.js';
 import { install as installAgent } from './agent.js';
-import { endpointEngine, listModels } from './engines.js';
+import { endpointEngine, browserEngine, listModels } from './engines.js';
 import { assistantPanel } from './panels/assistant.js';
 import { brief } from './catalog.js';
 import { sketchKind } from './sketch.js';
@@ -1821,7 +1821,7 @@ function below(s) {
 }
 
 // The brains there are (engines.js), and the one chosen in settings.
-const ENGINES = [{ id: 'endpoint', title: 'local server' }];
+const ENGINES = [{ id: 'endpoint', title: 'local server' }, { id: 'browser', title: 'in this browser', make: () => browserEngine({ model: settings.assistBrowserModel, dtype: settings.assistBrowserDtype, on: (e) => agent.emit(e) }) }];
 async function engine() {
   const make = ENGINES.find((x) => x.id === settings.assistEngine)?.make;
   if (make) return make();

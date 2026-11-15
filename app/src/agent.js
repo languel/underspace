@@ -12,19 +12,22 @@
 const OUTSIDE = new Set(['human', 'palette', 'example', 'demo', 'assistant']); // callers that are not agents
 
 // The tools a model is shown from the start (the rest it finds with tools.search and runs with `call`).
-export const CORE = ['space.read', 'tools.search', 'line.add', 'shape.add', 'patch.add', 'object.move', 'object.style', 'object.remove', 'object.code', 'select.set', 'view.frame', 'play.toggle', 'action.run', 'batch.run', 'user.ask'];
+export const CORE = ['space.read', 'tools.search', 'line.add', 'shape.add', 'patch.add', 'object.move', 'object.style', 'object.remove', 'object.code', 'select.set', 'play.toggle', 'action.run', 'batch.run', 'user.ask'];
 export const SYSTEM = `You work inside underspace, a drawing-first environment: lines, shapes, 3D frames ("targets"), scores (frames whose lines play as sound) and code objects on an infinite canvas. You act only through tools. The person sees everything you do, at once, and can undo it.
 How to work:
 - Look before you change: space_read lists what is drawn (ids, kinds, boxes [x0, y0, x1, y1] in canvas units, y up).
 - You have a few tools listed. Every other command is found with tools_search {query} and run with call {name, args}. action_run {id} does anything a key or menu does (find ids with call {name: "action.list", args: {query}}).
 - Make several changes in one batch_run when you can.
+- Do exactly what was asked and nothing more: no extra shapes, no decoration, no moving the view unless asked. Then stop.
 - Do the thing; do not describe plans. When something is unclear and it matters, ask with user_ask (give choices). Otherwise choose sensibly.
 - Nothing changes unless you call a tool: never say you drew or changed something you did not call a tool for.
 - When you are done, reply with one short sentence and no tool call.
 Examples of calls:
 - a straight line: line_add {"points": [[0, 0], [2, 0]], "style": {"path": "straight"}}
 - a closed shape (a triangle): line_add {"points": [[0, 0], [2, 0], [1, 1.7]], "closed": true, "style": {"path": "straight"}}
-- a curve is a line with several points and no "path" in its style.`;
+- a square 4 wide: line_add {"points": [[0, 0], [4, 0], [4, 4], [0, 4]], "closed": true, "style": {"path": "straight"}}
+- a curve is a line with several points and no "path" in its style.
+- A drawn figure (a triangle, a square, any outline) is line_add with "closed": true. shape_add is for frames that hold code, scores, 3D scenes or notes.`;
 
 const mcp = (n) => n.replaceAll('.', '_');
 // The tools for a model, in the OpenAI shape, and the way back from its names to ours.
@@ -51,6 +54,7 @@ export async function runTurn({ text, history = [], engine, port, by = 'assistan
   const { defs, resolve } = toolset(port.tools());
   const messages = [{ role: 'system', content: SYSTEM + (context ? '\n\nNow:\n' + context : '') }, ...history, { role: 'user', content: text }];
   let used = false, nudged = false;
+  const seen = new Map(), CHANGES = /\.(add|move|transform|paste|copy)$/; // a change made twice may be meant; a look made twice is a loop
   for (let round = 0; round < rounds; round++) {
     if (signal?.aborted) throw new Error('stopped');
     const reply = await engine.complete({ messages, tools: defs, signal });
@@ -68,6 +72,10 @@ export async function runTurn({ text, history = [], engine, port, by = 'assistan
       const { name, args } = resolve(c.name, parse(c.arguments));
       on({ type: 'call', name, args });
       let out, ok = true;
+      // a small model can fall into calling the same thing again and again: the second time it is told, the third the turn ends
+      const key = name + JSON.stringify(args), times = (seen.get(key) ?? 0) + 1; seen.set(key, times);
+      if (times === 2 && !CHANGES.test(name)) { out = 'You already made this exact call and nothing has changed since. If the task is done, answer in one short sentence with no tool call.'; on({ type: 'result', name, text: out, ok: false }); messages.push({ role: 'tool', tool_call_id: c.id, content: out }); continue; }
+      if (times > 2) { on({ type: 'say', text: '…' }); return { say: '', messages: messages.slice(1) }; }
       try { if (signal?.aborted || port.held()) throw new Error('stopped by the person'); out = asText(await port.call(name, args, by)); }
       catch (e) { ok = false; out = 'Error: ' + (e?.message ?? e); }
       on({ type: 'result', name, text: out, ok });
@@ -169,7 +177,7 @@ export function install(h) {
     finally { h.endStep(); running = null; emit({ type: 'end' }); }
   }
   return {
-    run, say,
+    run, say, emit,
     stop() { running?.abort(); settle(null); },
     forget() { history = []; },
     busy: () => !!running, held: () => held,

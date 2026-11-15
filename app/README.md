@@ -306,3 +306,9 @@ outside the page reaches the same commands through the relay:
 
 Good first calls: `space.read` (what is drawn), `view.look` (a picture), `tools.search`
 (find a command), `action.list` and `action.run` (everything a key or menu does).
+
+The built-in assistant (`⌘J`, or type a sentence in the palette) works through the same
+commands. Its brain is chosen in the panel: a model server on this machine (Ollama, LM Studio,
+llama.cpp: anything OpenAI-compatible; address in Settings) or a model in this browser
+(LFM3-1.7B on WebGPU, about 1.1 GB on first use). The mark at the bottom right shows an agent
+at work; clicking it holds every agent until it is clicked again.

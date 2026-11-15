@@ -26,6 +26,7 @@ export const DEFAULTS = {
   panel: 'code', panelOpen: false,
   relay: 'http://127.0.0.1:5311', relayOn: false, // the relay hub for agents outside the page (relay.js), and whether this browser connects to it
   assistEngine: 'endpoint', // the assistant's brain: 'endpoint' (a model server) or 'browser' (a model in this page)
+  assistBrowserModel: 'onnx-community/LFM3-1.7B-ONNX', assistBrowserDtype: 'q4f16', // the model run in this page (Transformers.js, WebGPU): a Hugging Face id, and its quantization
   assistBase: 'http://127.0.0.1:11434', assistModel: '',
 };
 
