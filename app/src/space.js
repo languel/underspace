@@ -10,6 +10,7 @@ import { EVENT } from './play.js';
 import { bindFor, wirePoints } from './bind.js';
 import { collapse, expand } from './collapse.js';
 import { PRESETS } from './presets.js';
+import { camera, flatCamera } from './framing.js';
 import { BRUSHES } from './brushes.js';
 import { BRUSHES as INK, syncBrushes } from './ink/brushes.js';
 import { spec, apply, applyRect } from './transform.js';
@@ -572,17 +573,34 @@ define({
 // (its camera starts 13 away, with a 12-unit floor).
 export const TARGET_SPAN = 8;
 define({
-  name: 'target.take', doc: 'Put lines into a render target\'s 3D scene, on its front plane where they lie in its frame (as drawing a target over marks does); with out: true, back onto the canvas, flat, where they would show. Joints and travelers on them go with them.',
-  args: { id: T.id, ids: T.ids, out: { type: 'boolean' } }, required: ['id', 'ids'], hold: () => [],
+  name: 'target.take', doc: 'Put lines into a render target\'s 3D scene, on its front plane where they lie in its frame (as drawing a target over marks does). view: true also sets its camera straight in front, so the 3D view is the flat drawing (only when the scene held nothing before). With out: true, back onto the canvas, projected through the target\'s camera so they land where they showed, as lines (a mesh\'s faces become closed lines). Joints and travelers on them go with them.',
+  args: { id: T.id, ids: T.ids, out: { type: 'boolean' }, view: { type: 'boolean' } }, required: ['id', 'ids'], hold: () => [],
   run(a) {
     const t = state.objects.get(a.id);
     if (!t || !isTarget(t)) return [];
-    const r = t.rect, k = TARGET_SPAN / Math.max(r.w, r.h), moved = new Set();
+    const r = t.rect, k = TARGET_SPAN / Math.max(r.w, r.h), moved = new Set(), had = inSpace(t.id).some((o) => !o.bind);
+    const cam = camera({ az: t.az ?? 0.5, el: t.el ?? 0.3, dist: t.dist ?? 13, center: t.center ?? [0, 0, 0] }, r.w / r.h);
+    const down = (p) => { const q = cam([p[0], p[1], p[2] ?? 0]); return q ? [round(r.cx + q[0] * r.w / 2), round(r.cy + q[1] * r.h / 2)] : null; };
     for (const id of a.ids) {
       const o = state.objects.get(id);
+      if (a.out && o?.kind === 'mesh' && o.space === t.id) { // a mesh has no flat form: its faces, outlined
+        for (const f of o.faces) {
+          const pts = f.map((i) => down(o.verts[i])).filter(Boolean);
+          if (pts.length < 3) continue;
+          const n = newId();
+          state.objects.set(n, { id: n, kind: 'line', role: 'ink', space: t.space, points: pts, off: [0, 0], closed: true, ...(o.style ? { style: { ...o.style } } : {}) });
+          moved.add(n);
+        }
+        state.objects.delete(id); state.selection.delete(id);
+        continue;
+      }
       if (!isCurve(o) && !(o?.kind === 'line' && o.role === 'traveler')) continue;
       if (!a.out && o.space === t.space) { o.points = ptsOf(o).map((p) => [round((p[0] - r.cx) * k), round((p[1] - r.cy) * k), 0]); o.space = t.id; }
-      else if (a.out && o.space === t.id) { o.points = ptsOf(o).map((p) => [round(r.cx + p[0] / k), round(r.cy + p[1] / k)]); o.space = t.space; }
+      else if (a.out && o.space === t.id) {
+        const flat = ptsOf(o).map(down);
+        if (flat.some((p) => !p) && flat.filter(Boolean).length < 2) continue; // behind the camera
+        o.points = flat.filter(Boolean); o.space = t.space;
+      }
       else continue;
       o.off = [0, 0]; delete o.brush; // brushes paint the flat canvas only
       moved.add(id);
@@ -590,7 +608,24 @@ define({
     for (const o of state.objects.values()) {
       if ((o.kind === 'joint' && o.at.every((q) => moved.has(q.id))) || (o.role === 'traveler' && moved.has(o.on))) o.space = a.out ? t.space : t.id;
     }
+    if (a.view && !a.out && !had && moved.size) Object.assign(t, flatCamera(r, TARGET_SPAN), { plane: 'view' });
     return [...moved];
+  },
+});
+
+// A target taken away and what it held kept: everything in its scene is projected onto the
+// canvas, through its camera, and then only the frame goes.
+define({
+  name: 'target.dissolve', doc: 'Remove a render target but keep what is in it: lines (and a mesh\'s faces, as closed lines) are projected through its camera onto the canvas, where they showed.',
+  args: { id: T.id }, required: ['id'], hold: () => [],
+  run(a) {
+    const t = state.objects.get(a.id);
+    if (!t || !isTarget(t)) return [];
+    const inside = inSpace(t.id).filter((o) => !o.bind && o.kind !== 'joint').map((o) => o.id);
+    const kept = commands.get('target.take').run({ id: a.id, ids: inside, out: true });
+    commands.get('object.remove').run({ ids: [a.id] });
+    state.selection = new Set((kept ?? []).filter((id) => state.objects.has(id)));
+    return kept ?? [];
   },
 });
 

@@ -1245,6 +1245,20 @@ Also asked for:
 - `docs/CONTEXT.md`: the owner's own statements, the survey of the earlier
   repos (dates, stacks, what each rebuilt), what was proposed and rejected,
   the time-and-process detail, and notes on the outside references.
+- **Framing, 2D to 3D and back (`app/src/framing.js`):** a frame drawn over
+  marks takes them in *and faces them* (`target.take` with `view: true`,
+  only when its scene was empty): camera az 0, el 0, at the distance where
+  the plane z = 0 exactly fills the frame, so the 3D view is the flat
+  drawing. Taking out (`out: true`) projects each point through the
+  target's own camera back onto the canvas, so lines land where they
+  showed, at depth too (nearer is larger). A mesh comes out as one closed
+  line per face. `target.dissolve` (Shift+Backspace, menu: remove the frame,
+  keep what is in it) does that for everything in a frame and removes only
+  the frame; plain Delete still removes the contents. The camera returned by
+  a target's code is not known to the command, so projection uses the
+  resting camera (az, el, dist, center). Not done: pose-matching a frame that
+  was orbited (only the front view is exact), keeping brushes through the
+  trip, and a preview of the projection before dissolving.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

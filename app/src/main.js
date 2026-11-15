@@ -1931,7 +1931,7 @@ function takeInto(id) {
   if (!t || !isTarget(t)) return;
   const r = t.rect, inside = (p) => Math.abs(p[0] - r.cx) <= r.w / 2 && Math.abs(p[1] - r.cy) <= r.h / 2;
   const ids = [...state.objects.values()].filter((o) => o.kind === 'line' && !o.bind && o.space === t.space && o.points.length > 1 && ptsOf(o).every(inside)).map((o) => o.id);
-  if (ids.length) call('target.take', { id, ids });
+  if (ids.length) call('target.take', { id, ids, view: true }); // and its camera faces them, so the 3D view is the flat drawing
 }
 const nudge = (c, dx, dy, e) => {
   const u = (e?.shiftKey ? 40 : 8) * view.unitsPerPx();
@@ -2016,6 +2016,7 @@ const ACTIONS = [
   { id: 'line.toTarget', title: 'Turn into a render target', icon: 'target', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some(flatLine), run: (c) => linesTo(c, () => ({ role: 'target' })) },
   { id: 'line.toCode', title: 'Turn into a code container', icon: 'box', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some(flatLine), run: (c) => linesTo(c, () => ({ role: 'code' })) },
   { id: 'line.straighten', title: 'Straighten', icon: 'straighten', group: 'attach', menu: 'Turn into', when: (c) => c.lines.some((o) => !o.bind && o.points.length > 2), run: (c) => batch(() => { for (const l of c.lines.filter((o) => !o.bind && o.points.length > 2)) { const pts = ptsOf(l); call('line.set', { id: l.id, points: [pts[0], pts[pts.length - 1]].map((p) => p.map(round)), ...(l.pen?.length === pts.length ? { pen: [l.pen[0], l.pen[l.pen.length - 1]] } : {}) }); } }) },
+  { id: 'target.dissolve', title: 'Remove the frame, keep what is in it', icon: 'up', keys: 'shift+backspace', group: 'delete', menu: true, when: (c) => c.sel.some(isTarget), run: (c) => batch(() => { for (const t of c.sel.filter(isTarget)) call('target.dissolve', { id: t.id }); }) },
   { id: 'target.out', title: 'Take out of the 3D scene', icon: 'up', group: 'attach', menu: true, when: (c) => c.lines.some((l) => get(l.space)?.role === 'target'), run: (c) => { const l = c.lines.find((x) => get(x.space)?.role === 'target'); call('target.take', { id: l.space, ids: ids(c.lines.filter((x) => x.space === l.space)), out: true }); } },
   { id: 'attach.traveler', title: 'Attach a traveler here', icon: 'traveler', keys: 'a', group: 'attach', menu: true, when: (c) => c.lines.length === 1 && !c.lines[0].bind,
     run: (c) => { const l = c.lines[0], s = spaces.find((x) => x.id === l.space) ?? spaces[0], q = toSpace(s, c.p[0], c.p[1]); const path = shownPath(l), g = gridHere(l.space, path[path.length >> 1]); const id = call('traveler.add', { on: l.id, u: round(nearestU(path, q[0], q[1])), size: round(22 * unitsPerPx(s)), ...(g.beats > 0 ? { dur: 0 } : {}) }); if (id) call('select.set', { ids: [id] }); } },

@@ -11,7 +11,7 @@ test('a target takes lines into its 3D scene, with their joints and travelers, a
   const j = call('joint.add', { at: [{ id: b, u: 0 }, { id: a, u: 1 }] });
   const tr = call('traveler.add', { on: a, dur: 4 });
   const t = call('shape.add', { role: 'target', rect: { cx: 2, cy: 1.5, w: 4, h: 2 } });
-  call('target.take', { id: t, ids: [a, b] });
+  call('target.take', { id: t, ids: [a, b], view: true }); // facing them, so out is back where they were
   const k = TARGET_SPAN / 4;
   near(state.objects.get(a).points[0], [-1 * k, -0.5 * k, 0]);
   for (const id of [a, b, j, tr]) assert.equal(state.objects.get(id).space, t, id);
