@@ -312,7 +312,8 @@ ears, `play.state` reads what sounds: each score's voices as pitch over time, an
 A wrong name (a scale, an instrument, an id) is an error that lists the right ones.
 
 The built-in assistant (`⌘J`, or type a sentence in the palette) works through the same
-commands. Its brain is chosen in the panel: a model server on this machine (Ollama, LM Studio,
+commands. A sentence in the palette is a quick turn: a short prompt and a few tools, done
+at once without a conversation (Settings, Assistant, quick turns it off); the panel is the whole loop. Its brain is chosen in the panel: a model server on this machine (Ollama, LM Studio,
 llama.cpp: anything OpenAI-compatible; address in Settings) or a model in this browser
 (LFM3-1.7B on WebGPU, about 1.1 GB on first use). The mark at the bottom right shows an agent
 at work; clicking it holds every agent until it is clicked again.

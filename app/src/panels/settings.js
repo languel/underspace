@@ -20,6 +20,7 @@ export function settingsPanel(el, app) {
       section('Assistant',
         row('endpoint', textField(settings.assistBase, (v) => { setSetting('assistBase', v); setSetting('assistModel', ''); }, 'http://127.0.0.1:11434')),
         row('model', textField(settings.assistModel, (v) => setSetting('assistModel', v), 'first available')),
+        row('quick', check('assistQuick')),
         row('in browser', textField(settings.assistBrowserModel, (v) => setSetting('assistBrowserModel', v), 'onnx-community/LFM3-1.7B-ONNX')),
         row('relay', textField(settings.relay, (v) => setSetting('relay', v), 'http://127.0.0.1:5311'))),
       section('', (() => { const bar = h('div', 'glyph-row'); bar.append(glyphButton('undo', 'Reset settings', () => { resetSettings(); build(); }), glyphButton('clear', 'Clear the canvas', () => app.runAction('clear'))); return bar; })()));

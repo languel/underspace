@@ -28,6 +28,7 @@ export const DEFAULTS = {
   assistEngine: 'endpoint', // the assistant's brain: 'endpoint' (a model server) or 'browser' (a model in this page)
   assistBrowserModel: 'onnx-community/LFM3-1.7B-ONNX', assistBrowserDtype: 'q4f16', // the model run in this page (Transformers.js, WebGPU): a Hugging Face id, and its quantization
   assistBase: 'http://127.0.0.1:11434', assistModel: '',
+  assistQuick: true,    // a sentence typed in the palette is a quick turn (agent.js): a short prompt, few tools, no conversation
 };
 
 let stored = {};

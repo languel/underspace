@@ -1530,8 +1530,37 @@ Also asked for:
     (long, but the agent needs them). 130 tests.
   Still to try: Pi and opencode sessions of some length; the deployed https
   page reaching the hub, and the weights staying cached, in Chrome proper;
-  WebMCP. Still to build: a runs argument for `eval.run`; a short prompt for
-  one-line edits; tools driven by connectors; the security audit.
+  WebMCP. Still to build: tools driven by connectors; the security audit.
+- **Controls: the fifth pass (15 Nov 2026), quick turns.**
+  - **A quick turn** (`quick` in `runTurn`, `agent.js`; after AMS's flow
+    prompt): a sentence typed in the palette while drawing is not a
+    conversation. It gets a short prompt (`QUICK_SYSTEM`, under 2600
+    characters), eight tools (`QUICK`: line.add, shape.add, object.style,
+    object.move, object.transform, object.remove, music.set, play.toggle), no
+    history and no `tools.search` or `call`. It is over when what it called
+    worked: the model is not asked again (half the wait, and a small model
+    asked again does the thing again); only a failed call goes back to it.
+    A word where an id is wanted ("note", "lines", "selected", "all") stands
+    for those objects (`wordIds`). A question answered in words is not told
+    "you called no tool" (`asks`). The palette asks this way when the setting
+    `assistQuick` is on (the default; Settings, Assistant, quick), quietly:
+    the panel is not opened, and what is said shows under the field. The
+    Assistant panel is the whole loop, as before.
+  - **Measured** (`node app/eval.mjs --quick --runs N`; the eleven cases):
+    `gemma4` 32 of 33 quick in 87 s, against 21 of 22 full in 126 s for two
+    runs each (so about 2.6 s a request against 5.7 s, as accurate).
+    `lfm2.5-thinking` 7 of 22 full; quick it varied from 5 to about 17 of
+    33 with the wording, and with the wording as it is now it acts at once
+    instead of saying it has. What mattered to it: the prompt must say that
+    nothing changes without a tool call *before* it says how to answer; "then
+    reply with one short sentence and no tool call" made it reply and not act.
+  - **`eval.run {runs, quick}`** in the page: each case asked `runs` times,
+    `byCase` giving passes of runs. Tried in the page with `gemma4`, quick,
+    two runs: 21 of 22 (the score once had a line outside its frame).
+  - Not done: LFM3 in the browser on quick turns (the weights were not
+    loaded this session: `setting.set assistEngine browser`, then
+    `eval.run {quick: true, runs: 3}`); a quick turn has no way to say "this
+    needs the whole loop" and hand over to it.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

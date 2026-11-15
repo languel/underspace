@@ -73,3 +73,38 @@ test('an id that names nothing is refused, but only where the command means an o
   assert.equal(missingIds({ id: 'mine', code: '' }, has, schema('brush.define')), '');
   assert.match(missingIds({ id: 'o9' }, has), /"o9"/); // no schema known: checked as before
 });
+
+test('a quick turn: few tools, a short prompt, over when its calls worked, words for ids', async () => {
+  const { QUICK, wordIds, asks } = await import('../src/agent.js');
+  call('space.clear');
+  const note = call('shape.add', { role: 'note', rect: { cx: 0, cy: 0, w: 3, h: 1 }, text: 'a' }), line = call('line.add', { points: [[0, 0], [1, 1]] });
+  const objects = () => [...state.objects.values()];
+  assert.deepEqual(wordIds('note', objects()), [note]);
+  assert.deepEqual(wordIds('lines', objects()), [line]);
+  assert.deepEqual(wordIds('all', objects()), [note, line]);
+  assert.deepEqual(wordIds('selected', objects(), [line]), [line]);
+  assert.equal(wordIds('o77', objects()), null);
+  assert.ok(asks('how many lines are there? answer with the number') && asks('is it red?') && !asks('draw one short line'));
+
+  const got = [], rounds = [];
+  const engine = { name: 'fake', complete: async ({ messages, tools: defs }) => { got.push({ system: messages[0].content, tools: defs.map((d) => d.function.name), n: messages.length }); return rounds.shift(); } };
+  const port = { call, tools, held: () => false, has: (id) => state.objects.has(id), objects, selection: () => [...state.selection] };
+  // the model names the note by word; the call works, so it is not asked again
+  rounds.push({ content: '', tool_calls: [{ id: 'a', name: 'object_move', arguments: { ids: ['note'], dx: 5, dy: 0 } }] });
+  await runTurn({ text: 'move the note 5 to the right', quick: true, history: [{ role: 'user', content: 'earlier' }], engine, port });
+  assert.equal(state.objects.get(note).rect.cx, 5);
+  assert.equal(got.length, 1);
+  assert.equal(got[0].n, 2); // the prompt and the request: no history
+  assert.deepEqual(got[0].tools, QUICK.filter((n) => tools().some((t) => t.name === n)).map((n) => n.replace('.', '_'))); // play.toggle is the page's
+  assert.ok(got[0].system.length < 2600, String(got[0].system.length));
+  // a call that fails goes back to the model to be put right
+  rounds.push({ content: '', tool_calls: [{ id: 'b', name: 'object_remove', arguments: { ids: ['o99'] } }] }, { content: '', tool_calls: [{ id: 'c', name: 'object_remove', arguments: { ids: [line] } }] });
+  await runTurn({ text: 'delete the line', quick: true, engine, port });
+  assert.equal(got.length, 3);
+  assert.ok(!state.objects.has(line));
+  // a question answered in words is an answer: no "you have not called a tool"
+  rounds.push({ content: '1', tool_calls: [] });
+  const r = await runTurn({ text: 'how many objects are there?', quick: true, engine, port });
+  assert.equal(r.say, '1');
+  assert.equal(got.length, 4);
+});

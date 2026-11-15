@@ -30,6 +30,45 @@ Examples of calls:
 - make a line red: object_style {"ids": ["o1"], "style": {"stroke": "#ff0000"}}
 - A drawn figure (a triangle, a square, any outline) is line_add with "closed": true. shape_add is for frames that hold code, scores, 3D scenes or notes.`;
 
+// The quick turn (after Artist Model Studio's flow prompt): a sentence typed while drawing, not a
+// conversation. A few tools that draw and change, a few lines of prompt, no history, no questions.
+// A small model given the whole prompt is slow and loses the thread; given this it mostly acts at once.
+export const QUICK = ['line.add', 'shape.add', 'object.style', 'object.move', 'object.transform', 'object.remove', 'music.set', 'play.toggle'];
+export const QUICK_SYSTEM = `You change a drawing in underspace, at once, through tools. Never ask a question: when something is unclear, choose the most sensible reading and do it. Undo is one key away.
+- What is drawn is listed under "Now" (ids, kinds, boxes [x0, y0, x1, y1] in canvas units, y up). Use the ids from there; "it" and "this" are what is selected.
+- Nothing changes unless you call a tool: to make or change anything, call the tools now, all of it in one reply (several calls when it takes several), and nothing more than was asked.
+- Only a question about the drawing is answered in words, from "Now", with no tool.
+- A drawn figure (a line, a triangle, a square, any outline) is line_add; shape_add is for frames: a score (its lines play as sound), a target (a 3D frame), a note (text), code.
+Examples of calls:
+- a straight line: line_add {"points": [[0, 0], [2, 0]], "style": {"path": "straight"}}
+- a triangle: line_add {"points": [[0, 0], [2, 0], [1, 1.7]], "closed": true, "style": {"path": "straight"}}
+- a curve: line_add {"points": [[0, 0], [1, 1], [2, 0], [3, 1]]}
+- make a line red: object_style {"ids": ["o1"], "style": {"stroke": "#ff0000"}}
+- move it right by 5: object_move {"ids": ["o1"], "dx": 5, "dy": 0}
+- twice as big: object_transform {"ids": ["o1"], "sx": 2, "sy": 2}
+- a score 10 wide and 4 tall at the origin with a line in it (the line lies inside the frame's box): shape_add {"role": "score", "rect": {"cx": 0, "cy": 0, "w": 10, "h": 4}} and line_add {"points": [[-4, -1], [0, 1], [4, 0]]}`;
+
+// A small model names things by word where an id is wanted ("note", "line", "selected", "all"). In a
+// quick turn such a word stands for what it plainly means: -> ids, or null when it is no such word.
+// objects: [{ id, kind, role }]; selection: ids.
+export function wordIds(word, objects, selection = []) {
+  const w = String(word).toLowerCase().replace(/s$/, '');
+  if (['selected', 'selection', 'it', 'thi', 'these'].includes(w)) return [...selection];
+  if (['all', 'everything'].includes(w)) return objects.map((o) => o.id);
+  const hit = objects.filter((o) => o.role === w || o.kind === w || (w === 'frame' && ['score', 'target', 'grid'].includes(o.role)));
+  return hit.length ? hit.map((o) => o.id) : null;
+}
+// The ids in a call's arguments, with words put into ids (only where the command means objects).
+function withWords(args, schema, port) {
+  if (!port.objects || !args || typeof args !== 'object') return args;
+  const objects = port.objects(), has = new Set(objects.map((o) => o.id)), sel = port.selection?.() ?? [];
+  const means = (k) => /^object ids?$/.test(schema?.properties?.[k]?.description ?? '');
+  const out = { ...args };
+  if (means('ids') && (Array.isArray(out.ids) || typeof out.ids === 'string')) out.ids = [...new Set([out.ids].flat().flatMap((id) => (has.has(id) ? [id] : wordIds(id, objects, sel) ?? [id])))];
+  if (means('id') && typeof out.id === 'string' && !has.has(out.id)) { const ids = wordIds(out.id, objects, sel); if (ids?.length === 1) out.id = ids[0]; }
+  return out;
+}
+
 // A command given an id that names nothing does nothing and says nothing, which reads as success.
 // For an agent that is the worst answer, so its calls are checked first: -> a message, or ''.
 // schema: the command's own (its inputSchema). Some commands take an `id` that is not an object's
@@ -47,12 +86,12 @@ const schemaOf = (tools, name) => tools.find((t) => t.name === name || mcp(t.nam
 // defers: for a model whose chat template knows deferred tools (LFM3): every other command is given
 // too, marked defer_loading, so it stays out of the prompt until tools_search names it; then the
 // model calls it by its own name, and `call` is not needed.
-export function toolset(all, core = CORE, defers = false) {
+export function toolset(all, core = CORE, defers = false, rest = true) {
   const fn = (t, extra = {}) => ({ type: 'function', ...extra, function: { name: mcp(t.name), description: (t.description ?? '').slice(0, 500), parameters: t.inputSchema ?? { type: 'object', properties: {} } } });
   const pick = core.map((n) => all.find((t) => t.name === n)).filter(Boolean);
   const defs = pick.map((t) => fn(t));
   if (defers) for (const t of all) { if (!core.includes(t.name)) defs.push(fn(t, { defer_loading: true })); }
-  else defs.push({ type: 'function', function: { name: 'call', description: 'Run any command by its name (from tools_search), with its arguments.', parameters: { type: 'object', properties: { name: { type: 'string' }, args: { type: 'object' } }, required: ['name'] } } });
+  else if (rest) defs.push({ type: 'function', function: { name: 'call', description: 'Run any command by its name (from tools_search), with its arguments.', parameters: { type: 'object', properties: { name: { type: 'string' }, args: { type: 'object' } }, required: ['name'] } } });
   const names = new Map(all.map((t) => [mcp(t.name), t.name]));
   return { defs, resolve: (n, a) => (n === 'call' ? { name: a?.name, args: a?.args ?? {} } : { name: names.get(n) ?? n, args: a ?? {} }) };
 }
@@ -68,9 +107,13 @@ const parse = (v) => { if (v && typeof v === 'object') return v; try { return JS
 // One turn: the person's words in, tool calls until the model answers in words.
 // port: { call(name, args, by) (may be async), tools(), held() }; on(event): what happens, for the panel
 //   { type: 'call', name, args } | { type: 'result', name, text, ok } | { type: 'stream', text (so far) } | { type: 'say', text } | { type: 'error', text }
-export async function runTurn({ text, history = [], engine, port, by = 'assistant', context = '', signal, on = () => {}, rounds = 16 }) {
-  const { defs, resolve } = toolset(port.tools(), engine.sees ? [...CORE, 'view.look'] : CORE, !!engine.defers);
-  const system = engine.defers ? SYSTEM.replace('Every other command is found with tools_search {query} and run with call {name, args}.', 'Every other command is found with tools_search {query}; the tools it finds can then be called by their own names.').replace('call {name: "action.list", args: {query}}', 'tools_search') : SYSTEM;
+// Is it a question? (In a quick turn a question answered in words is an answer, not a model that forgot to act.)
+export const asks = (text) => /\?\s*$|\?\s|^\s*(how|what|which|where|who|why|is|are|does|do|can)\b/i.test(String(text));
+// quick: the short prompt and the few tools of QUICK, no history, at most six rounds.
+export async function runTurn({ text, history = [], engine, port, by = 'assistant', context = '', signal, on = () => {}, rounds = 16, quick = false }) {
+  if (quick) { history = []; rounds = Math.min(rounds, 6); }
+  const { defs, resolve } = quick ? toolset(port.tools(), QUICK, false, false) : toolset(port.tools(), engine.sees ? [...CORE, 'view.look'] : CORE, !!engine.defers);
+  const system = quick ? QUICK_SYSTEM : engine.defers ? SYSTEM.replace('Every other command is found with tools_search {query} and run with call {name, args}.', 'Every other command is found with tools_search {query}; the tools it finds can then be called by their own names.').replace('call {name: "action.list", args: {query}}', 'tools_search') : SYSTEM;
   const messages = [{ role: 'system', content: system + (context ? '\n\nNow:\n' + context : '') }, ...history, { role: 'user', content: text }];
   let used = false, nudged = false;
   const pictures = [];
@@ -83,13 +126,15 @@ export async function runTurn({ text, history = [], engine, port, by = 'assistan
     if (!calls.length) {
       const say = (reply.content ?? '').trim();
       // A small model will say it has done a thing without doing it. Once a turn, when it has used no tool, it is told so.
-      if (!used && !nudged && round < rounds - 1) { nudged = true; messages.push({ role: 'user', content: 'You have not called any tool, so nothing has changed. If something was to be made or changed, call the tools now. If only an answer was wanted, give it again.' }); continue; }
+      if (!used && !nudged && round < rounds - 1 && !(quick && asks(text))) { nudged = true; messages.push({ role: 'user', content: 'You have not called any tool, so nothing has changed. If something was to be made or changed, call the tools now. If only an answer was wanted, give it again.' }); continue; }
       on({ type: 'say', text: say }); return { say, messages: messages.slice(1) };
     }
     used = true;
     if (reply.content?.trim()) on({ type: 'say', text: reply.content.trim() });
+    let wrong = 0;
     for (const c of calls) {
-      const { name, args } = resolve(c.name, parse(c.arguments));
+      let { name, args } = resolve(c.name, parse(c.arguments));
+      if (quick) args = withWords(args, schemaOf(port.tools(), name), port);
       on({ type: 'call', name, args });
       let out, ok = true;
       // a small model will make the right call and then make it again: an exact repeat is not run. The
@@ -105,11 +150,15 @@ export async function runTurn({ text, history = [], engine, port, by = 'assistan
         if (engine.sees && typeof r?.image === 'string') { picture = r.image; out = JSON.stringify({ ...r, image: '(the picture follows)' }); } else out = 'OK. Result: ' + asText(r);
       } catch (e) { ok = false; out = 'Error: ' + (e?.message ?? e); }
       on({ type: 'result', name, text: out, ok });
+      if (!ok) wrong++;
       // a model with deferred tools is handed what a search found as references: its template then shows it those tools
       const found = engine.defers && ok && name === 'tools.search' && Array.isArray(raw) ? raw.map((t) => mcp(t.name)) : null;
       messages.push({ role: 'tool', tool_call_id: c.id, content: found ? [{ type: 'text', text: `Found ${found.length} tools: ${found.join(', ')}.` }, ...found.map((n) => ({ type: 'tool_reference', name: n }))] : out });
       if (picture) pictures.push(picture);
     }
+    // a quick turn is over when what it called worked: the model is not asked again (half the wait, and a
+    // small model asked again does the thing again). Only a call that failed goes back to it, to be put right.
+    if (quick && !wrong) return { say: (reply.content ?? '').trim(), messages: messages.slice(1) };
     // a model that can see is shown the pictures its calls returned (a tool result cannot carry one, so they come as the person's)
     if (pictures.length) { messages.push({ role: 'user', content: [{ type: 'text', text: 'The picture you asked for:' }, ...pictures.map((url) => ({ type: 'image_url', image_url: { url } }))] }); pictures.length = 0;
     }
@@ -196,14 +245,14 @@ export function install(h) {
   // ---- a turn of a brain in the page -------------------------------------------
   let running = null, history = [];
   const emit = (e) => listeners.forEach((fn) => fn(e));
-  async function run(text, engine, { context = '' } = {}) {
+  async function run(text, engine, { context = '', quick = false } = {}) {
     if (running) throw new Error('the assistant is busy');
     const ac = new AbortController();
     running = ac; held = false; show(); emit({ type: 'begin', text });
     h.beginStep();
     try {
-      const r = await runTurn({ text, history, engine, by: engine.name ?? 'assistant', context, signal: ac.signal, on: emit, port: { call: h.call, tools: h.tools, held: () => held, has: (id) => !!h.get(id) } });
-      history = r.messages.slice(-24); // what was said and done, for the next turn
+      const r = await runTurn({ text, history, engine, quick, by: engine.name ?? 'assistant', context, signal: ac.signal, on: emit, port: { call: h.call, tools: h.tools, held: () => held, has: (id) => !!h.get(id), objects: () => [...h.state.objects.values()], selection: () => [...h.state.selection] } });
+      if (!quick) history = r.messages.slice(-24); // what was said and done, for the next turn (a quick turn leaves none)
       return r.say;
     } catch (e) { emit({ type: 'error', text: e?.message ?? String(e) }); throw e; }
     finally { h.endStep(); running = null; emit({ type: 'end' }); }

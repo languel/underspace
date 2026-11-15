@@ -1840,6 +1840,9 @@ const moment = () => `View: middle (${round(view.cam.cx)}, ${round(view.cam.cy)}
 async function ask(text, { panel = false } = {}) {
   const plan = scripted(text), by = 'assistant';
   if (!plan) {
+    // From the palette, while drawing: a quick turn, done quietly (what it says shows under the field).
+    // From the Assistant panel, or with the setting off: the whole loop, shown there.
+    if (!panel && settings.assistQuick) return agent.run(text, await engine(), { context: moment(), quick: true });
     if (!panel) panels.show('assistant'); // what it does and says shows there
     return agent.run(text, await engine(), { context: moment() });
   }
@@ -2736,21 +2739,24 @@ define({ name: 'sculpt.stroke', record: false, doc: 'Sculpt lines as the sculpt 
   } });
 // The evaluation in the page (evalcases.js), against the brain the Assistant is set to. The drawing
 // is put aside and brought back after, since every case starts from an empty canvas.
-define({ name: 'eval.run', record: false, doc: 'Run the evaluation requests against the Assistant\'s current brain (set it with setting.set assistEngine "endpoint" or "browser"): each is asked on an empty canvas and what it drew is checked. only: one case by name. Returns each case with pass, seconds, the commands called and, when it failed, what was wrong. The drawing is put aside and restored after. Takes a minute or more.', args: { only: T.str },
+define({ name: 'eval.run', record: false, doc: 'Run the evaluation requests against the Assistant\'s current brain (set it with setting.set assistEngine "endpoint" or "browser"): each is asked on an empty canvas and what it drew is checked. only: one case by name. Returns each case with pass, seconds, the commands called and, when it failed, what was wrong. runs: ask each this many times (one run of a model is noisy), giving passes of runs a case. quick: as quick turns, as the palette asks (the short prompt, few tools). The drawing is put aside and restored after. Takes a minute or more.', args: { only: T.str, runs: T.num, quick: { type: 'boolean' } },
   async run(a) {
     const kept = JSON.stringify(take), out = [];
     try {
-      for (const c of evalCases({ state, call }).filter((x) => !a.only || x.name === a.only)) {
+      const runs = Math.max(1, Math.min(20, Math.round(a.runs) || 1));
+      for (const c of evalCases({ state, call }).filter((x) => !a.only || x.name === a.only)) for (let r = 0; r < runs; r++) {
         call('space.clear'); agent.forget(); c.setup?.();
         const called = [], off = agent.on((e) => { if (e.type === 'call') called.push(e.name); }), t0 = performance.now();
         let say = '', err = '';
-        try { say = await agent.run(c.ask, await engine(), { context: moment() }); } catch (e) { err = e.message; }
+        try { say = await agent.run(c.ask, await engine(), { context: moment(), quick: !!a.quick }); } catch (e) { err = e.message; }
         off();
         const verdict = err ? `error: ${err}` : c.check(say ?? '');
         out.push({ name: c.name, pass: verdict === true, seconds: Math.round((performance.now() - t0) / 100) / 10, called, ...(verdict === true ? {} : { wrong: verdict }) });
       }
     } finally { loadTake(JSON.parse(kept)); agent.forget(); }
-    return { passed: out.filter((x) => x.pass).length, of: out.length, engine: settings.assistEngine, cases: out };
+    // with several runs, each case in one line: how many of its runs passed
+    const by = new Map(); for (const x of out) { const c = by.get(x.name) ?? { name: x.name, passed: 0, of: 0, seconds: 0 }; c.of++; if (x.pass) c.passed++; c.seconds = Math.round((c.seconds + x.seconds) * 10) / 10; by.set(x.name, c); }
+    return { passed: out.filter((x) => x.pass).length, of: out.length, engine: settings.assistEngine, quick: !!a.quick, ...(out.length > by.size ? { byCase: [...by.values()] } : {}), cases: out };
   } });
 define({ name: 'play.state', doc: 'What is sounding, read instead of heard. playing, the beat it is at, the tempo; scores: each score with whether it plays, its pass length in seconds and its voices (one a line: the line\'s id, and its pitch over time as [seconds, midi] samples, up to `samples` a voice, default 8); notes: the last discrete notes played by travelers, events and clips (beat, midi, vel, ch).', args: { samples: T.num }, record: false,
   run(a) {
