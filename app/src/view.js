@@ -274,7 +274,7 @@ export async function createView({ canvas, stage, onFrame }) {
       cam.cx += before[0] - after[0]; cam.cy += before[1] - after[1];
     },
     // The ink as it is now, as a canvas to copy from (drawn afresh: a WebGPU canvas keeps its picture only for the frame).
-    grab() { draw(); return canvas; },
+    grab() { onFrame?.(); draw(); return canvas; }, // onFrame first: the faces (DOM) are placed there, and a hidden tab gets no frames of its own
     backend: renderer.backend?.isWebGPUBackend ? 'WebGPU' : 'WebGL 2',
   };
 }

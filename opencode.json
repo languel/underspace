@@ -1,0 +1,6 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "underspace": { "type": "local", "command": ["node", "app/relay.mjs"], "enabled": true }
+  }
+}

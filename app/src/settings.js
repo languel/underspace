@@ -24,6 +24,7 @@ export const DEFAULTS = {
   showPoints: false,    // control points shown in every tool (')
   stacks: {},           // the tool each stack last used
   panel: 'code', panelOpen: false,
+  relay: 'http://127.0.0.1:5311', relayOn: false, // the relay hub for agents outside the page (relay.js), and whether this browser connects to it
   assistBase: 'http://127.0.0.1:11434', assistModel: '',
 };
 

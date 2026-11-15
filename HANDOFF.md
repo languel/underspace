@@ -1301,6 +1301,27 @@ Also asked for:
   stroke drawn through the pen pipeline with pressure and brushes is
   `line.add` with `pen` and `brush`, but tool drags such as sculpt strokes
   have no command yet), and the palette has no history.
+- **Controls, step 2 done: the relay (`app/relay.mjs`, `app/src/relay.js`).**
+  One Node file with no dependencies: an MCP server on stdin/stdout and a
+  hub on `127.0.0.1:5311`. The page (opened with `?relay`, or the relay
+  action in the palette; then remembered in settings `relayOn`) holds a
+  server-sent event stream open to the hub, posts its tools, and answers
+  calls through `call()` under the agent's name. Hub HTTP: `/status`,
+  `/tools`, `POST /call {name, args, by}`. The first relay to start is the
+  hub; later ones send through it, and take over the port if it goes away.
+  MCP tools are the commands with `.` as `_`, plus `underspace_status` and
+  `underspace_call` (always there, also with no tab); `view.look` comes back
+  as an image. Set up: `.mcp.json` (Claude Code), `opencode.json`
+  (`opencode mcp list` says connected), `.pi/extensions/underspace.ts` (Pi
+  has no MCP; the same by HTTP; it loads, but a tool call through Pi was
+  not run: the configured provider had no credits, and a global plannotator
+  extension fails to load here unless Pi runs with `--no-extensions -e`).
+  Tried with a test MCP client: clear, add an example, add a line, frame,
+  read, look (the picture is right), undo. `view.grab()` runs the frame
+  callback first, because a hidden tab gets no animation frames and its DOM
+  faces would lag the camera. Not tried: Claude Code itself over
+  `.mcp.json` (needs a new session), and the deployed https page reaching
+  the hub on localhost.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

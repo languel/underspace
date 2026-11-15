@@ -23,6 +23,7 @@ import { settings, setSetting, onSettings, DEFAULTS } from './settings.js';
 import { colorField } from './controls.js';
 import { createPalette } from './palette.js';
 import { install as installCatalog } from './catalog.js';
+import { createRelay } from './relay.js';
 import { showMenu, showPopover, closeMenu } from './menu.js';
 import { scripted, endpoint, listModels } from './assistant.js';
 import { sketchKind } from './sketch.js';
@@ -2132,6 +2133,7 @@ const ACTIONS = [
   ...PANELS.map((d) => ({ id: 'panel.' + d.id, title: d.title, icon: d.icon, keys: d.keys, group: 'panel', run: () => panels.show(d.id) })),
   { id: 'paste.here', title: 'Paste here', icon: 'copy', group: 'add', menu: true, when: (c) => !c.hit && !!navigator.clipboard?.readText, run: async (c) => pasteText(await navigator.clipboard.readText(), c) },
   { id: 'grid', title: 'Grid', icon: 'grid', keys: "mod+'", group: 'panel', menu: true, when: (c) => !c.hit, on: () => settings.grid, run: () => setSetting('grid', !settings.grid) },
+  { id: 'relay', title: 'Let agents outside the page in (the relay)', icon: 'relay', group: 'panel', on: () => relay.state() !== 'off', run: () => { const on = relay.state() === 'off'; setSetting('relayOn', on); on ? relay.open(settings.relay) : relay.close(); } },
   { id: 'snap', title: 'Snap to the grid', icon: 'grid', keys: "mod+shift+'", group: 'panel', menu: true, when: (c) => !c.hit, on: () => settings.snap, run: () => setSetting('snap', !settings.snap) },
   { id: 'clean', title: 'Hide the interface', icon: 'clean', keys: ['tab', 'alt+z', 'mod+.'], group: 'panel', run: () => document.body.classList.toggle('clean') },
 ];
@@ -2523,6 +2525,10 @@ const catalog = installCatalog({
   settings, setSetting, DEFAULTS, panels: () => panels, PANELS, view, frameIds, fit, stage,
   EXAMPLES, addExample: (e, at) => app.addExample(e, at),
 });
+// Agents outside the page (relay.js): on with ?relay or the relay action, and then kept on.
+const relay = createRelay({ base: settings.relay, call, tools, onState: (s) => { document.documentElement.dataset.relay = s; } });
+if (new URLSearchParams(location.search).has('relay')) setSetting('relayOn', true);
+if (settings.relayOn) relay.open(settings.relay);
 const palette = createPalette($('palette'), { ask, more: catalog, getActions: () => { const c = context(); return ACTIONS.filter((a) => !a.hidden && a.id !== 'palette' && allowed(a, c)).map((a) => asItem(a, c)); } });
 
 // Context menu: the actions that apply to what was clicked, grouped.

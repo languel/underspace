@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "underspace": { "command": "node", "args": ["app/relay.mjs"] }
+  }
+}
