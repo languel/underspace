@@ -1405,6 +1405,56 @@ Also asked for:
   commands expected) run against each engine; palette history; the
   security audit (everything is open by the owner's decision: any agent can
   write object code, which runs in the page).
+- **Controls: the second pass (15 Nov 2026), from using it as an agent.**
+  Driven through the relay as an agent would (build a score, a 3D frame
+  with a traveler, a brushed line, a note; play; look), and by opencode
+  (`opencode run` read the drawing and added a line through the MCP server).
+  What that changed:
+  - `play.state`: what sounds, read instead of heard: each score's voices
+    as [seconds, midi] samples a line, and the last discrete notes.
+  - `sculpt.stroke {tool, path, ids, radius, strength, invert, params}`: a
+    sculpt drag as a command (flat lines; not yet inside a target).
+  - `tools.search` ranks by how many words match (it used to need all).
+  - `view.look` also draws the brushed-ink canvas (it was missing) and a
+    note's text, wrapped; code is read with `space.read`, not the picture.
+  - An agent's call with an id that names nothing is an error that says so
+    (`missingIds`, at the relay, WebMCP and the loop): commands themselves
+    ignore unknown ids, which read as success.
+  - `call()` takes `line_add` for `line.add`: models put the tool-list name
+    inside `batch.run` and `call`.
+  - The loop: an exact repeat of a call is not run (told once, the turn ends
+    at the third); results start "OK. Result:"; the prompt lists what is
+    drawn (`describe` in catalog.js: 30 objects in short, and the
+    selection); `music.set` is a core tool; an engine that sees
+    (`engine.sees`; asked of Ollama by `/api/show`) gets `view.look` and is
+    shown the picture as a user message.
+  - The palette remembers lines and questions (Up in an empty field), and a
+    whole command name typed after `!` runs on Enter.
+  - **`app/eval.mjs`**: eleven requests with checks, run in Node through
+    `runTurn` against a model server (`node app/eval.mjs --model NAME
+    [--only case] [--verbose]`). Results on this machine: `gemma4` (9.6 GB)
+    11 of 11 after the fixes above (10 before the underscore fix);
+    `lfm2.5-thinking` (0.7 GB) went from 0 to 5 of 11: it now draws what is
+    asked once, but does not read ids from the list or answer questions
+    from it. LFM3 in the browser is not in the eval (it needs the page):
+    the next thing to add is a way to run these cases in the page.
+  - **Security pass (the first; the audit proper is still to come).** One
+    hole closed without limiting the owner's agents: the hub answered any
+    web page (`access-control-allow-origin: *`), so any site open in the
+    browser could have driven the drawing, and through `object.code` run
+    code in it. Now a request with an `Origin` must come from this machine
+    or from `UNDERSPACE_ORIGINS` (default `https://languel.github.io`);
+    programs (no Origin) are let in as before. Still open by decision: the
+    hub has no token, so any local program can call it; any agent can write
+    object code, which runs in the page with the page's rights (sketch
+    frames are same-origin); `setting.set` can point the assistant and the
+    relay at other addresses; the take in localStorage can be cleared by
+    `space.clear`. For a server on the network rather than localhost: bind
+    address, a token, and TLS are all still to do.
+  - Found, not fixed: from the app's own browser pane the deployed https
+    page cannot reach the hub (`ERR_BLOCKED_BY_CLIENT`: the pane's policy,
+    so it says nothing about Chrome, which should ask for local network
+    access); the hub must be restarted to pick up `relay.mjs` changes.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

@@ -56,5 +56,6 @@ test('a model that repeats a call is told once, then the turn ends', async () =>
   const r = await runTurn({ text: 'x', engine: { complete: async () => structuredClone(again) }, on: (e) => events.push(e), port: { call, tools: () => [...tools(), { name: 'tools.search', description: '', inputSchema: { type: 'object', properties: {} } }], held: () => false } }).catch((e) => ({ err: e.message }));
   assert.equal(r.say, '');
   assert.equal(events.filter((e) => e.type === 'call').length, 3);
+  assert.equal(events.filter((e) => e.type === 'result' && e.ok).length + events.filter((e) => e.type === 'result' && /^Error/.test(e.text)).length, 1); // run once only
   assert.match(events.filter((e) => e.type === 'result')[1].text, /already made this exact call/);
 });

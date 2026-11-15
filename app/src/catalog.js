@@ -93,6 +93,14 @@ export function brief(o, rectOf, blanketOf) {
   return b;
 }
 
+// What a brain is told of the moment, in words: what is drawn (in short, the first `max`), and what is selected.
+export function describe(objects, selection, rectOf, blanketOf, max = 30) {
+  const list = objects.filter((o) => !o.bind && o.kind !== 'joint'), sel = list.filter((o) => selection.has(o.id));
+  const row = (o) => JSON.stringify(brief(o, rectOf, blanketOf));
+  return (list.length ? `Drawn now (${list.length} objects${list.length > max ? `, the first ${max}` : ''}):\n` + list.slice(0, max).map(row).join('\n') : 'Nothing is drawn yet.')
+    + (sel.length ? `\nSelected ("it", "this", "these"): ${sel.map((o) => o.id).join(', ')}` : '\nNothing is selected.');
+}
+
 // ---- the page -----------------------------------------------------------------
 
 // host: { define, T, tools, state, get, rectOf, actions, context, allowed, keysShown,

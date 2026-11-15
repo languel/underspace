@@ -312,3 +312,6 @@ commands. Its brain is chosen in the panel: a model server on this machine (Olla
 llama.cpp: anything OpenAI-compatible; address in Settings) or a model in this browser
 (LFM3-1.7B on WebGPU, about 1.1 GB on first use). The mark at the bottom right shows an agent
 at work; clicking it holds every agent until it is clicked again.
+
+`node app/eval.mjs --model NAME` runs a set of requests against a model server and checks what
+each one drew: the way to compare brains, and to see whether a change to the tools helped.

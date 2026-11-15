@@ -27,9 +27,9 @@ import { createRelay } from './relay.js';
 import { showMenu, showPopover, closeMenu } from './menu.js';
 import { scripted } from './assistant.js';
 import { install as installAgent } from './agent.js';
-import { endpointEngine, browserEngine, listModels } from './engines.js';
+import { endpointEngine, browserEngine, listModels, seesPictures } from './engines.js';
 import { assistantPanel } from './panels/assistant.js';
-import { brief } from './catalog.js';
+import { describe } from './catalog.js';
 import { sketchKind } from './sketch.js';
 import { PRESETS } from './presets.js';
 import { BRUSHES } from './brushes.js';
@@ -1829,10 +1829,10 @@ async function engine() {
   if (make) return make();
   if (!settings.assistBase) throw new Error('no model endpoint set');
   if (!settings.assistModel) setSetting('assistModel', (await listModels(settings.assistBase))[0]);
-  return endpointEngine({ base: settings.assistBase, model: settings.assistModel });
+  return endpointEngine({ base: settings.assistBase, model: settings.assistModel, sees: await seesPictures(settings.assistBase, settings.assistModel) });
 }
 // What a brain is told of the moment: what is selected and where the view is.
-const moment = () => { const sel = [...state.selection].map(get).filter(Boolean).slice(0, 12); return `View: middle (${round(view.cam.cx)}, ${round(view.cam.cy)}), ${round(view.size.w * view.unitsPerPx())} by ${round(view.size.h * view.unitsPerPx())} canvas units. ${state.objects.size} objects.` + (sel.length ? '\nSelected ("it", "this", "these"):\n' + sel.map((o) => JSON.stringify(brief(o, rectOf, blanketOf))).join('\n') : '\nNothing is selected.'); };
+const moment = () => `View: middle (${round(view.cam.cx)}, ${round(view.cam.cy)}), ${round(view.size.w * view.unitsPerPx())} by ${round(view.size.h * view.unitsPerPx())} canvas units.\n` + describe([...state.objects.values()], state.selection, rectOf, blanketOf);
 
 // Text to work: the scripted engine when the words are a patch ("2 osc into mix"), else a brain
 // that works through the commands (agent.js), a turn at a time.
@@ -2548,7 +2548,7 @@ const catalog = installCatalog({
   EXAMPLES, addExample: (e, at) => app.addExample(e, at),
 });
 // Agents outside the page (relay.js): on with ?relay or the relay action, and then kept on.
-const relay = createRelay({ base: settings.relay, tools, call: (name, args, by) => { if (agent.held()) throw new Error('stopped by the person: agents are held until they let them go on'); return call(name, args, by); }, onState: (s) => { document.documentElement.dataset.relay = s; } });
+const relay = createRelay({ base: settings.relay, tools, call: (name, args, by) => { agent.guard(args); return call(name, args, by); }, onState: (s) => { document.documentElement.dataset.relay = s; } });
 if (new URLSearchParams(location.search).has('relay')) setSetting('relayOn', true);
 if (settings.relayOn) relay.open(settings.relay);
 const palette = createPalette($('palette'), { ask, more: catalog, getActions: () => { const c = context(); return ACTIONS.filter((a) => !a.hidden && a.id !== 'palette' && allowed(a, c)).map((a) => asItem(a, c)); } });
@@ -2707,7 +2707,7 @@ window.underspace = { agent, relay, call, batch, tools, commands: tools, state, 
 try {
   const mc = document.modelContext ?? navigator.modelContext;
   const result = (r) => (typeof r?.image === 'string' && r.image.startsWith('data:image/') ? [{ type: 'image', data: r.image.slice(r.image.indexOf(',') + 1), mimeType: 'image/png' }, { type: 'text', text: JSON.stringify({ ...r, image: undefined }) }] : [{ type: 'text', text: JSON.stringify(r ?? null) }]);
-  if (mc?.registerTool) for (const t of tools()) mc.registerTool({ name: t.name.replaceAll('.', '_'), description: t.description, inputSchema: t.inputSchema, execute: async (args) => ({ content: result(await call(t.name, args, 'webmcp')) }) });
+  if (mc?.registerTool) for (const t of tools()) mc.registerTool({ name: t.name.replaceAll('.', '_'), description: t.description, inputSchema: t.inputSchema, execute: async (args) => { agent.guard(args); return { content: result(await call(t.name, args, 'webmcp')) }; } });
 } catch (e) { console.warn('webmcp:', e.message); }
 
 // ---- keep the take between visits; ?demo builds a small example ------------

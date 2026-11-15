@@ -18,6 +18,11 @@ export function createPalette(el, { getActions, ask, more }) {
   input.type = 'text'; input.spellcheck = false; input.setAttribute('aria-label', 'Command or request');
   el.append(input, list, note);
   let rows = [], at = 0, prompt = null, busy = false;
+  // what was run from the line or asked, newest last: Up in an empty field brings them back
+  const HIST = 'underspace-palette';
+  let past = []; try { past = JSON.parse(localStorage.getItem(HIST) || '[]'); } catch { /* none */ }
+  let back = 0;
+  const remember = (text) => { const t = text.trim(); if (!t) return; past = [...past.filter((x) => x !== t), t].slice(-50); back = 0; try { localStorage.setItem(HIST, JSON.stringify(past)); } catch { /* private mode */ } };
 
   function render() {
     const raw = input.value.trim(), bang = raw.startsWith('!'), kinds = NARROW[raw[0]];
@@ -51,7 +56,7 @@ export function createPalette(el, { getActions, ask, more }) {
     if (a.fill) { input.value = a.fill; note.textContent = more.hint(a.fill); at = 0; render(); input.focus(); return; }
     if (a.line) return runLine(a.line);
     if (!a.ask) { if (a.stay) { a.run(); render(); } else { close(); a.run(); } return; }
-    busy = true; el.classList.add('busy'); note.textContent = '';
+    busy = true; el.classList.add('busy'); note.textContent = ''; remember(a.title);
     try { note.textContent = await ask(a.title); input.value = ''; }
     catch (e) { note.textContent = e.message; }
     busy = false; el.classList.remove('busy');
@@ -60,23 +65,24 @@ export function createPalette(el, { getActions, ask, more }) {
 
   // a command from the line: what it returns shows under the field, and the field stays for the next
   async function runLine(text) {
-    busy = true; el.classList.add('busy');
+    remember(text); busy = true; el.classList.add('busy');
     try { note.textContent = await more.line(text); input.value = ''; }
     catch (e) { note.textContent = e.message; }
     busy = false; el.classList.remove('busy');
     render(); input.focus();
   }
 
-  input.addEventListener('input', () => { at = 0; note.textContent = ''; render(); });
+  input.addEventListener('input', () => { at = 0; back = 0; note.textContent = ''; render(); });
   input.addEventListener('keydown', (e) => {
     e.stopPropagation();
     if (e.key === 'Escape') { e.preventDefault(); close(); }
+    else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && past.length && (back > 0 || (e.key === 'ArrowUp' && !input.value))) { e.preventDefault(); back = Math.max(0, Math.min(past.length, back + (e.key === 'ArrowUp' ? 1 : -1))); input.value = back ? past[past.length - back] : ''; at = 0; note.textContent = ''; render(); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); at = (at + 1) % Math.max(1, rows.length); render(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); at = (at - 1 + rows.length) % Math.max(1, rows.length); render(); }
     else if (e.key === 'Enter') {
       e.preventDefault();
       if (prompt) { const done = prompt; prompt = null; const v = input.value.trim(); close(); done(v); }
-      else if (input.value.trim().startsWith('!') && !rows.length) runLine(input.value);
+      else if (input.value.trim().startsWith('!') && (!rows.length || more.hint(input.value.trim()))) runLine(input.value); // a whole command's name, typed: it runs
       else run(e.metaKey || e.ctrlKey ? rows.find((r) => r.ask) : rows[at]);
     }
     else if (e.key === 'Tab' && rows[at]?.fill) { e.preventDefault(); run(rows[at]);

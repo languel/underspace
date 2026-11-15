@@ -712,8 +712,9 @@ function runCmd(cmd, args, by) {
 // call(name, args, by): the one way to do anything. `by` says who: 'human',
 // 'assistant', an agent or model name.
 export function call(name, args = {}, by = 'human') {
-  const cmd = commands.get(name);
+  const cmd = commands.get(name) ?? commands.get(String(name).replace('_', '.')); // "line_add": the name an agent's tool list gives it
   if (!cmd) throw new Error(`unknown command: ${name}`);
+  name = cmd.name;
   for (const fn of callers) fn(name, by);
   const result = runCmd(cmd, args, by);
   if (cmd.record) {

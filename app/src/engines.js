@@ -12,10 +12,16 @@ export async function listModels(base) {
   return (await r.json()).data.map((m) => m.id);
 }
 
-export function endpointEngine({ base, model, temperature = 0.2 }) {
+// Whether a server's model takes pictures. Ollama says (/api/show); for other servers it is not known, so no.
+export async function seesPictures(base, model) {
+  try { const r = await fetch(base.replace(/\/$/, '') + '/api/show', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) }); return r.ok && ((await r.json()).capabilities ?? []).includes('vision'); }
+  catch { return false; }
+}
+
+export function endpointEngine({ base, model, temperature = 0.2, sees = false }) {
   const url = base.replace(/\/$/, '') + '/v1/chat/completions';
   return {
-    name: model,
+    name: model, sees,
     async complete({ messages, tools, signal }) {
       let r;
       try { r = await fetch(url, { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model, messages, tools, temperature, stream: false }) }); }

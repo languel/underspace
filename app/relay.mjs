@@ -46,13 +46,22 @@ const hubStatus = () => ({ tabs: [...tabs.values()].filter((t) => t.res).map((t)
 const hubTools = () => newest()?.tools ?? [];
 
 const body = (req) => new Promise((resolve, reject) => { let s = ''; req.on('data', (d) => { s += d; if (s.length > 64e6) req.destroy(); }); req.on('end', () => { try { resolve(s ? JSON.parse(s) : {}); } catch (e) { reject(e); } }); req.on('error', reject); });
-const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-private-network': 'true' };
-const send = (res, code, json) => { res.writeHead(code, { ...CORS, 'content-type': 'application/json' }); res.end(JSON.stringify(json)); };
+// Who may talk to the hub. A program on this machine (an agent, curl) sends no Origin and is let
+// in. A web page does send one, and only the app's own pages are let in: this machine's, and the
+// origins in UNDERSPACE_ORIGINS (comma-separated; by default the deployed copy). Without this any
+// site open in the browser could drive the drawing, and so run code in it.
+const ORIGINS = new Set((process.env.UNDERSPACE_ORIGINS ?? 'https://languel.github.io').split(',').map((x) => x.trim()).filter(Boolean));
+const allowed = (origin) => { if (!origin) return true; try { const u = new URL(origin); return ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname) || u.hostname.endsWith('.localhost') || ORIGINS.has(u.origin); } catch { return false; } };
+let CORS = {};
+const cors = (origin) => ({ 'access-control-allow-origin': origin || '*', vary: 'origin', 'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-private-network': 'true' });
+const send = (res, code, json) => { res.writeHead(code, { ...res.cors, 'content-type': 'application/json' }); res.end(JSON.stringify(json)); };
 
 function startHub() {
   const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url, BASE);
+    const url = new URL(req.url, BASE), origin = req.headers.origin;
+    res.cors = CORS = cors(origin);
     try {
+      if (!allowed(origin)) { res.writeHead(403, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: `origin ${origin} is not allowed (UNDERSPACE_ORIGINS)` })); }
       if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
       if (url.pathname === '/events') {
         const id = url.searchParams.get('tab') || 't' + (++seq);
