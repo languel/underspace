@@ -1379,6 +1379,32 @@ Also asked for:
   Next for the brains: LFM3's native deferred tools, streaming, a smaller
   prompt for one-line edits (AMS's flow prompt), and evaluation: a set of
   requests with expected commands, run against each engine.
+- **Controls: where it stands (15 Nov 2026, end of session) and what is next.**
+  All four steps are built, pushed and deployed; 128 tests pass. The files:
+  `app/src/catalog.js` (commands for the whole system, palette rows),
+  `app/src/palette.js`, `app/relay.mjs` and `app/src/relay.js` (outside
+  agents), `app/src/agent.js` (user.* tools, batch, hold, `runTurn`),
+  `app/src/engines.js` and `app/src/brain.worker.js` (brains),
+  `app/src/panels/assistant.js`; set-up files `.mcp.json`, `opencode.json`,
+  `.pi/extensions/underspace.ts`. Start a session by opening
+  `http://localhost:5310/app/?relay`; with the relay running, `curl -X POST
+  127.0.0.1:5311/call -d '{"name":"view.look","args":{}}'` is the quickest
+  check that a tab answers.
+  Still to try, in this order: (1) Claude Code in a new session in this
+  folder driving the tab over `.mcp.json` (the real test of the tool set:
+  have it build a score and play it, and note every command it had to guess
+  at); (2) Pi with a provider that has credits or a local one, and an
+  opencode session; (3) the deployed https page reaching the hub on
+  localhost; (4) whether the 1.1 GB weights stay cached across reloads in
+  Chrome proper; (5) WebMCP in a browser that has it.
+  Still to build: gestures as commands (sculpt strokes and other tool drags
+  have none, so an agent cannot yet do them); `view.look` with the text
+  inside code and note objects; pictures to models that can see; LFM3's
+  native deferred tools in place of `tools.search` + `call`; streaming; a
+  short prompt for one-line edits; an evaluation set (requests with the
+  commands expected) run against each engine; palette history; the
+  security audit (everything is open by the owner's decision: any agent can
+  write object code, which runs in the page).
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is
