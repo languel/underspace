@@ -81,7 +81,8 @@ export function browserEngine({ model, dtype = 'q4f16', on = () => {} }) {
     name: model.split('/').pop(),
     async complete({ messages, tools, signal }) {
       listener = on;
-      await start();
+      // stopping while the model is still coming ends the turn; the download goes on for next time
+      await Promise.race([start(), new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new Error('stopped')), { once: true }))]);
       const id = 'r' + (++seq);
       const stop = () => worker?.postMessage({ type: 'stop' });
       signal?.addEventListener('abort', stop);
