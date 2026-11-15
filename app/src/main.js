@@ -47,7 +47,7 @@ import { midiFile, readNotes, createMidiOut } from './midi.js';
 import { iannixPlan, applyPlan } from './iannix.js';
 import { nousPlan, applyNous, nodeCodeFor } from './nous.js';
 import { INSTRUMENTS, DEFAULT_CHANNELS } from './instruments.js';
-import { solve, crossings, measure, atU, atS, tangentS, curveOf, isCurve, JUNCTIONS } from './joints.js';
+import { solve, crossings, crossings3d, measure, atU, atS, tangentS, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
 import { SCULPTS, MESH_SCULPTS, sculptMark, effectiveSculpt } from './ink/sculpt.js';
@@ -594,20 +594,30 @@ function follow(live, held) {
 const TOUCH = 10; // pixels: this close, things touch
 // What a point of the stage touches in space s, other than the lines in `not`:
 // a joint, the end of a line, or a line anywhere along it. { joint } | { id, u, slide?, end? }, with `px` where.
-function touching(s, p, not = new Set()) {
-  const scr = s.kind === 'scene' ? (q) => view.sceneToScreen(s.id, q) : (q) => view.toScreen(at(s.xf, q));
-  let best = null;
-  const consider = (hit, q, rank) => { if (!q) return; const d = Math.hypot(q[0] - p[0], q[1] - p[1]); if (d < TOUCH && (!best || rank < best.rank || (rank === best.rank && d < best.d))) best = { ...hit, px: q, d, rank }; };
-  for (const j of state.objects.values()) if (j.kind === 'joint' && j.space === s.id && !j.fix && !j.at.every((q) => not.has(q.id))) consider({ joint: j.id }, scr(jointAt(j)), 0);
+// In a target, with p3 (where the point is in the scene), only what is near it there counts:
+// two strokes that only look as if they touch, one behind the other, do not.
+function touching(s, p, not = new Set(), p3 = null) {
+  const scene = s.kind === 'scene', scr = scene ? (q) => view.sceneToScreen(s.id, q) : (q) => view.toScreen(at(s.xf, q));
+  let best = null, reach3 = Infinity;
+  if (scene && p3) { const b = view.planeBasis(s.id, 'view'), q = b && scr([p3[0] + b.u[0], p3[1] + b.u[1], (p3[2] ?? 0) + b.u[2]]), o = scr(p3); if (q && o) reach3 = TOUCH / Math.max(1e-6, Math.hypot(q[0] - o[0], q[1] - o[1])); }
+  const far = (q3) => scene && p3 && q3 && Math.hypot(q3[0] - p3[0], q3[1] - p3[1], (q3[2] ?? 0) - (p3[2] ?? 0)) > reach3;
+  const consider = (hit, q, rank, q3) => { if (!q || far(q3)) return; const d = Math.hypot(q[0] - p[0], q[1] - p[1]); if (d < TOUCH && (!best || rank < best.rank || (rank === best.rank && d < best.d))) best = { ...hit, px: q, d, rank }; };
+  for (const j of state.objects.values()) if (j.kind === 'joint' && j.space === s.id && !j.fix && !j.at.every((q) => not.has(q.id))) { const q3 = jointAt(j); consider({ joint: j.id }, scr(q3), 0, q3); }
   for (const l of state.objects.values()) {
     if (!isCurve(l) || l.space !== s.id || l.hidden || not.has(l.id)) continue;
     const path = shownPath(l), sp = path.map(scr);
     if (sp.some((q) => !q)) continue;
-    if (!l.closed) { consider({ id: l.id, u: 0, end: true }, sp[0], 1); consider({ id: l.id, u: 1, end: true }, sp[sp.length - 1], 1); }
+    if (!l.closed) { consider({ id: l.id, u: 0, end: true }, sp[0], 1, path[0]); consider({ id: l.id, u: 1, end: true }, sp[sp.length - 1], 1, path[path.length - 1]); }
     const m = measure(path);
     for (let i = 1; i < sp.length; i++) {
-      const a = sp[i - 1], b = sp[i], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, k = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
-      consider({ id: l.id, u: m.total ? (m.cum[i - 1] + k * (m.cum[i] - m.cum[i - 1])) / m.total : 0, slide: true }, [a[0] + dx * k, a[1] + dy * k], 2);
+      const a = sp[i - 1], b = sp[i], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+      let k = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0, q3 = null;
+      if (scene && p3) { // the nearest place on the stretch in the scene itself
+        const A = path[i - 1], B = path[i], d = [0, 1, 2].map((c) => (B[c] ?? 0) - (A[c] ?? 0)), L2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+        k = L2 ? Math.max(0, Math.min(1, [0, 1, 2].reduce((t, c) => t + ((p3[c] ?? 0) - (A[c] ?? 0)) * d[c], 0) / L2)) : 0;
+        q3 = [0, 1, 2].map((c) => (A[c] ?? 0) + d[c] * k);
+      }
+      consider({ id: l.id, u: m.total ? (m.cum[i - 1] + k * (m.cum[i] - m.cum[i - 1])) / m.total : 0, slide: true }, [a[0] + dx * k, a[1] + dy * k], 2, q3);
     }
   }
   return best;
@@ -617,7 +627,10 @@ const jointHolding = (id, u) => [...state.objects.values()].find((j) => j.kind =
 // Join the end of line `id` at u (seen at stage point p) to what it touches. Returns the joint, or null.
 function joinEnd(s, id, u, p, not) {
   if (jointHolding(id, u)) return null;
-  const t = touching(s, p, not ?? new Set([id]));
+  // in a target the end is where it is in the scene, whatever it looks to be over
+  let p3 = null;
+  if (s.kind === 'scene') { const pts = ptsOf(get(id)); p3 = u === 0 ? pts[0] : pts[pts.length - 1]; p = view.sceneToScreen(s.id, p3) ?? p; }
+  const t = touching(s, p, not ?? new Set([id]), p3);
   if (!t) return null;
   const into = t.joint ?? (t.end ? jointHolding(t.id, t.u)?.id : null);
   if (into) return call('joint.add', { into, at: [{ id, u }] });
@@ -638,11 +651,11 @@ function joinTouching(list, not = new Set(list)) {
 function joinCrossings(c) {
   batch(() => {
     const done = new Set();
-    for (const l of c.lines.filter((o) => isCurve(o) && get(o.space)?.role !== 'target')) {
+    for (const l of c.lines.filter(isCurve)) {
       for (const o of state.objects.values()) {
         if (o === l || !isCurve(o) || o.space !== l.space || o.hidden || done.has(o.id + '|' + l.id)) continue;
         done.add(l.id + '|' + o.id);
-        for (const x of crossings(shownPath(l), shownPath(o))) {
+        for (const x of (get(l.space)?.role === 'target' ? crossings3d(shownPath(l), shownPath(o)) : crossings(shownPath(l), shownPath(o)))) {
           if (jointHolding(l.id, x.ua) && jointHolding(o.id, x.ub)) continue;
           call('joint.add', { at: [{ id: l.id, u: round(x.ua) }, { id: o.id, u: round(x.ub) }] });
         }
@@ -928,7 +941,7 @@ function finishPoly(keep = true) {
   const pts = closed ? g.pts.slice(0, -1) : g.pts;
   batch(() => {
     const id = call('line.add', { space: g.s.id, points: pts.map((q) => q.map(round)), ...(closed ? { closed: true } : {}), style: { path: 'straight', ...(settings.stroke ? { stroke: settings.stroke } : {}), ...(closed && settings.fill ? { fill: settings.fill } : {}), ...(settings.width !== 2.2 ? { width: settings.width } : {}) } });
-    if (id && !closed && g.s.kind !== 'scene') { joinEnd(g.s, id, 0, g.px[0]); joinEnd(g.s, id, 1, g.px.at(-1)); }
+    if (id && !closed) { joinEnd(g.s, id, 0, g.px[0]); joinEnd(g.s, id, 1, g.px.at(-1)); }
     if (id) call('select.set', { ids: [id] });
   });
 }

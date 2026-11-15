@@ -94,3 +94,19 @@ test('events in 3D: a point passed through, a line passed near, a closed line go
   for (let s = 0; s <= 9.5; s += 1 / 30) play.step(state.objects, s, true, hooks);
   assert.deepEqual(notes, [60, 64, 67]);
 });
+
+test('joints in a scene: lines that pass near each other cross; a joined line follows in depth', async () => {
+  const { crossings3d, solve } = await import('../src/joints.js');
+  const a = [[-1, 0, 0], [1, 0, 0]], near = [[0, -1, 0.02], [0, 1, 0.02]], behind = [[0, -1, 1], [0, 1, 1]];
+  assert.equal(crossings3d(a, near).length, 1);
+  assert.ok(Math.abs(crossings3d(a, near)[0].ua - 0.5) < 1e-6);
+  assert.equal(crossings3d(a, behind).length, 0); // it only looks as if they cross
+  const objects = new Map([
+    ['a', { id: 'a', kind: 'line', space: 't', points: [[-1, 0, 0], [1, 0, 2]], style: { path: 'straight' } }],
+    ['b', { id: 'b', kind: 'line', space: 't', points: [[1, 0, 0], [3, 0, 0]], style: { path: 'straight' } }],
+    ['j', { id: 'j', kind: 'joint', space: 't', at: [{ id: 'a', u: 1 }, { id: 'b', u: 0 }], pos: [1, 0, 0] }],
+  ]);
+  const { points } = solve(objects, { hold: new Set(['a']) });
+  const b = points.get('b');
+  assert.ok(b && Math.hypot(b[0][0] - 1, b[0][1], b[0][2] - 2) < 2e-3, JSON.stringify(b));
+});

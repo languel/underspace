@@ -248,6 +248,11 @@ holds the ten kinds; Shift+Space opens the tools of the kind in use in a
 ring at the pointer (hold, move toward one, let go). The brush ring shows
 its reach and, inside, its strength; the tool in hand is shown beside the
 pointer. `'` shows control points in any tool.
+Lines join in a target as on the canvas: an end drawn onto another line
+(the magnet puts it there) is held to it, and what is joined follows when
+either moves. Lines that only look as if they touch, one behind the
+other, are left alone. Right-click › Constrain › Join where it crosses
+works there too.
 
 ## Scores
 

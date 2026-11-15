@@ -945,6 +945,16 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   - Control points in any tool (`'`, `view.points`, the setting
     `showPoints`): shown small and not picked; the sculpt brush marks the
     ones in its reach.
+- **One editor, step (b): joints in targets.** The solver already carried
+  lines in three dimensions (`carry` in `joints.js`); what was missing
+  was telling a real touch from one that only looks like it. `touching`
+  takes where the point is in the scene (`p3`) and leaves out whatever
+  is farther from it than ten pixels' worth at that depth; `joinEnd`
+  reads the end's place from the line. So a line drawn onto another with
+  the magnet joins it, and one drawn in front of it does not. Join where
+  it crosses works in targets (`crossings3d`: where two lines pass within
+  0.05 of each other, once for each near pass). Polylines join in
+  targets too.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a
@@ -1019,7 +1029,7 @@ kind of point, Poly Build, edit operations). The rule that unifies them:
 space under the pointer decides how its result is placed (on the canvas;
 in a target, by the magnet and the drawing plane), and what it works on
 is points (a line's, a mesh's corners), whatever owns them. Steps:
-(a) done: the manner (below); (b) joints in targets, so lines that touch
+(a) done: the manner (below); (b) done: joints in targets, so lines that touch
 in 3D connect and hold as they do on the canvas (the solver in
 `joints.js` is 2D: it needs a rigid motion in 3D, or a first version
 that only keeps the points together); (c) edit operations on points in

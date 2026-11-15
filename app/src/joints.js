@@ -150,6 +150,29 @@ export function crossings(pa, pb) {
   return out;
 }
 
+// The same in three dimensions, where curves seldom cross exactly: where two come within tol
+// of each other (the nearest places of each pair of stretches; one crossing for each near pass).
+export function crossings3d(pa, pb, tol = 0.05) {
+  const ma = measure(pa), mb = measure(pb), out = [];
+  for (let i = 1; i < pa.length; i++) {
+    const a0 = v3(pa[i - 1]), d1 = sub(v3(pa[i]), a0);
+    for (let j = 1; j < pb.length; j++) {
+      const b0 = v3(pb[j - 1]), d2 = sub(v3(pb[j]), b0), r = sub(a0, b0);
+      const a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r), c = dot(d1, r), b = dot(d1, d2), den = a * e - b * b;
+      let t = den > 1e-12 ? Math.max(0, Math.min(1, (b * f - c * e) / den)) : 0;
+      let w = e > 1e-12 ? Math.max(0, Math.min(1, (b * t + f) / e)) : 0;
+      t = a > 1e-12 ? Math.max(0, Math.min(1, (b * w - c) / a)) : 0;
+      const p = add(a0, mul(d1, t)), q = add(b0, mul(d2, w)), d = len(sub(p, q));
+      if (d > tol) continue;
+      const ua = (ma.cum[i - 1] + t * (ma.cum[i] - ma.cum[i - 1])) / (ma.total || 1), ub = (mb.cum[j - 1] + w * (mb.cum[j] - mb.cum[j - 1])) / (mb.total || 1);
+      const near = out.find((x) => len(sub(x.at, p)) < tol * 2);
+      if (near) { if (d < near.d) Object.assign(near, { ua, ub, at: p, d }); continue; }
+      out.push({ ua, ub, at: p, d });
+    }
+  }
+  return out;
+}
+
 // ---- the similarity that carries a curve ------------------------------------
 
 // The rotation taking unit a to unit b, applied to p (Rodrigues; the least turn).
