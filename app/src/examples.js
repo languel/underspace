@@ -69,6 +69,16 @@ export const EXAMPLES = [
     c('traveler.add', { on: line, u: 0.5, dur: 9 });
     for (const i of [3, 11, 20, 29, 40]) c('shape.add', { role: 'event', shape: 'ellipse', rect: { cx: loop[i][0], cy: loop[i][1], w: 0.9, h: 0.9 } });
   } },
+  { path: 'Music/Travelers and events', title: 'A score sets the brush', icon: 'sculpt', build: (c, at) => {
+    // a traveler goes back and forth; each event it passes sets the sculpt brush (its reach, its strength, its kind)
+    const line = c('line.add', { points: [[at[0] - 4, at[1]], [at[0] + 4, at[1]]], style: { path: 'straight' } });
+    c('traveler.add', { on: line, u: 0, dur: 8 });
+    [[-2.5, 20, 0.2, 'smooth'], [0, 60, 0.5, 'push'], [2.5, 140, 0.9, 'twist']].forEach(([x, radius, strength, kind]) => {
+      const ev = c('shape.add', { role: 'event', shape: 'ellipse', rect: { cx: at[0] + x, cy: at[1], w: 0.5 + radius / 100, h: 0.5 + radius / 100 } });
+      c('object.code', { id: ev, code: `// brush: ${kind}\n// the tools in hand, set by the score: play, then sculpt the wavy line\ntool('sculpt', '${kind}');\ntool('sculptRadius', ${radius});\ntool('sculptStrength', ${strength});` });
+    });
+    c('line.add', { points: Array.from({ length: 33 }, (_, i) => [+(at[0] - 4 + i * 0.25).toFixed(3), +(at[1] - 1.6 + Math.sin(i * 0.6) * 0.4).toFixed(3)]) });
+  } },
   { path: 'Sketches', title: 'A p5.js sketch', icon: 'box', build: (c, at) => c('shape.add', { role: 'code', code: P5, rect: { cx: at[0], cy: at[1], w: 6, h: 4.5 } }) },
   { path: 'Sketches', title: 'A three.js sketch', icon: 'box', build: (c, at) => c('shape.add', { role: 'code', code: THREE, rect: { cx: at[0], cy: at[1], w: 6, h: 4.5 } }) },
   { path: 'Patching', title: 'One reusable group', icon: 'collapse', build: (c, at) => c('patch.add', { at, nodes: [{ key: 'osc', preset: 'osc' }, { key: 'smooth', preset: 'smooth' }, { key: 'out', preset: 'scale' }], links: ['osc -> smooth', 'smooth -> out'], collapse: true, name: 'lfo' }) },

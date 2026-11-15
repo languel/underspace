@@ -262,6 +262,13 @@ A mesh's corners are points too: click an edge to pick its ends, a face
 to pick its corners; drag them, or G, R, S. Shift+K splits picked edges,
 J makes a face of picked corners, M merges them, Cmd+Backspace dissolves.
 
+Sculpt tools are code. The panel "Sculpt tools as code" shows any tool as
+JavaScript; copy one and change it, and the preview shows what it does to
+a sample line as you type. A tool you write is saved with the drawing.
+Event and junction code can set the tools in hand with
+`tool('sculptRadius', 80)` (also `sculpt`, `sculptStrength`, `width`,
+`stroke`, `fill`, `magnet`), so a score can change the brush as it plays.
+
 ## Scores
 
 Draw a score frame (S) and draw lines in it: across is time, up is pitch.

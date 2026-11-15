@@ -976,6 +976,27 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   corners and their faces away, Cmd+Backspace dissolves (faces keep the
   corners they have left). Not checked: the colour of a picked face's
   fill ('accent' as a fill) in both themes.
+- **One editor, step (e): tools as code, and tools a score can set.**
+  - A sculpt tool is plain JavaScript that calls `sculpt({ id, label,
+    doc, refine, params: { name: [min, max, default, doc] }, step(pts, s,
+    p, k) })` (`compileSculpt` in `ink/sculpt.js`). The built-in ones read
+    back the same way (`sculptSource`), so any can be copied and changed.
+    Tools written in a drawing live in it: `state.sculpts` (id -> source),
+    `sculpt.define` and `sculpt.remove`, so they are saved, undone and
+    replayed. `syncSculptTools` in `main.js` keeps them among `SCULPTS`
+    and gives each its action (menu, stack, ring). A built-in tool is
+    never replaced.
+  - The panel (`panels/sculpts.js`, "Sculpt tools as code"): pick a tool
+    to read it, copy it, write; the preview sweeps the tool as written
+    over a sample line as you type, and says what is wrong.
+  - `tool(name, value)` in event and junction code sets what is in hand:
+    `sculpt`, `sculptRadius`, `sculptStrength`, `width`, `stroke`, `fill`,
+    `magnet` (`driveTool`; `tool(name)` reads). These are settings, not
+    part of the take. Example: Music › Travelers and events › A score
+    sets the brush.
+  - Not done: ink brushes as code in the same way (the brush kit in
+    `ink/brushes.js` still has no editor), and tools driven by connectors
+    (a port into a tool) rather than by event code.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a
@@ -1057,7 +1078,7 @@ that only keeps the points together); (c) done: edit operations on points in
 both spaces under the same keys (delete and dissolve, subdivide, join,
 cut; threegrease `editops.ts`, `polyops.ts`); (d) done: the selection of
 points, edges and faces as one thing the transform (G, R, S), sculpt and
-the operations all read; (e) sculpt tools and brushes as code you can
+the operations all read; (e) done for sculpt tools (brushes not yet): sculpt tools and brushes as code you can
 write (AMS's panels), then performance: tools and their settings as
 things a score can drive.
 

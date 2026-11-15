@@ -23,6 +23,8 @@ import { pathBeats, cellOf } from './grid.js';
 //   pitch(v)  a place 0..1 as a note: across the timeline's range, on its scale
 //   step(n, k)  k degrees of the scale up from note n;  snap(n)  the nearest note of the scale
 //   rng()  a seeded random 0..1 (the same each time from the start);  cc(n, v, ch)  a MIDI controller
+//   tool(name, value)  set a setting of the tools in hand: sculpt (the kind), sculptRadius, sculptStrength,
+//          width, stroke, fill, magnet;  tool(name) reads it
 //   note(midi, vel, seconds, channel): channel 1..16 picks the instrument (the timeline's)
 //   ev.type 'enter', 'cross' (an open line; ev.dir which way) or 'exit' (with the parameter exit 1);
 //   ev.launch(line, dir) sets a new rider off on a line (its id or name).
@@ -191,6 +193,9 @@ const MAX_RIDERS = 64; // a traveler that splits is at most this many
 function seeded(seed = 1) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const lineNowIs3d = (objects, id) => (objects.get(id)?.points?.[0]?.length ?? 0) > 2; // a line in a render target
 let paramsHook = () => ({});
+// tool(name, value): set a setting of the tools in hand (the brush's reach, its strength, the colour drawn with);
+// tool(name) reads it. Nothing when nothing is listening (a score rendered to notes).
+const NO_TOOL = () => undefined;
 const plain = { note() {}, cc() {}, pitch: (v) => 48 + v * 36, step: (n, k) => n + k, snap: (n) => n };
 let hooksNow = plain;
 export function createPlay() {
@@ -205,8 +210,8 @@ export function createPlay() {
     if (!f) { try { f = { run: new Function(...args, code) }; } catch (e) { f = { error: e.message }; } if (handlers.size > 200) handlers.clear(); handlers.set(key, f); }
     return f;
   };
-  const handler = (code) => compile(code, ['ev', 'p', 'note', 'mem', 'pitch', 'step', 'snap', 'rng', 'cc', 'light', 'lit'], code);
-  const chooser = (code) => compile('junction\n' + code, ['ways', 'ev', 'p', 'mem', 'note', 'pitch', 'step', 'snap', 'rng', 'cc', 'light', 'lit'], code);
+  const handler = (code) => compile(code, ['ev', 'p', 'note', 'mem', 'pitch', 'step', 'snap', 'rng', 'cc', 'light', 'lit', 'tool'], code);
+  const chooser = (code) => compile('junction\n' + code, ['ways', 'ev', 'p', 'mem', 'note', 'pitch', 'step', 'snap', 'rng', 'cc', 'light', 'lit', 'tool'], code);
   // Lights (after Midinous and AMS's nodes): a node is lit for a while, or on until it is put out.
   // light(beats | true | false) sets the light of the node or event whose code runs; lit(name) reads
   // any node's (by name or id). Gates read them.
@@ -246,7 +251,7 @@ export function createPlay() {
         else try {
           // the note a node plays is remembered by the rider: ev.last (Midinous's relative notes)
           const h = hooksNow, note = (m, v, d, ch) => { if (Number.isFinite(m)) rider.last = m; return h.note(m, v, d, ch); };
-          r = f.run(ways, { traveler: o.id, rider: rider.n, from: rider.line, count: counts.get(j.id), last: rider.last ?? 60, spb: h.spb ?? 0.5, self: j.id, t: nowT }, paramsHook(j), memOf(j.id), note, h.pitch, h.step, h.snap, rng, h.cc, lightFor(j.id), lit);
+          r = f.run(ways, { traveler: o.id, rider: rider.n, from: rider.line, count: counts.get(j.id), last: rider.last ?? 60, spb: h.spb ?? 0.5, self: j.id, t: nowT }, paramsHook(j), memOf(j.id), note, h.pitch, h.step, h.snap, rng, h.cc, lightFor(j.id), lit, h.tool ?? NO_TOOL);
         } catch (err) { errors.set(j.id, err.message); }
         const d = decide(r, ways);
         rider.skip = j.id;
@@ -416,7 +421,7 @@ export function createPlay() {
               const g = hooks.gridAt?.(e.space, fireAt);
               let pitch = hooksNow.pitch;
               if (g) { [ev.col, ev.row] = cellOf(fireAt, g); if (g.rows > 0) pitch = () => hooksNow.step(hooksNow.pitch(0), ev.row * g.rows); }
-              try { f.run(ev, ep, note, memOf(e.id), pitch, hooksNow.step, hooksNow.snap, rng, hooksNow.cc, lightFor(e.id), lit); } catch (err) { errors.set(e.id, err.message); }
+              try { f.run(ev, ep, note, memOf(e.id), pitch, hooksNow.step, hooksNow.snap, rng, hooksNow.cc, lightFor(e.id), lit, hooksNow.tool ?? NO_TOOL); } catch (err) { errors.set(e.id, err.message); }
               }
             }
             // latched until it leaves: an event does not fire again while the traveler stays inside

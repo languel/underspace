@@ -269,3 +269,8 @@ body.with-timeline #zoom { bottom: calc(8px + var(--tl-h, 96px)); }
 #debug { position: absolute; right: 8px; bottom: 8px; z-index: 9; margin: 0; padding: 6px 8px; font: 10.5px/1.45 ui-monospace, monospace; color: var(--ink); background: color-mix(in srgb, var(--panel) 92%, transparent); border-radius: 6px; box-shadow: 0 0 0 1px var(--line); pointer-events: none; white-space: pre; }
 #debug[hidden] { display: none; }
 body.with-timeline #debug { bottom: calc(8px + var(--tl-h, 96px)); }
+/* sculpt tools as code */
+.sculpts .sculpt-preview { width: 100%; aspect-ratio: 300 / 110; color: var(--ink); background: var(--field); border-radius: 5px; }
+.sculpts .sculpt-code { min-height: 220px; resize: vertical; font: 11px/1.45 var(--mono, ui-monospace, monospace); white-space: pre; tab-size: 2; }
+.sculpts .sculpt-code[readonly] { opacity: 0.75; }
+.sculpts .sculpt-status { min-height: 1.3em; margin: 0; font-size: 11px; }

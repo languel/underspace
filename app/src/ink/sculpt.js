@@ -229,7 +229,7 @@ export const SCULPTS = {
 };
 
 export function sculptParams(id, values = {}) {
-  const t = SCULPTS[id];
+  const t = typeof id === 'object' ? id : SCULPTS[id];
   const out = {};
   for (const p of t?.params || []) out[p.key] = Number.isFinite(values?.[p.key]) ? values[p.key] : p.default;
   return out;
@@ -254,6 +254,54 @@ export function nearMark(pts, x, y, r, closed = false) {
  * What Cmd does to a sculpt tool: it switches to the tool's opposite (a pair of existing tools). Thicken thins
  * with Cmd (or Alt) on its own; tools without a pair (Push, Grab, Twist) are unchanged.
  */
+// ---- tools as code ---------------------------------------------------------------------------
+// A sculpt tool you write is plain JavaScript that calls sculpt() once with its definition:
+//   sculpt({ id, label, doc, refine, params: { name: [min, max, default, doc] }, step(pts, s, p, k) { ... } })
+// The built-in ones read the same way (sculptSource), so any of them can be copied and changed.
+const BUILTIN = new Set(Object.keys(SCULPTS));
+for (const [id, t] of Object.entries(SCULPTS)) t.id = id;
+export const isBuiltinSculpt = id => BUILTIN.has(id);
+
+/** The definition a tool's source makes. Throws with what is wrong. */
+export function compileSculpt(source) {
+  let def = null;
+  new Function('sculpt', source)(d => { def = d; });
+  if (!def || typeof def !== 'object') throw new Error('call sculpt({ id, label, step(pts, s, p, k) { ... } })');
+  if (!/^[a-z][\w-]*$/i.test(def.id ?? '')) throw new Error('id: a name (letters, digits, - and _)');
+  if (typeof def.step !== 'function') throw new Error('step(pts, s, p, k): a function that returns the points');
+  const params = Array.isArray(def.params) ? def.params
+    : Object.entries(def.params ?? {}).map(([key, v]) => {
+      if (!Array.isArray(v) || !v.slice(0, 3).every(Number.isFinite)) throw new Error(`params.${key}: [min, max, default, doc]`);
+      return param(key, key[0].toUpperCase() + key.slice(1), v[0], v[1], +((v[1] - v[0]) / 100).toPrecision(2), v[2], v[3] ?? '');
+    });
+  return { id: def.id, label: def.label ?? def.id, doc: def.doc ?? '', refine: Boolean(def.refine), params, step: def.step, custom: true, source };
+}
+
+/** A tool as source: what was written, or for a built-in one, the same thing written out. */
+export function sculptSource(id) {
+  const t = SCULPTS[id];
+  if (!t) return '';
+  if (t.source) return t.source;
+  const q = v => JSON.stringify(v);
+  const params = t.params.map(p => `    ${p.key}: [${p.min}, ${p.max}, ${p.default}, ${q(p.doc)}]`).join(',\n');
+  return `sculpt({\n  id: ${q(id)},\n  label: ${q(t.label)},\n  doc: ${q(t.doc)},\n  refine: ${Boolean(t.refine)},\n  params: {\n${params}\n  },\n  ${t.step.toString()}\n})\n`;
+}
+
+/**
+ * The tools written in a drawing ({ id: source }) put among the built-in ones; those no longer there go.
+ * A built-in tool is never replaced. Returns what failed: { id: message }.
+ */
+export function syncSculpts(sources = {}) {
+  const errors = {};
+  for (const id of Object.keys(SCULPTS)) if (SCULPTS[id].custom && !(id in sources)) delete SCULPTS[id];
+  for (const [id, source] of Object.entries(sources)) {
+    if (BUILTIN.has(id)) { errors[id] = 'a built-in tool has this id'; continue; }
+    if (SCULPTS[id]?.source === source) continue;
+    try { const def = compileSculpt(source); if (def.id !== id) throw new Error(`its id is ${def.id}`); SCULPTS[id] = def; } catch (err) { errors[id] = err.message; delete SCULPTS[id]; }
+  }
+  return errors;
+}
+
 /** The tools that work on a mesh's corners: the ones that move points and add or take away none. */
 export const MESH_SCULPTS = new Set(['push', 'grab', 'pinch', 'twist', 'jitter', 'smooth']);
 export const SCULPT_OPPOSITE = { simplify: 'resample', resample: 'simplify', smooth: 'jitter', jitter: 'smooth', pinch: 'relax', relax: 'pinch' };
@@ -264,7 +312,8 @@ export const effectiveSculpt = (id, boost) => (boost && SCULPT_OPPOSITE[id]) || 
  * points, or null when nothing under the brush changed.
  */
 export function sculptMark(id, e, s, values, rng = Math.random, mark = { orig: e.points, state: {} }) {
-  const t = SCULPTS[id];
+  const t = typeof id === 'object' ? id : SCULPTS[id]; // a tool by name, or one being written (its definition)
+  if (t) id = t.id ?? id;
   if (!t) return null;
   const near = (a, b) => nearMark([a, b], s.x, s.y, s.radius);
   let pts = e.points;

@@ -51,7 +51,8 @@ import { INSTRUMENTS, DEFAULT_CHANNELS } from './instruments.js';
 import { solve, crossings, crossings3d, measure, atU, atS, tangentS, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
-import { SCULPTS, MESH_SCULPTS, sculptMark, effectiveSculpt } from './ink/sculpt.js';
+import { SCULPTS, MESH_SCULPTS, sculptMark, effectiveSculpt, syncSculpts } from './ink/sculpt.js';
+import { sculptsPanel } from './panels/sculpts.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage'), pad = $('pad'), marquee = $('marquee'), dotLayer = $('dots');
@@ -409,14 +410,14 @@ function seek(sec) { transport.seek(sec); catchUp(); }
 function catchUp() {
   resetScores();
   playEngine.reset();
-  const t = transport.t, h = { ...musicHooks(), note() {} }, dt = Math.max(1 / 30, t / 3000);
+  const t = transport.t, h = { ...musicHooks(), note() {}, tool: (name) => settings[name] }, dt = Math.max(1 / 30, t / 3000);
   if (t > 0) for (let x = 0; x <= t + 1e-9; x += dt) playEngine.step(state.objects, Math.min(x, t), true, h);
   lastBeat = transport.beat;
 }
 // What travelers, events and junctions play with: the music context, and notes that are heard, sent and recorded.
 function musicHooks() {
   const m = state.music;
-  return { pointsOf: shownPath, paramsOf, note: playNote, hold: holdNote, cc: (n, v, ch = 1) => midiOut.send([0xb0 | ((ch - 1) & 15), n & 127, Math.max(0, Math.min(127, Math.round(v)))]), spb: secPerBeat(m), grid: gridCell(), gridAt: (space, p) => gridHere(space, p), pitch: (v) => pitchOf(v, m), step: (n, k) => stepOf(n, k, m.scale, m.root), snap: (n) => snapOf(n, m.scale, m.root) };
+  return { pointsOf: shownPath, paramsOf, note: playNote, hold: holdNote, tool: driveTool, cc: (n, v, ch = 1) => midiOut.send([0xb0 | ((ch - 1) & 15), n & 127, Math.max(0, Math.min(127, Math.round(v)))]), spb: secPerBeat(m), grid: gridCell(), gridAt: (space, p) => gridHere(space, p), pitch: (v) => pitchOf(v, m), step: (n, k) => stepOf(n, k, m.scale, m.root), snap: (n) => snapOf(n, m.scale, m.root) };
 }
 // The instrument a channel plays (the timeline's choice, else the default).
 const instrumentOf = (ch = 1) => state.music.channels?.[ch] ?? DEFAULT_CHANNELS[ch] ?? 'triangle';
@@ -1203,6 +1204,35 @@ const gridHere = (space, p) => gridAt(state.objects, space, p, state.grid, param
 const snapHere = (space, p) => { const g = gridHere(space, p); return g.frame ? (g.snap ? snapPoint(p, g) : p) : settings.snap ? snapPoint(p, g) : p; };
 
 const stacks = new Map(); // stack -> { b, members, current }: tools of one kind share a button
+// ---- what a score can set of the tools in hand: tool(name, value) in event and junction code ----
+const DRIVEN = { sculptRadius: [6, 400], sculptStrength: [0.05, 1], width: [0.5, 40], sculpt: 'tool', stroke: 'text', fill: 'text', magnet: 'text' };
+function driveTool(name, value) {
+  const kind = DRIVEN[name];
+  if (!kind) return undefined;
+  if (value !== undefined) {
+    if (Array.isArray(kind)) { if (Number.isFinite(value)) setSetting(name, Math.max(kind[0], Math.min(kind[1], value))); }
+    else if (kind === 'tool') { if (SCULPTS[value]) setSetting(name, value); }
+    else if (typeof value === 'string') setSetting(name, value);
+  }
+  return settings[name];
+}
+// The sculpt tools written in the drawing, kept among the built-in ones: each gets its action (so a menu entry, a place in the stack and the ring).
+let sculptSig = '{}', sculptErrors = {};
+function syncSculptTools() {
+  const sig = JSON.stringify(state.sculpts);
+  if (sig === sculptSig) return;
+  sculptSig = sig; sculptErrors = syncSculpts(state.sculpts);
+  const st = stacks.get('sculpt');
+  for (let i = ACTIONS.length - 1; i >= 0; i--) { const a = ACTIONS[i]; if (a.sculptId && !SCULPTS[a.sculptId]) { ACTIONS.splice(i, 1); if (st) st.members = st.members.filter((m) => m !== a); } }
+  for (const id of Object.keys(SCULPTS)) {
+    const old = ACTIONS.find((a) => a.sculptId === id);
+    if (old) { old.title = `Sculpt: ${SCULPTS[id].label}`; old.short = SCULPTS[id].label; continue; }
+    const a = sculptAction(id); ACTIONS.push(a); st?.members.push(a);
+  }
+  if (!SCULPTS[settings.sculpt]) setSetting('sculpt', 'push');
+  settingsVersion++;
+}
+
 // ---- sculpt in a 3D scene ----------------------------------------------------
 // The same tools, on the screen: every point is brushed where it is seen, and
 // goes back into the scene on the plane that faces the camera through where it
@@ -1806,6 +1836,13 @@ async function ask(text) {
   return plan.say;
 }
 
+// One sculpt tool as an action (a built-in one, or one written in the drawing).
+function sculptAction(id) {
+  const t = SCULPTS[id];
+  return { id: 'sculpt.' + id, sculptId: id, title: `Sculpt: ${t.label}`, short: t.label, icon: t.custom ? 'sculpt' : 'sc.' + id, group: 'tool', bar: 'tools', stack: 'sculpt', tool: 'sculpt', pick: () => settings.sculpt === id,
+    menu: 'Sculpt', menuWhen: (c) => c.lines.some(flatLine), on: () => settings.sculpt === id && tool === 'sculpt', run: () => { setSetting('sculpt', id); setTool('sculpt'); } };
+}
+
 // ---- actions: one table for toolbar, keys, menus and the palette -----------
 // { id, title, icon, keys, group, bar: 'tools' | 'edit', menu, when(ctx), run(ctx) }
 
@@ -1816,6 +1853,7 @@ const PANELS = [
   { id: 'examples', title: 'Examples', icon: 'examples', make: examplesPanel },
   { id: 'docs', title: 'Docs', icon: 'book', make: docsPanel },
   { id: 'help', title: 'Shortcuts', icon: 'help', keys: 'shift+?', make: helpPanel },
+  { id: 'sculpts', title: 'Sculpt tools as code', icon: 'sculpt', make: sculptsPanel },
   { id: 'settings', title: 'Settings', icon: 'gear', keys: 'mod+,', make: settingsPanel },
 ];
 
@@ -1884,7 +1922,7 @@ const ACTIONS = [
   { id: 'sculpt.larger', title: 'Sculpt: larger', keys: ']', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptRadius', Math.min(400, Math.round(settings.sculptRadius * 1.2))) },
   { id: 'sculpt.weaker', title: 'Sculpt: weaker', keys: 'shift+{', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptStrength', Math.max(0.05, +(settings.sculptStrength - 0.1).toFixed(2))) },
   { id: 'sculpt.stronger', title: 'Sculpt: stronger', keys: 'shift+}', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptStrength', Math.min(1, +(settings.sculptStrength + 0.1).toFixed(2))) },
-  ...Object.entries(SCULPTS).map(([id, t]) => ({ id: 'sculpt.' + id, title: `Sculpt: ${t.label}`, short: t.label, icon: 'sc.' + id, group: 'tool', bar: 'tools', stack: 'sculpt', tool: 'sculpt', pick: () => settings.sculpt === id, menu: 'Sculpt', menuWhen: (c) => c.lines.some(flatLine), on: () => settings.sculpt === id && tool === 'sculpt', run: () => { setSetting('sculpt', id); setTool('sculpt'); } })),
+  ...Object.keys(SCULPTS).map(sculptAction),
   { id: 'tool.note', title: 'Note', icon: 'note', keys: 'n', group: 'tool', bar: 'tools', tool: 'note' },
   { id: 'tool.code', title: 'Code container', icon: 'box', keys: 'b', group: 'tool2', bar: 'tools', tool: 'code', stack: 'object' },
   // roles: the same key means "tool" with nothing selected and "make this one" with a selection
@@ -2117,6 +2155,8 @@ function toolPopover(name, anchor) {
   pop = showPopover(() => toolProps(app, name), r.left, r.bottom + 6);
 }
 onChange(() => pop?.refresh());
+onChange(syncSculptTools);
+setTimeout(syncSculptTools, 0); // a drawing opened with tools of its own
 onSettings(() => pop?.refresh());
 // a stack whose members are one tool in several kinds (sculpt) shows the kind in use
 onSettings(() => { for (const st of stacks.values()) { const m = st.members.find((a) => a.pick?.()); if (m && m !== st.current) { st.current = m; paintStack(st); } } });
@@ -2191,7 +2231,7 @@ $('peek').onclick = () => document.body.classList.toggle('clean');
 let settingsVersion = 0;
 onSettings(() => settingsVersion++);
 const app = {
-  state, call, batch, get, tools, PRESETS, BRUSHES, INK, SCULPTS, brushesFor, actions: ACTIONS, onParam, onCode, frameIds, runAction,
+  state, call, batch, get, tools, PRESETS, BRUSHES, INK, SCULPTS, sculptErrors: () => sculptErrors, brushesFor, actions: ACTIONS, onParam, onCode, frameIds, runAction,
   run: () => run, setRole, keysShown: (a) => showKey(a), tool: () => tool, settingsVersion: () => settingsVersion,
   presetsFor: (o) => (o.role === 'target' ? TARGET_PRESETS : o.role === 'score' ? BRUSHES : o.role === 'junction' ? JUNCTIONS : o.role === 'event' ? EVENTS : o.role === 'grid' ? GRID_PRESETS : PRESETS),
   // Add an example: built, then moved as a whole to `drop` (a canvas point: dragged from the panel),

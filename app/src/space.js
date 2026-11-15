@@ -21,7 +21,8 @@ import { INSTRUMENTS } from './instruments.js';
 export const state = {
   objects: new Map(),   // id -> object, see object.js
   music: { ...DEFAULT_MUSIC }, // the context everything is heard in (music.js)
-  grid: { ...DEFAULT_GRID },   // the global grid: how space, time and pitch are quantized (grid.js)
+  grid: { ...DEFAULT_GRID },
+  sculpts: {},                 // sculpt tools written in this drawing: id -> source (ink/sculpt.js)   // the global grid: how space, time and pitch are quantized (grid.js)
   clips: new Map(),     // id -> a recorded clip: { id, name, at (beats), notes: [{ beat, midi, vel, len }] }
   selection: new Set(),
   n: 0,                 // ids are counted, so a replay gives the same ids
@@ -229,6 +230,16 @@ define({
     return o.id;
   },
 });
+define({
+  name: 'sculpt.define', doc: 'Write a sculpt tool, or change one written here. code is JavaScript that calls sculpt({ id, label, doc, refine, params: { name: [min, max, default, doc] }, step(pts, s, p, k) { return pts } }) with the same id.',
+  args: { id: { type: 'string' }, code: { type: 'string' } }, required: ['id', 'code'],
+  run(a) { if (!/^[a-z][\w-]*$/i.test(a.id) || !a.code.trim()) return false; state.sculpts = { ...state.sculpts, [a.id]: a.code }; return a.id; },
+});
+define({
+  name: 'sculpt.remove', doc: 'Remove a sculpt tool written in this drawing.', args: { id: { type: 'string' } }, required: ['id'],
+  run(a) { if (!(a.id in state.sculpts)) return false; const { [a.id]: _, ...rest } = state.sculpts; state.sculpts = rest; return true; },
+});
+
 define({
   name: 'mesh.set', doc: 'Give a mesh new verts, or new faces, or both (a Poly Build step).',
   args: { id: T.id, verts, faces }, required: ['id'],
@@ -623,7 +634,7 @@ define({
 // Run a command from inside another, without recording it separately.
 export const exec = (name, args) => commands.get(name).run(args);
 
-function reset() { state.objects.clear(); state.selection.clear(); state.n = 0; state.music = { ...DEFAULT_MUSIC }; state.grid = { ...DEFAULT_GRID }; state.clips.clear(); }
+function reset() { state.objects.clear(); state.selection.clear(); state.n = 0; state.music = { ...DEFAULT_MUSIC }; state.grid = { ...DEFAULT_GRID }; state.sculpts = {}; state.clips.clear(); }
 
 // ---- the take ---------------------------------------------------------------
 
