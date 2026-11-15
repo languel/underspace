@@ -955,6 +955,16 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   it crosses works in targets (`crossings3d`: where two lines pass within
   0.05 of each other, once for each near pass). Polylines join in
   targets too.
+- **One editor, step (c): edit operations on picked points**
+  (`src/editops.js`, pure; after threegrease's `editops.ts` and
+  `polyops.ts`). In the points tool, on a line on the canvas or a stroke
+  in a target alike: Shift+K adds a point between every two picked
+  neighbours (on the curve when the line is smooth), K cuts the line at
+  its picked points (a closed line opens), J joins two picked ends into
+  one line (the two ends of one line close it), Backspace takes points
+  away. `line.set` takes `closed`. The file also holds the mesh
+  operations (take away, dissolve, subdivide edges, merge, fill), wired
+  in step (d).
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a
@@ -1032,7 +1042,7 @@ is points (a line's, a mesh's corners), whatever owns them. Steps:
 (a) done: the manner (below); (b) done: joints in targets, so lines that touch
 in 3D connect and hold as they do on the canvas (the solver in
 `joints.js` is 2D: it needs a rigid motion in 3D, or a first version
-that only keeps the points together); (c) edit operations on points in
+that only keeps the points together); (c) done: edit operations on points in
 both spaces under the same keys (delete and dissolve, subdivide, join,
 cut; threegrease `editops.ts`, `polyops.ts`); (d) the selection of
 points, edges and faces as one thing the transform (G, R, S), sculpt and

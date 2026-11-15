@@ -254,6 +254,11 @@ either moves. Lines that only look as if they touch, one behind the
 other, are left alone. Right-click › Constrain › Join where it crosses
 works there too.
 
+In the points tool (Shift+V) the picked points can be edited, on the
+canvas and in a target alike: Shift+K adds a point between picked
+neighbours, K cuts the line there, J joins two picked ends (or closes one
+line), Backspace deletes.
+
 ## Scores
 
 Draw a score frame (S) and draw lines in it: across is time, up is pitch.

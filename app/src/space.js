@@ -388,11 +388,12 @@ define({
 
 define({
   name: 'line.set', doc: 'Replace a line\'s points (what a sculpt stroke does). pen, when given, has one [ms, pressure] per point.',
-  args: { id: T.id, points: { type: 'array' }, pen: { type: 'array' } }, required: ['id', 'points'],
+  args: { id: T.id, points: { type: 'array' }, pen: { type: 'array' }, closed: { type: 'boolean', description: 'close or open the line (left as it is when not given)' } }, required: ['id', 'points'],
   run(a) {
     const o = state.objects.get(a.id);
     if (!o || o.kind !== 'line' || o.bind || a.points.length < 2) return false;
     o.points = a.points.map((p) => p.slice(0, 3)); o.off = [0, 0];
+    if (a.closed === true) o.closed = true; else if (a.closed === false) delete o.closed;
     if (Array.isArray(a.pen) && a.pen.length === o.points.length) o.pen = a.pen.map((q) => [q[0], q[1]]); else delete o.pen;
     return true;
   },

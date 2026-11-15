@@ -36,6 +36,7 @@ import { snapPoints, snapBox, toSVG, toP5 } from './selection.js';
 import { showPie, recognize } from './pie.js';
 import { createTransport } from './transport.js';
 import { createDebug } from './debug.js';
+import { subdivide, cut, join, removeVerts, dissolveVerts, subdivideEdges, mergeVerts, fill } from './editops.js';
 import { magnet, MAGNETS, MAGNET_TITLE } from './magnet.js';
 import { edgesOf, weld, extrude } from './mesh.js';
 import { EXAMPLES } from './examples.js';
@@ -746,6 +747,54 @@ function removePoints() {
     }
   });
   handles.picked.clear();
+}
+
+// ---- edit operations on picked points (editops.js) ------------------------------
+// The same keys whatever owns the points: a line on the canvas, a stroke in a target.
+const pickOnly = (id, list) => { for (const k of [...handles.picked]) if (k.startsWith(id + ':')) handles.picked.delete(k); for (const i of list) handles.picked.add(handles.key(id, i)); };
+const lineOf = (o) => ({ points: ptsOf(o), pen: o.pen });
+const setLine = (id, r, more = {}) => call('line.set', { id, points: r.points.map((p) => p.map(round)), ...(r.pen ? { pen: r.pen.map((q) => [Math.round(q[0]), +(+q[1]).toFixed(3)]) } : {}), ...more });
+// K with Shift: a point between every two picked neighbours.
+function subdividePicked() {
+  batch(() => {
+    for (const [id, idx] of handles.byLine()) {
+      const o = get(id);
+      if (!isLine(o) || o.bind) continue;
+      const r = subdivide(ptsOf(o), o.pen, idx, { closed: !!o.closed, curved: o.style?.path !== 'straight' });
+      if (r) { setLine(id, r); pickOnly(id, r.picked); }
+    }
+  });
+}
+// K: the line is cut at its picked points (a closed line opens).
+function cutPicked() {
+  batch(() => {
+    for (const [id, idx] of handles.byLine()) {
+      const o = get(id);
+      if (!isLine(o) || o.bind) continue;
+      const pieces = cut(ptsOf(o), o.pen, idx, { closed: !!o.closed });
+      if (!pieces) continue;
+      setLine(id, pieces[0], { closed: false });
+      for (const pc of pieces.slice(1)) call('line.add', { space: o.space, points: pc.points.map((p) => p.map(round)), ...(pc.pen ? { pen: pc.pen } : {}), ...(o.style ? { style: o.style } : {}), ...(o.brush ? { brush: o.brush } : {}) });
+      pickOnly(id, []);
+    }
+  });
+}
+// J: two picked ends become one line; the two ends of one line close it.
+function joinPicked() {
+  const by = [...handles.byLine()].filter(([id]) => isLine(get(id)) && !get(id).bind);
+  if (by.length === 1 && by[0][1].length === 2) {
+    const [id, idx] = by[0], o = get(id), n = ptsOf(o).length;
+    if (!o.closed && idx[0] === 0 && idx[1] === n - 1) { setLine(id, lineOf(o), { closed: true }); return true; }
+    return false;
+  }
+  if (by.length !== 2 || by.some(([, idx]) => idx.length !== 1)) return false;
+  const [[ia, [pa]], [ib, [pb]]] = by, a = get(ia), b = get(ib);
+  if (a.space !== b.space || a.closed || b.closed) return false;
+  const r = join(lineOf(a), pa, lineOf(b), pb);
+  if (!r) return false;
+  batch(() => { setLine(ia, r); call('object.remove', { ids: [ib] }); });
+  handles.picked.clear();
+  return true;
 }
 
 // ---- grab, rotate, scale (G, R, S, as in Blender) ----------------------------
@@ -1897,6 +1946,9 @@ const ACTIONS = [
   ...['path', 'wave'].map((k) => ({ id: 'code.' + k, title: `Path code: ${k}`, short: k, icon: 'path', group: 'role', menu: 'Path code', when: (c) => c.lines.length && !c.lines.some((o) => o.bind), run: (c) => batch(() => c.lines.forEach((o) => { call('object.role', { id: o.id, role: 'path' }); call('object.code', { id: o.id, code: PRESETS[k] }); })) })),
   // navigation
   { id: 'enter', title: 'Go into', icon: 'enter', keys: 'enter', group: 'nav', menu: true, when: (c) => c.one?.rect || (c.one && blanketOf(c.one)), run: (c) => frameIds([c.one.id], 0.82) },
+  { id: 'points.subdivide', title: 'Points: add one between picked neighbours', icon: 'sc.resample', keys: 'shift+k', group: 'edit', menu: 'Points', when: () => tool === 'points' && handles.picked.size > 1, run: subdividePicked },
+  { id: 'points.cut', title: 'Points: cut the line here', icon: 'cut', keys: 'k', group: 'edit', menu: 'Points', when: () => tool === 'points' && handles.picked.size > 0, run: cutPicked },
+  { id: 'points.join', title: 'Points: join two ends (the two ends of one line close it)', icon: 'joint', keys: 'j', group: 'edit', menu: 'Points', when: () => tool === 'points' && handles.picked.size > 1, run: joinPicked },
   { id: 'points.none', title: 'Unpick points', keys: 'escape', group: 'nav', hidden: true, when: () => tool === 'points' && handles.picked.size, run: () => handles.picked.clear() },
   { id: 'points.all', title: 'Pick every point shown', keys: 'mod+a', group: 'nav', hidden: true, when: () => tool === 'points', run: () => { for (const h of handles.shown) handles.picked.add(handles.key(h.id, h.i)); } },
   { id: 'deselect', title: 'Deselect', keys: 'escape', group: 'nav', when: (c) => c.sel.length, run: () => call('select.set', { ids: [] }) },
