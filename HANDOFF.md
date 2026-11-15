@@ -1322,6 +1322,31 @@ Also asked for:
   faces would lag the camera. Not tried: Claude Code itself over
   `.mcp.json` (needs a new session), and the deployed https page reaching
   the hub on localhost.
+- **Controls, step 3 done: the agent port and the assistant (`app/src/agent.js`,
+  `engines.js`, `panels/assistant.js`).** Commands for working with the
+  person: `user.say` (a line on the canvas that fades), `user.ask` (a card
+  with choices and/or a field; the call waits for the answer), `user.pick`
+  (waits for a selection or a clicked place), `user.show` (selects and
+  frames); `batch.run` (several commands, one undo step). `onCall` in
+  `space.js` tells who is calling: a mark at the bottom right of the stage
+  shows while an agent's calls arrive, and clicking it holds every agent
+  (relay calls are refused with a reason, the page's own loop stops) until
+  it is clicked again. `runTurn` is the loop for a brain in the page: an
+  engine is `{ name, complete({ messages, tools, signal }) -> { content,
+  tool_calls } }` in the OpenAI shape; the model gets `CORE` (15 tools) plus
+  `call` and finds the rest with `tools.search`; a turn is one undo step
+  (`beginStep/endStep`); when a model answers without having used a tool it
+  is told once that nothing changed. `endpointEngine` talks to any
+  OpenAI-compatible server. The old patch-only endpoint call is gone;
+  `scripted` still answers patch sentences first. The Assistant panel
+  (Cmd+J) shows the turn as it happens (commands as rows, arguments on
+  hover), picks the engine and model, stops, forgets. Tried with Ollama:
+  `lfm2.5-thinking` (0.7 GB) answered in seconds and called `line.add`
+  three times for "a triangle" (wrong shapes: the model, not the loop);
+  `huihui-4:8b` did not answer in two minutes even from curl, so nothing
+  was learned from it. Not done: streaming, pictures to models that can see
+  (a picture is named, not sent), the mark staying lit while a question
+  waits, per-agent undo.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

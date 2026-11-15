@@ -293,3 +293,35 @@ input[type=number][data-dragging] { cursor: ew-resize; user-select: none; }
 .palette-list { max-height: min(60vh, 420px); overflow-y: auto; }
 .palette-list .label small { display: block; overflow: hidden; color: var(--muted); font-size: 0.85em; white-space: nowrap; text-overflow: ellipsis; }
 .palette-list .label { min-width: 0; }
+
+/* the agent port: a mark while an agent works (click: hold), and the card it speaks through */
+.agentmark { position: absolute; right: 12px; bottom: 12px; z-index: 6; width: 28px; height: 28px; padding: 5px; color: var(--accent); background: var(--panel); border: 1px solid var(--accent); border-radius: 50%; cursor: pointer; animation: agent-pulse 1.2s ease-in-out infinite; }
+.agentmark[data-state=held] { color: var(--hot); border-color: var(--hot); border-style: dashed; animation: none; }
+@keyframes agent-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 25%, transparent); } }
+.agentcard { position: absolute; left: 50%; bottom: 52px; z-index: 6; max-width: min(460px, 80%); padding: 8px 26px 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; transform: translateX(-50%); box-shadow: 0 6px 24px rgb(0 0 0 / 0.25); }
+.agentcard p { margin: 0; white-space: pre-wrap; }
+.agentcard .choices { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.agentcard .choices:empty { display: none; }
+.agentcard .choices button { padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; }
+.agentcard .choices button:hover { border-color: var(--accent); color: var(--accent); }
+.agentcard input { width: 100%; margin-top: 8px; padding: 4px 7px; background: var(--field); }
+.agentcard .close { position: absolute; top: 4px; right: 6px; color: var(--muted); }
+:root[data-relay=on] #tabs::after, :root[data-relay=waiting] #tabs::after { content: ''; display: block; width: 6px; height: 6px; margin: 6px auto; border-radius: 50%; background: var(--accent); }
+:root[data-relay=waiting] #tabs::after { background: none; border: 1px solid var(--muted); }
+
+/* the assistant panel */
+.panel-assistant { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.chat-log { flex: 1; min-height: 80px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; padding: 4px 0; }
+.chat-me { align-self: flex-end; max-width: 88%; padding: 4px 9px; background: var(--field); border-radius: 10px 10px 2px 10px; white-space: pre-wrap; }
+.chat-say { max-width: 94%; white-space: pre-wrap; }
+.chat-call { color: var(--muted); font-family: ui-monospace, monospace; font-size: 0.86em; }
+.chat-call::before { content: '▸ '; }
+.chat-call[data-ok='1']::after { content: ' ✓'; color: var(--accent); }
+.chat-call[data-ok='0']::after { content: ' ✕'; color: var(--hot); }
+.chat-err { color: var(--hot); white-space: pre-wrap; }
+.chat-progress { color: var(--muted); font-size: 0.86em; }
+.chat-input { width: 100%; margin-top: 6px; padding: 6px 8px; background: var(--field); border: 1px solid var(--line); border-radius: 6px; resize: vertical; font: inherit; }
+.panel-assistant.busy .chat-input { opacity: 0.55; }
+.chat-bar { align-items: center; margin-top: 4px; }
+.chat-models { display: flex; flex: 1; gap: 4px; min-width: 0; }
+.chat-models select { min-width: 0; max-width: 50%; }

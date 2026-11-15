@@ -1,7 +1,7 @@
 // Wiring: layout by zoom, gestures, and the action table that the toolbar,
 // keys, context menus and palette all read.
 
-import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, history, travel, stats, argTypes as T, beginStep, endStep } from './space.js';
+import { state, call, batch, define, undo, redo, take, onChange, onCall, loadTake, tools, history, travel, stats, argTypes as T, beginStep, endStep } from './space.js';
 
 import './patch.js';
 import { stepsOnScreen, TARGET_PRESETS, pressureRuns } from './object.js';
@@ -25,7 +25,11 @@ import { createPalette } from './palette.js';
 import { install as installCatalog } from './catalog.js';
 import { createRelay } from './relay.js';
 import { showMenu, showPopover, closeMenu } from './menu.js';
-import { scripted, endpoint, listModels } from './assistant.js';
+import { scripted } from './assistant.js';
+import { install as installAgent } from './agent.js';
+import { endpointEngine, listModels } from './engines.js';
+import { assistantPanel } from './panels/assistant.js';
+import { brief } from './catalog.js';
 import { sketchKind } from './sketch.js';
 import { PRESETS } from './presets.js';
 import { BRUSHES } from './brushes.js';
@@ -1816,13 +1820,25 @@ function below(s) {
   return low === Infinity ? back(s.xf ?? ROOT, view.toWorld(...centre())) : [(x0 + x1) / 2, low - 3.2];
 }
 
-// Text to objects: the scripted engine first, a local model when it has no answer.
-async function ask(text) {
-  let plan = scripted(text), by = 'assistant';
+// The brains there are (engines.js), and the one chosen in settings.
+const ENGINES = [{ id: 'endpoint', title: 'local server' }];
+async function engine() {
+  const make = ENGINES.find((x) => x.id === settings.assistEngine)?.make;
+  if (make) return make();
+  if (!settings.assistBase) throw new Error('no model endpoint set');
+  if (!settings.assistModel) setSetting('assistModel', (await listModels(settings.assistBase))[0]);
+  return endpointEngine({ base: settings.assistBase, model: settings.assistModel });
+}
+// What a brain is told of the moment: what is selected and where the view is.
+const moment = () => { const sel = [...state.selection].map(get).filter(Boolean).slice(0, 12); return `View: middle (${round(view.cam.cx)}, ${round(view.cam.cy)}), ${round(view.size.w * view.unitsPerPx())} by ${round(view.size.h * view.unitsPerPx())} canvas units. ${state.objects.size} objects.` + (sel.length ? '\nSelected ("it", "this", "these"):\n' + sel.map((o) => JSON.stringify(brief(o, rectOf, blanketOf))).join('\n') : '\nNothing is selected.'); };
+
+// Text to work: the scripted engine when the words are a patch ("2 osc into mix"), else a brain
+// that works through the commands (agent.js), a turn at a time.
+async function ask(text, { panel = false } = {}) {
+  const plan = scripted(text), by = 'assistant';
   if (!plan) {
-    if (!settings.assistBase) throw new Error('no model endpoint set');
-    if (!settings.assistModel) setSetting('assistModel', (await listModels(settings.assistBase))[0]);
-    plan = await endpoint(text, { base: settings.assistBase, model: settings.assistModel }); by = settings.assistModel;
+    if (!panel) panels.show('assistant'); // what it does and says shows there
+    return agent.run(text, await engine(), { context: moment() });
   }
   // New work goes in the space in the middle of the view, below what is there.
   const s = spaceAt(...centre(), true);
@@ -1916,6 +1932,7 @@ const PANELS = [
   { id: 'help', title: 'Shortcuts', icon: 'help', keys: 'shift+?', make: helpPanel },
   { id: 'sculpts', title: 'Sculpt tools as code', icon: 'sculpt', make: sculptsPanel },
   { id: 'brushes', title: 'Brushes as code', icon: 'brush', make: brushesPanel },
+  { id: 'assistant', title: 'Assistant', icon: 'ask', keys: 'mod+j', make: assistantPanel },
   { id: 'settings', title: 'Settings', icon: 'gear', keys: 'mod+,', make: settingsPanel },
 ];
 
@@ -2297,6 +2314,7 @@ onSettings(() => settingsVersion++);
 dragStep.begin = beginStep; dragStep.end = endStep;
 const app = {
   simplifyIds: (ids, px) => simplifyLines({ lines: ids.map(get).filter(Boolean) }, px),
+  ask: (text, o) => ask(text, o), agent: () => agent, engines: () => ENGINES, listModels: () => listModels(settings.assistBase),
   state, call, batch, get, tools, PRESETS, BRUSHES, INK, SCULPTS, sculptErrors: () => sculptErrors, brushesFor, actions: ACTIONS, onParam, onCode, frameIds, runAction,
   run: () => run, setRole, keysShown: (a) => showKey(a), tool: () => tool, settingsVersion: () => settingsVersion,
   presetsFor: (o) => (o.role === 'target' ? TARGET_PRESETS : o.role === 'score' ? BRUSHES : o.role === 'junction' ? JUNCTIONS : o.role === 'event' ? EVENTS : o.role === 'grid' ? GRID_PRESETS : PRESETS),
@@ -2331,6 +2349,8 @@ const app = {
     if (!drop) requestAnimationFrame(() => frameIds(fresh, 0.6));
   },
 };
+// The agent port (agent.js): how an agent works with the person, and the loop of a brain in the page.
+const agent = installAgent({ define, T, call, batch, beginStep, endStep, tools, state, get, view, stage, frameIds, onCall, onChange, icon, toCanvas: (px, py) => { const r = stage.getBoundingClientRect(); return view.toWorld(px - r.left, py - r.top).map(round); } });
 const panels = createPanels($('tabs'), $('side'), app, PANELS);
 // Replay the making: every step again, at the pace it was made (pauses over 1.5 s shortened).
 // A press or a key stops it where it is.
@@ -2526,7 +2546,7 @@ const catalog = installCatalog({
   EXAMPLES, addExample: (e, at) => app.addExample(e, at),
 });
 // Agents outside the page (relay.js): on with ?relay or the relay action, and then kept on.
-const relay = createRelay({ base: settings.relay, call, tools, onState: (s) => { document.documentElement.dataset.relay = s; } });
+const relay = createRelay({ base: settings.relay, tools, call: (name, args, by) => { if (agent.held()) throw new Error('stopped by the person: agents are held until they let them go on'); return call(name, args, by); }, onState: (s) => { document.documentElement.dataset.relay = s; } });
 if (new URLSearchParams(location.search).has('relay')) setSetting('relayOn', true);
 if (settings.relayOn) relay.open(settings.relay);
 const palette = createPalette($('palette'), { ask, more: catalog, getActions: () => { const c = context(); return ACTIONS.filter((a) => !a.hidden && a.id !== 'palette' && allowed(a, c)).map((a) => asItem(a, c)); } });
@@ -2649,7 +2669,7 @@ define({ name: 'play.toggle', doc: 'Start or stop playing: scores loop and trave
 define({ name: 'score.stop', doc: 'Stop one score (the others play on), or pause everything when no id is given.', args: { id: T.id }, record: false, run: (a) => { if (!a.id) { if (transport.playing) togglePlay(); return; } scoreSet = new Set(scores().filter((o) => o.id !== a.id && scorePlaying(o)).map((o) => o.id)); sound.silence(a.id); scorePlan.delete(a.id); } });
 define({ name: 'assistant.ask', doc: 'Ask the built-in assistant to build something from a sentence.', args: { text: T.str }, required: ['text'], record: false, run: (a) => ask(a.text) });
 
-window.underspace = { call, batch, tools, commands: tools, state, take, undo, redo, view, ask, actions: ACTIONS, backend: view.backend };
+window.underspace = { agent, relay, call, batch, tools, commands: tools, state, take, undo, redo, view, ask, actions: ACTIONS, backend: view.backend };
 // WebMCP, where the browser has it: every command is offered as a tool. The object was
 // navigator.modelContext and is now document.modelContext: whichever is there.
 try {

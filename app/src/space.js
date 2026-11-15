@@ -714,6 +714,7 @@ function runCmd(cmd, args, by) {
 export function call(name, args = {}, by = 'human') {
   const cmd = commands.get(name);
   if (!cmd) throw new Error(`unknown command: ${name}`);
+  for (const fn of callers) fn(name, by);
   const result = runCmd(cmd, args, by);
   if (cmd.record) {
     const clip = { t: +((performance.now() - t0) / 1000).toFixed(3), name, args: structuredClone(args), by };
@@ -724,6 +725,10 @@ export function call(name, args = {}, by = 'human') {
   }
   return result;
 }
+
+// Who is calling: told of every call (the agent port shows who is at work).
+const callers = new Set();
+export const onCall = (fn) => { callers.add(fn); return () => callers.delete(fn); };
 
 // Everything called inside fn is one step for undo.
 export function batch(fn) {
