@@ -95,7 +95,7 @@ test('a quick turn: few tools, a short prompt, over when its calls worked, words
   assert.equal(state.objects.get(note).rect.cx, 5);
   assert.equal(got.length, 1);
   assert.equal(got[0].n, 2); // the prompt and the request: no history
-  assert.deepEqual(got[0].tools, QUICK.filter((n) => tools().some((t) => t.name === n)).map((n) => n.replace('.', '_'))); // play.toggle is the page's
+  assert.deepEqual(got[0].tools, QUICK.filter((n) => tools().some((t) => t.name === n)).map((n) => n.replace('.', '_')).concat('more_tools')); // play.toggle is the page's
   assert.ok(got[0].system.length < 2600, String(got[0].system.length));
   // a call that fails goes back to the model to be put right
   rounds.push({ content: '', tool_calls: [{ id: 'b', name: 'object_remove', arguments: { ids: ['o99'] } }] }, { content: '', tool_calls: [{ id: 'c', name: 'object_remove', arguments: { ids: [line] } }] });
@@ -108,4 +108,22 @@ test('a quick turn: few tools, a short prompt, over when its calls worked, words
   assert.equal(r.say, '1');
   assert.equal(got.length, 4);
   assert.equal(got[3].tools, undefined); // and it is given no tools to misuse
+});
+
+test('a quick turn hands a request it cannot do over to the whole loop', async () => {
+  call('space.clear');
+  const line = call('line.add', { points: [[0, 0], [4, 0]] });
+  const got = [], events = [];
+  const rounds = [
+    { content: '', tool_calls: [{ id: 'a', name: 'more_tools', arguments: {} }] },
+    { content: '', tool_calls: [{ id: 'b', name: 'call', arguments: { name: 'traveler.add', args: { on: line } } }] },
+    { content: 'A traveler is on the line.', tool_calls: [] },
+  ];
+  const engine = { name: 'fake', complete: async ({ tools: defs }) => { got.push(defs.map((d) => d.function.name)); return rounds.shift(); } };
+  const r = await runTurn({ text: 'put a traveler on the line', quick: true, engine, on: (e) => events.push(e.type), port: { call, tools, held: () => false, has: (id) => state.objects.has(id) } });
+  assert.ok(got[0].includes('more_tools') && !got[0].includes('call'));
+  assert.ok(got[1].includes('call') && got[1].includes('object_code') && !got[1].includes('more_tools'));
+  assert.ok(events.includes('handover'));
+  assert.equal([...state.objects.values()].filter((o) => o.role === 'traveler' && o.on === line).length, 1);
+  assert.equal(r.say, 'A traveler is on the line.');
 });

@@ -28,6 +28,7 @@ Examples of calls:
 - a square 4 wide: line_add {"points": [[0, 0], [4, 0], [4, 4], [0, 4]], "closed": true, "style": {"path": "straight"}}
 - a curve is a line with several points and no "path" in its style.
 - make a line red: object_style {"ids": ["o1"], "style": {"stroke": "#ff0000"}}
+- a traveler on a line (a command that is not listed, run with call): call {"name": "traveler.add", "args": {"on": "o1"}}
 - A drawn figure (a triangle, a square, any outline) is line_add with "closed": true. shape_add is for frames that hold code, scores, 3D scenes or notes.`;
 
 // The quick turn (after Artist Model Studio's flow prompt): a sentence typed while drawing, not a
@@ -38,6 +39,7 @@ export const QUICK_SYSTEM = `You change a drawing in underspace, at once, throug
 - What is drawn is listed under "Now" (ids, kinds, boxes [x0, y0, x1, y1] in canvas units, y up). Use the ids from there; "it" and "this" are what is selected.
 - Nothing changes unless you call a tool: to make or change anything, call the tools now, all of it in one reply (several calls when it takes several), and nothing more than was asked.
 - Only a question about the drawing is answered in words, from "Now", with no tool.
+- When what is asked needs something these tools cannot do (a traveler, an event, a joint, code, a brush, a 3D camera, an example, a setting, playing one score), call more_tools and nothing else: the request is then done with every tool.
 - A drawn figure (a line, a triangle, a square, any outline) is line_add; shape_add is for frames: a score (its lines play as sound), a target (a 3D frame), a note (text), code.
 Examples of calls:
 - a straight line: line_add {"points": [[0, 0], [2, 0]], "style": {"path": "straight"}}
@@ -46,7 +48,7 @@ Examples of calls:
 - make a line red: object_style {"ids": ["o1"], "style": {"stroke": "#ff0000"}}
 - move it right by 5: object_move {"ids": ["o1"], "dx": 5, "dy": 0}
 - twice as big: object_transform {"ids": ["o1"], "sx": 2, "sy": 2}
-- a score 10 wide and 4 tall at the origin with a line in it (the line lies inside the frame's box): shape_add {"role": "score", "rect": {"cx": 0, "cy": 0, "w": 10, "h": 4}} and line_add {"points": [[-4, -1], [0, 1], [4, 0]]}`;
+- a score 12 wide and 6 tall around (20, 0) with a line in it (each line lies inside the frame's box, each its own points): shape_add {"role": "score", "rect": {"cx": 20, "cy": 0, "w": 12, "h": 6}} and line_add {"points": [[15, -2], [20, 2], [25, 0]]}`;
 
 // A small model names things by word where an id is wanted ("note", "line", "selected", "all"). In a
 // quick turn such a word stands for what it plainly means: -> ids, or null when it is no such word.
@@ -112,10 +114,15 @@ const parse = (v) => { if (v && typeof v === 'object') return v; try { return JS
 // there were, removed them). "can you make it red?" is a request and is not caught here.
 export const asks = (text) => /^\s*(how many|how much|how big|how long|what|which|where|who|why|is|are)\b/i.test(String(text));
 // quick: the short prompt and the few tools of QUICK, no history, at most six rounds.
+// A quick turn that needs more hands itself over: the model calls more_tools, and the same request
+// is run as a whole turn (on({ type: 'handover' }) says so; the panel shows the rest).
+const MORE = { type: 'function', function: { name: 'more_tools', description: 'Call this, alone, when the request needs a tool that is not listed here. The request is then done with every tool.', parameters: { type: 'object', properties: {} } } };
 export async function runTurn({ text, history = [], engine, port, by = 'assistant', context = '', signal, on = () => {}, rounds = 16, quick = false }) {
+  const whole = { text, history, engine, port, by, context, signal, on, rounds };
   if (quick) { history = []; rounds = Math.min(rounds, 6); }
   const { defs, resolve } = quick ? toolset(port.tools(), QUICK, false, false) : toolset(port.tools(), engine.sees ? [...CORE, 'view.look'] : CORE, !!engine.defers);
-  const system = quick ? QUICK_SYSTEM : engine.defers ? SYSTEM.replace('Every other command is found with tools_search {query} and run with call {name, args}.', 'Every other command is found with tools_search {query}; the tools it finds can then be called by their own names.').replace('call {name: "action.list", args: {query}}', 'tools_search') : SYSTEM;
+  if (quick) defs.push(MORE);
+  const system = quick ? QUICK_SYSTEM : engine.defers ? SYSTEM.replace('Every other command is found with tools_search {query} and run with call {name, args}.', 'Every other command is found with tools_search {query}; the tools it finds can then be called by their own names.').replace('call {name: "action.list", args: {query}}', 'tools_search').replace('(a command that is not listed, run with call): call {"name": "traveler.add", "args": {"on": "o1"}}', '(a command that is not listed: find it with tools_search {"query": "traveler"}, then): traveler_add {"on": "o1"}') : SYSTEM;
   const messages = [{ role: 'system', content: system + (context ? '\n\nNow:\n' + context : '') }, ...history, { role: 'user', content: text }];
   let used = false, nudged = false;
   const pictures = [];
@@ -131,6 +138,7 @@ export async function runTurn({ text, history = [], engine, port, by = 'assistan
       if (!used && !nudged && round < rounds - 1 && !(quick && asks(text))) { nudged = true; messages.push({ role: 'user', content: 'You have not called any tool, so nothing has changed. If something was to be made or changed, call the tools now. If only an answer was wanted, give it again.' }); continue; }
       on({ type: 'say', text: say }); return { say, messages: messages.slice(1) };
     }
+    if (quick && calls.some((c) => c.name === 'more_tools')) { on({ type: 'handover' }); return runTurn(whole); }
     used = true;
     if (reply.content?.trim()) on({ type: 'say', text: reply.content.trim() });
     let wrong = 0;
@@ -165,6 +173,7 @@ export async function runTurn({ text, history = [], engine, port, by = 'assistan
     if (pictures.length) { messages.push({ role: 'user', content: [{ type: 'text', text: 'The picture you asked for:' }, ...pictures.map((url) => ({ type: 'image_url', image_url: { url } }))] }); pictures.length = 0;
     }
   }
+  if (quick) { on({ type: 'handover' }); return runTurn(whole); } // it could not put its calls right with these tools
   on({ type: 'say', text: '…' });
   return { say: '', messages: messages.slice(1) };
 }
@@ -253,8 +262,9 @@ export function install(h) {
     running = ac; held = false; show(); emit({ type: 'begin', text });
     h.beginStep();
     try {
-      const r = await runTurn({ text, history, engine, quick, by: engine.name ?? 'assistant', context, signal: ac.signal, on: emit, port: { call: h.call, tools: h.tools, held: () => held, has: (id) => !!h.get(id), objects: () => [...h.state.objects.values()], selection: () => [...h.state.selection] } });
-      if (!quick) history = r.messages.slice(-24); // what was said and done, for the next turn (a quick turn leaves none)
+      let over = false; // a quick turn that handed itself over became a whole one
+      const r = await runTurn({ text, history, engine, quick, by: engine.name ?? 'assistant', context, signal: ac.signal, on: (e) => { if (e.type === 'handover') over = true; emit(e); }, port: { call: h.call, tools: h.tools, held: () => held, has: (id) => !!h.get(id), objects: () => [...h.state.objects.values()], selection: () => [...h.state.selection] } });
+      if (!quick || over) history = r.messages.slice(-24); // what was said and done, for the next turn (a quick turn leaves none)
       return r.say;
     } catch (e) { emit({ type: 'error', text: e?.message ?? String(e) }); throw e; }
     finally { h.endStep(); running = null; emit({ type: 'end' }); }

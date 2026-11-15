@@ -1572,8 +1572,27 @@ Also asked for:
     after a reload of the page, in the app's browser pane: they are read
     again at each reload, and whether they are fetched again is still to
     check in Chrome proper.
-  - Not done: a quick turn has no way to say "this needs the whole loop"
-    and hand over to it.
+  - **Handover.** A quick turn is also given `more_tools`: the model calls
+    it, alone, when the request needs a command it does not have (a
+    traveler, a joint, code, a camera), and the same request is then run as a
+    whole turn (`runTurn` calls itself without `quick`; the event
+    `handover` opens the Assistant panel, and that turn's history is kept).
+    A quick turn that cannot put its calls right in six rounds hands over
+    too. New eval case `traveler` ("put a traveler on the line"): `gemma4`
+    passes it by handover in 5 to 7 s (23 of 24 quick, two runs); LFM3 in
+    the browser passes it in about 19 s, and there it did call
+    `tools_search` (the deferred tools, seen working for the first time),
+    then `traveler.add`, then two calls nobody asked for.
+  - **What the handover turned up:** `shape.add` and `line.add` offered the
+    role "traveler", and a model made a shape with that role instead of
+    calling `traveler.add`: the role is no longer in their schemas, and the
+    whole loop's prompt shows the call. `line.add` and `line.set` kept
+    points that were empty or written as text (`"[0, 1]"`, as LFM3 sends
+    them): text is now read, and no points or a point that is not numbers is
+    refused (`cleanPoints`).
+  - LFM3 in the browser now, one run (it is deterministic): quick 11 of 12
+    (it misses the score: lines outside the frame), whole loop 9 of 12
+    (triangle, score, delete). 133 tests.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

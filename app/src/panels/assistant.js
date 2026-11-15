@@ -23,6 +23,7 @@ export function assistantPanel(el, app) {
     else if (e.type === 'call' && live) { if (!live.textContent.trim()) live.remove(); live = null; lastCall = line('call', e.name, JSON.stringify(e.args).slice(0, 600)); }
     else if (e.type === 'call') lastCall = line('call', e.name, JSON.stringify(e.args).slice(0, 600));
     else if (e.type === 'result' && lastCall) { lastCall.dataset.ok = e.ok ? '1' : '0'; lastCall.title += '\n→ ' + e.text.slice(0, 600); }
+    else if (e.type === 'handover') { live?.remove(); live = null; line('call', '…', 'the quick turn handed the request over to the whole loop'); }
     else if (e.type === 'error') line('err', e.text);
     else if (e.type === 'progress') { let p = log.querySelector('.chat-progress'); if (!p) p = line('progress', ''); p.textContent = e.text; if (e.done) p.remove(); }
     else if (e.type === 'end') { el.classList.remove('busy'); live = null; }

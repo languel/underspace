@@ -75,14 +75,27 @@ function bindInto(o, b) {
   o.points = b.points; o.off = [0, 0]; o.bind = b.bind; o.role = 'connector';
 }
 
+// The points of a line as given to a command: [[x, y], ...] (z too in a target). A point written as
+// text ("[0, 1]": some models do) is read; no points, or a point that is not numbers, is refused, so a
+// line that cannot be drawn is not kept and the caller is told.
+function cleanPoints(points) {
+  if (typeof points === 'string') { try { points = JSON.parse(points); } catch { /* refused below */ } }
+  if (!Array.isArray(points) || !points.length) throw new Error('points must be a list of points, like [[0, 0], [4, 2]] (got ' + JSON.stringify(points ?? null).slice(0, 80) + ')');
+  return points.map((p) => {
+    if (typeof p === 'string') { try { p = JSON.parse(p); } catch { /* refused below */ } }
+    if (!Array.isArray(p) || p.length < 2 || !p.slice(0, 3).every(Number.isFinite)) throw new Error('each point is [x, y] in numbers, like [[0, 0], [4, 2]] (got ' + JSON.stringify(p).slice(0, 60) + ')');
+    return p.slice(0, 3);
+  });
+}
+
 define({
   name: 'line.add',
   doc: 'Draw a line. With tol > 0, a line whose ends land on an output and an input port becomes a connector. role "path" attaches code that reads the line.',
-  args: { space: T.space, points: { type: 'array', description: '[[x, y], ...]; [x, y, z] inside a target' }, tol: T.num, role: { enum: ROLES.line }, closed: { type: 'boolean' }, style: T.style, brush: T.brush, pen: { type: 'array', description: '[[ms, pressure 0..1], ...], one per point: the hand that drew it' } },
+  args: { space: T.space, points: { type: 'array', description: '[[x, y], ...]; [x, y, z] inside a target' }, tol: T.num, role: { enum: ROLES.line.filter((r) => r !== 'traveler') }, closed: { type: 'boolean' }, style: T.style, brush: T.brush, pen: { type: 'array', description: '[[ms, pressure 0..1], ...], one per point: the hand that drew it' } },
   required: ['points'],
   run(a) {
     const space = a.space ?? null;
-    const o = { id: newId(), kind: 'line', role: 'ink', space, points: a.points.map((p) => p.slice(0, 3)), off: [0, 0] };
+    const o = { id: newId(), kind: 'line', role: 'ink', space, points: cleanPoints(a.points), off: [0, 0] };
     if (a.closed) o.closed = true;
     if (a.style) o.style = { ...a.style };
     if (a.brush?.id && INK[a.brush.id]) o.brush = { id: a.brush.id, params: { ...a.brush.params } };
@@ -97,8 +110,8 @@ define({
 
 define({
   name: 'shape.add',
-  doc: 'Add a shape. role: "visual" (something to look at), "code" (a code container; give code, or a preset name), "target" (a render target with a 3D interior), "score" (a frame that plays the lines drawn in it; its code is a brush), "grid" (a frame whose parameters quantize space, time and pitch inside it), "event", "note" (text).',
-  args: { space: T.space, rect: T.rect, shape: { enum: ['rect', 'ellipse'] }, role: { enum: ROLES.shape }, code: T.str, text: T.str, style: T.style, brush: T.brush, preset: { enum: [...Object.keys(PRESETS), ...Object.keys(BRUSHES)] } },
+  doc: 'Add a shape. role: "visual" (something to look at), "code" (a code container; give code, or a preset name), "target" (a render target with a 3D interior), "score" (a frame that plays the lines drawn in it; its code is a brush), "grid" (a frame whose parameters quantize space, time and pitch inside it), "event", "note" (text). A traveler is not made here: traveler.add puts one on a line.',
+  args: { space: T.space, rect: T.rect, shape: { enum: ['rect', 'ellipse'] }, role: { enum: ROLES.shape.filter((r) => r !== 'traveler') }, code: T.str, text: T.str, style: T.style, brush: T.brush, preset: { enum: [...Object.keys(PRESETS), ...Object.keys(BRUSHES)] } },
   required: ['rect'],
   run(a) {
     const o = { id: newId(), kind: 'shape', role: a.role ?? 'visual', shape: a.shape ?? 'rect', space: a.space ?? null, rect: { ...a.rect } };
@@ -426,8 +439,10 @@ define({
   args: { id: T.id, points: { type: 'array' }, pen: { type: 'array' }, closed: { type: 'boolean', description: 'close or open the line (left as it is when not given)' } }, required: ['id', 'points'],
   run(a) {
     const o = state.objects.get(a.id);
-    if (!o || o.kind !== 'line' || o.bind || a.points.length < 2) return false;
-    o.points = a.points.map((p) => p.slice(0, 3)); o.off = [0, 0];
+    if (!o || o.kind !== 'line' || o.bind) return false;
+    const pts = cleanPoints(a.points);
+    if (pts.length < 2) return false;
+    o.points = pts; o.off = [0, 0];
     if (a.closed === true) o.closed = true; else if (a.closed === false) delete o.closed;
     if (Array.isArray(a.pen) && a.pen.length === o.points.length) o.pen = a.pen.map((q) => [q[0], q[1]]); else delete o.pen;
     return true;

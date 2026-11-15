@@ -2357,6 +2357,8 @@ const app = {
 };
 // The agent port (agent.js): how an agent works with the person, and the loop of a brain in the page.
 const agent = installAgent({ define, T, call, batch, beginStep, endStep, tools, state, get, view, stage, frameIds, onCall, onChange, icon, toCanvas: (px, py) => { const r = stage.getBoundingClientRect(); return view.toWorld(px - r.left, py - r.top).map(round); } });
+// a quick turn that hands its request over to the whole loop shows the rest in the Assistant panel
+agent.on((e) => { if (e.type === 'handover') panels.show('assistant'); });
 const panels = createPanels($('tabs'), $('side'), app, PANELS);
 // Replay the making: every step again, at the pace it was made (pauses over 1.5 s shortened).
 // A press or a key stops it where it is.

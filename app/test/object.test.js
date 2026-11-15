@@ -111,3 +111,14 @@ test('smooth draws a curve through the points; simplify drops what the line does
   assert.deepEqual(smooth([[0, 0], [1, 1]]), [[0, 0], [1, 1]], 'two points stay a straight line');
   assert.deepEqual(simplify([[0, 0], [1, 0.01], [2, 0], [3, 2], [4, 0]], 0.1), [[0, 0], [2, 0], [3, 2], [4, 0]]);
 });
+
+test('line.add reads points written as text and refuses what cannot be drawn', async () => {
+  const { call, state } = await import('../src/space.js');
+  call('space.clear');
+  const id = call('line.add', { points: ['[-4, -1]', '[0, 1]', '[4, 0]'] });
+  assert.deepEqual(state.objects.get(id).points, [[-4, -1], [0, 1], [4, 0]]);
+  const n = state.objects.size;
+  assert.throws(() => call('line.add', { points: [] }), /points must be a list/);
+  assert.throws(() => call('line.add', { points: [[0, 0], ['a', 1]] }), /each point is \[x, y\]/);
+  assert.equal(state.objects.size, n);
+});
