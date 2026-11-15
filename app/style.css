@@ -288,3 +288,8 @@ body.with-timeline #debug { bottom: calc(8px + var(--tl-h, 96px)); }
 /* Cmd-drag on a number */
 :root[data-cmd='1'] input[type=number] { cursor: ew-resize; }
 input[type=number][data-dragging] { cursor: ew-resize; user-select: none; }
+
+/* palette: rows of every kind; a command's first sentence under its name */
+.palette-list { max-height: min(60vh, 420px); overflow-y: auto; }
+.palette-list .label small { display: block; overflow: hidden; color: var(--muted); font-size: 0.85em; white-space: nowrap; text-overflow: ellipsis; }
+.palette-list .label { min-width: 0; }

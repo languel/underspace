@@ -238,8 +238,7 @@ export async function createView({ canvas, stage, onFrame }) {
   new ResizeObserver(resize).observe(stage);
   readTheme(); resize();
 
-  renderer.setAnimationLoop(() => {
-    onFrame?.();
+  function draw() {
     updateCamera();
     renderer.setScissorTest(false);
     renderer.setViewport(0, 0, size.w, size.h);
@@ -258,7 +257,8 @@ export async function createView({ canvas, stage, onFrame }) {
       renderer.clearDepth();
       renderer.render(s.scene, s.cam);
     }
-  });
+  }
+  renderer.setAnimationLoop(() => { onFrame?.(); draw(); });
 
   return {
     readTheme, cam, size, unitsPerPx, toWorld, toScreen, setLines, setScenes, setPreview, sceneToLocal, sceneToScreen, planeBasis,
@@ -273,6 +273,8 @@ export async function createView({ canvas, stage, onFrame }) {
       const after = toWorld(px, py);
       cam.cx += before[0] - after[0]; cam.cy += before[1] - after[1];
     },
+    // The ink as it is now, as a canvas to copy from (drawn afresh: a WebGPU canvas keeps its picture only for the frame).
+    grab() { draw(); return canvas; },
     backend: renderer.backend?.isWebGPUBackend ? 'WebGPU' : 'WebGL 2',
   };
 }

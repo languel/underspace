@@ -1259,6 +1259,48 @@ Also asked for:
   resting camera (az, el, dist, center). Not done: pose-matching a frame that
   was orbited (only the front view is exact), keeping brushes through the
   trip, and a preview of the projection before dissolving.
+- **Controls: the plan (agreed 15 Nov 2026).** Three layers, built in this
+  order. (1) *One catalog* (`app/src/catalog.js`): everything the system can
+  do is a listed command with a schema: actions by id, settings, panels,
+  reading the space, seeing the view, moving the view, examples, and a
+  search over the tools themselves (small models cannot hold them all). The
+  palette is its human face: it finds actions, commands, settings, objects
+  and examples and takes a command's arguments in the same field. (2) *A
+  relay* (optional Node sidecar: MCP over stdio on one side, a websocket to
+  the open tab on the other) so Claude Code, Pi or opencode drive the page
+  with the same tools; WebMCP for browser agents. (3) *One agent port*: every
+  brain goes through it; calls are in the take under the agent's name, a turn
+  is one undo step, and commands that wait for the person (ask with choices,
+  pick objects or a place, point at, say) let an agent work with them through
+  the system. Then the local-endpoint loop replaces the add-only assistant.
+  (4) *The in-browser brain*: a Pi-style loop in a worker with LFM3 on WebGPU,
+  a short core tool set plus tool search. **Security:** this is for the
+  owner's own machines and network ("remote" means their own server), and it
+  stays open while it is built: no levels or confirmations yet. An audit
+  comes when there is something to test. To check before building on them:
+  whether Pi's loop and provider packages bundle into one vendored file with
+  no build; what the LFM3 + Pi demo Space uses; a websocket from the deployed
+  page to localhost; WebMCP's name (`document.modelContext` now,
+  `navigator.modelContext` before: register on both).
+- **Controls, step 1 done: the catalog and the palette (`app/src/catalog.js`).**
+  New commands, none recorded: `tools.search`, `action.list`, `action.run`
+  (every `ACTIONS` entry by id, so anything a key does an agent can do),
+  `setting.get/set`, `panel.show/close`, `space.read` (short form with box,
+  ports and code header; `ids` for objects in full), `view.get/set/frame`,
+  `view.look` (a PNG: `view.grab()` redraws the three.js canvas, and the DOM
+  faces are drawn over it as frames with their titles, so text inside code
+  and notes is not in the picture), `example.list/add`. 65 tools in all. The
+  palette finds actions first, then commands, settings, objects and
+  examples; `>` `:` `@` narrow to commands, settings, objects; `!name args`
+  runs a command from the line (`parseArgs`: JSON, name=value pairs, or the
+  one required argument bare), and choosing a command that takes arguments
+  writes that line and shows its signature; what it returns shows under the
+  field. Booleans toggle in place. WebMCP registers on `document.modelContext`
+  or `navigator.modelContext`, and returns `view.look` as image content (not
+  tried: no browser here has WebMCP). Not done: gestures as commands (a
+  stroke drawn through the pen pipeline with pressure and brushes is
+  `line.add` with `pen` and `brush`, but tool drags such as sculpt strokes
+  have no command yet), and the palette has no history.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

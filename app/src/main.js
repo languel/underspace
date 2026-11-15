@@ -19,9 +19,10 @@ import { examplesPanel } from './panels/examples.js';
 import { docsPanel } from './panels/docs.js';
 import { helpPanel } from './panels/help.js';
 import { settingsPanel } from './panels/settings.js';
-import { settings, setSetting, onSettings } from './settings.js';
+import { settings, setSetting, onSettings, DEFAULTS } from './settings.js';
 import { colorField } from './controls.js';
 import { createPalette } from './palette.js';
+import { install as installCatalog } from './catalog.js';
 import { showMenu, showPopover, closeMenu } from './menu.js';
 import { scripted, endpoint, listModels } from './assistant.js';
 import { sketchKind } from './sketch.js';
@@ -2516,7 +2517,13 @@ for (const id of ['edit', 'tools', 'tabs', 'zoom']) grip($(id));
 placeIslands();
 addEventListener('resize', placeIslands);
 
-const palette = createPalette($('palette'), { ask, getActions: () => { const c = context(); return ACTIONS.filter((a) => !a.hidden && a.id !== 'palette' && allowed(a, c)).map((a) => asItem(a, c)); } });
+// The rest of the system as commands, and the palette's rows for them (catalog.js).
+const catalog = installCatalog({
+  define, T, tools, call, state, get, rectOf, blanketOf, actions: ACTIONS, context, allowed, keysShown: (a) => showKey(a),
+  settings, setSetting, DEFAULTS, panels: () => panels, PANELS, view, frameIds, fit, stage,
+  EXAMPLES, addExample: (e, at) => app.addExample(e, at),
+});
+const palette = createPalette($('palette'), { ask, more: catalog, getActions: () => { const c = context(); return ACTIONS.filter((a) => !a.hidden && a.id !== 'palette' && allowed(a, c)).map((a) => asItem(a, c)); } });
 
 // Context menu: the actions that apply to what was clicked, grouped.
 pad.addEventListener('contextmenu', (e) => {
@@ -2629,20 +2636,20 @@ function pasteText(code, c) {
 // The same registry, with the view added as commands that are not recorded.
 
 define({ name: 'view.fit', doc: 'Show everything.', record: false, run: () => fit() });
-define({ name: 'view.frame', doc: 'Show these objects; a single object is opened to its near face.', args: { ids: T.ids }, required: ['ids'], record: false, run: (a) => frameIds(a.ids, a.ids.length === 1 ? 0.82 : 0.6) });
 define({ name: 'view.zoom', doc: 'Zoom by a factor about the middle of the view.', args: { factor: T.num }, required: ['factor'], record: false, run: (a) => view.zoomAt(...centre(), a.factor) });
 define({ name: 'tool.set', doc: 'Choose the pointer tool.', args: { name: { enum: ['select', 'pan', 'draw', 'line', 'rect', 'ellipse', 'sculpt', 'note', 'code', 'target', 'score', 'event'] } }, required: ['name'], record: false, run: (a) => setTool(a.name) });
-define({ name: 'space.read', doc: 'Read the document: every object with its role, space, rectangle, ports and code.', record: false, run: () => [...state.objects.values()].map((o) => ({ id: o.id, kind: o.kind, role: o.role, space: o.space, rect: o.rect, name: blanketOf(o)?.name, ins: blanketOf(o)?.ins, outs: blanketOf(o)?.outs, params: o.params, code: hasCode(o) ? o.code : undefined, bind: o.bind, points: o.points?.length })) });
 define({ name: 'score.play', doc: 'Play a score on the transport, pass after pass. What is drawn or changed while it plays is heard from the next pass.', args: { id: T.id }, required: ['id'], record: false, run: (a) => { if (get(a.id)?.role !== 'score') return; if (scoreSet) scoreSet.add(a.id); if (!transport.playing) { lastBeat = transport.beat; transport.play(); } scoreTick(); } });
 define({ name: 'play.toggle', doc: 'Start or stop playing: scores loop and travelers set off along their lines.', record: false, run: () => togglePlay() });
 define({ name: 'score.stop', doc: 'Stop one score (the others play on), or pause everything when no id is given.', args: { id: T.id }, record: false, run: (a) => { if (!a.id) { if (transport.playing) togglePlay(); return; } scoreSet = new Set(scores().filter((o) => o.id !== a.id && scorePlaying(o)).map((o) => o.id)); sound.silence(a.id); scorePlan.delete(a.id); } });
 define({ name: 'assistant.ask', doc: 'Ask the built-in assistant to build something from a sentence.', args: { text: T.str }, required: ['text'], record: false, run: (a) => ask(a.text) });
 
 window.underspace = { call, batch, tools, commands: tools, state, take, undo, redo, view, ask, actions: ACTIONS, backend: view.backend };
-// WebMCP, where the browser has it: every command is offered as a tool.
+// WebMCP, where the browser has it: every command is offered as a tool. The object was
+// navigator.modelContext and is now document.modelContext: whichever is there.
 try {
-  const mc = navigator.modelContext;
-  if (mc?.registerTool) for (const t of tools()) mc.registerTool({ name: t.name.replace('.', '_'), description: t.description, inputSchema: t.inputSchema, execute: async (args) => ({ content: [{ type: 'text', text: JSON.stringify((await call(t.name, args, 'webmcp')) ?? null) }] }) });
+  const mc = document.modelContext ?? navigator.modelContext;
+  const result = (r) => (typeof r?.image === 'string' && r.image.startsWith('data:image/') ? [{ type: 'image', data: r.image.slice(r.image.indexOf(',') + 1), mimeType: 'image/png' }, { type: 'text', text: JSON.stringify({ ...r, image: undefined }) }] : [{ type: 'text', text: JSON.stringify(r ?? null) }]);
+  if (mc?.registerTool) for (const t of tools()) mc.registerTool({ name: t.name.replaceAll('.', '_'), description: t.description, inputSchema: t.inputSchema, execute: async (args) => ({ content: result(await call(t.name, args, 'webmcp')) }) });
 } catch (e) { console.warn('webmcp:', e.message); }
 
 // ---- keep the take between visits; ?demo builds a small example ------------

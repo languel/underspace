@@ -1,42 +1,46 @@
-// The command palette: type to find an action, or say what you want and the
-// assistant builds it. One field; the last row always offers the assistant.
+// The command palette: type to find anything the system can do, or say what you want and the
+// assistant builds it. One field. Actions come first; then commands, settings, objects and
+// examples (catalog.js). A first character narrows it: > commands, : settings, @ objects,
+// and ! runs a command from the line ("!line.add points=[[0,0],[2,1]]"); choosing a command
+// that takes arguments writes that line for you and shows what it takes. The last row always
+// offers the assistant.
 
 import { h } from './controls.js';
 import { icon } from './icons.js';
 
-// Letters of the query in order; earlier and tighter matches score higher.
-function score(query, text) {
-  let i = 0, s = 0, last = -1;
-  for (const ch of query) {
-    const at = text.indexOf(ch, i);
-    if (at < 0) return -1;
-    s += at === last + 1 ? 3 : 1; if (at === 0 || text[at - 1] === ' ') s += 2;
-    last = at; i = at + 1;
-  }
-  return s - text.length * 0.01;
-}
+import { score } from './catalog.js';
 
-// getActions() -> [{ title, keys, icon, run }], ask(text) -> Promise<string> (what the assistant says)
-export function createPalette(el, { getActions, ask }) {
+// getActions() -> [{ title, keys, icon, run }], ask(text) -> Promise<string> (what the assistant says),
+// more: { rows(q, kinds), line(text) -> Promise<string>, hint(text) } from catalog.js
+const NARROW = { '>': ['command'], ':': ['setting'], '@': ['object'] };
+export function createPalette(el, { getActions, ask, more }) {
   const input = h('input'), list = h('div', 'palette-list'), note = h('p', 'palette-note');
   input.type = 'text'; input.spellcheck = false; input.setAttribute('aria-label', 'Command or request');
   el.append(input, list, note);
   let rows = [], at = 0, prompt = null, busy = false;
 
   function render() {
-    const q = input.value.trim().toLowerCase();
+    const raw = input.value.trim(), bang = raw.startsWith('!'), kinds = NARROW[raw[0]];
+    const q = (bang || kinds ? raw.slice(1) : raw).trim().toLowerCase();
     if (prompt) rows = [];
-    else {
-      rows = getActions().map((a) => ({ a, s: q ? score(q, a.title.toLowerCase()) : 0 })).filter((r) => r.s >= 0);
+    else if (bang) { // a command being typed: its name completes, then the line shows what it takes
+      const named = /\s/.test(input.value.replace(/^\s*!\s*/, ''));
+      rows = named ? [] : more.rows(q, ['command']).sort((x, y) => y.s - x.s).slice(0, 12);
+      if (named) note.textContent = more.hint(raw);
+    } else {
+      const acts = kinds ? [] : getActions().map((a) => ({ ...a, s: q ? score(q, a.title.toLowerCase()) + 4 : 0 })).filter((r) => r.s >= 0);
+      const rest = q || kinds ? more.rows(q, kinds) : [];
+      rows = [...acts, ...rest];
       if (q) rows.sort((x, y) => y.s - x.s);
-      rows = rows.slice(0, 9).map((r) => r.a);
-      if (q) rows.push({ title: input.value.trim(), icon: 'ask', keys: rows.length ? '⌘↵' : '↵', ask: true });
+      rows = rows.slice(0, kinds ? 40 : 12);
+      if (q && !kinds) rows.push({ title: raw, icon: 'ask', keys: rows.length ? '⌘↵' : '↵', ask: true });
     }
     at = Math.min(at, Math.max(0, rows.length - 1));
     list.replaceChildren(...rows.map((a, i) => {
       const row = h('button', 'menu-item' + (i === at ? ' on' : '') + (a.ask ? ' ask' : ''));
       const glyph = h('span', 'glyph'); glyph.innerHTML = a.icon ? icon(a.icon) : '';
-      row.append(glyph, h('span', 'label', a.title), h('kbd', '', a.keys ?? ''));
+      const label = h('span', 'label', a.title); if (a.sub) label.append(h('small', '', a.sub));
+      row.append(glyph, label, h('kbd', '', a.keys ?? ''));
       row.addEventListener('click', () => run(a));
       return row;
     }));
@@ -44,7 +48,9 @@ export function createPalette(el, { getActions, ask }) {
 
   async function run(a) {
     if (!a || busy) return;
-    if (!a.ask) { close(); a.run(); return; }
+    if (a.fill) { input.value = a.fill; note.textContent = more.hint(a.fill); at = 0; render(); input.focus(); return; }
+    if (a.line) return runLine(a.line);
+    if (!a.ask) { if (a.stay) { a.run(); render(); } else { close(); a.run(); } return; }
     busy = true; el.classList.add('busy'); note.textContent = '';
     try { note.textContent = await ask(a.title); input.value = ''; }
     catch (e) { note.textContent = e.message; }
@@ -52,7 +58,16 @@ export function createPalette(el, { getActions, ask }) {
     render(); input.focus();
   }
 
-  input.addEventListener('input', () => { at = 0; render(); });
+  // a command from the line: what it returns shows under the field, and the field stays for the next
+  async function runLine(text) {
+    busy = true; el.classList.add('busy');
+    try { note.textContent = await more.line(text); input.value = ''; }
+    catch (e) { note.textContent = e.message; }
+    busy = false; el.classList.remove('busy');
+    render(); input.focus();
+  }
+
+  input.addEventListener('input', () => { at = 0; note.textContent = ''; render(); });
   input.addEventListener('keydown', (e) => {
     e.stopPropagation();
     if (e.key === 'Escape') { e.preventDefault(); close(); }
@@ -61,7 +76,10 @@ export function createPalette(el, { getActions, ask }) {
     else if (e.key === 'Enter') {
       e.preventDefault();
       if (prompt) { const done = prompt; prompt = null; const v = input.value.trim(); close(); done(v); }
+      else if (input.value.trim().startsWith('!') && !rows.length) runLine(input.value);
       else run(e.metaKey || e.ctrlKey ? rows.find((r) => r.ask) : rows[at]);
+    }
+    else if (e.key === 'Tab' && rows[at]?.fill) { e.preventDefault(); run(rows[at]);
     }
   });
   el.addEventListener('pointerdown', (e) => e.stopPropagation());
