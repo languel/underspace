@@ -1461,6 +1461,37 @@ Also asked for:
     page cannot reach the hub (`ERR_BLOCKED_BY_CLIENT`: the pane's policy,
     so it says nothing about Chrome, which should ask for local network
     access); the hub must be restarted to pick up `relay.mjs` changes.
+- **Controls: the third pass (15 Nov 2026).**
+  - **Streaming.** `engine.complete` takes `onText(soFar)`: the endpoint
+    engine reads server-sent events (content and tool-call pieces joined by
+    index); the worker posts tokens through a `TextStreamer`; the Assistant
+    panel writes the line as it comes. Tried: the endpoint in Node through
+    the eval; the browser engine in the page (63 pieces on one reply).
+  - **The evaluation in the page.** The cases moved to
+    `app/src/evalcases.js`; `eval.run {only}` runs them against the
+    Assistant's current brain, puts the drawing aside and restores it.
+    LFM3 in the browser: 9 of 11 again (colour now passes; this time it
+    failed "delete the lines, keep the rest" by removing the note too, and
+    the score again). One run a model is noisy: use `--runs` in Node, and a
+    runs argument is still to add in the page.
+  - **LFM3's deferred tools.** For a model whose name has LFM3
+    (`engine.defers`), every non-core command is passed with
+    `defer_loading: true` and `call` is dropped; a `tools.search` result
+    goes back as `tool_reference` parts, as the model card describes. The
+    prompt did not grow (a case still takes about 3.4 s), but LFM3 was not
+    seen to call `tools_search` on its own: asked for a traveler on a line
+    (a non-core command) it drew lines instead. Unproven, left on.
+  - **`sculpt.stroke` with `space`:** inside a render target, on lines and
+    meshes, on the screen through the target's camera and lifted back, as
+    the tool does. Tried: a push on a straight 3D line (it bulged in the
+    camera plane; one undo put it back). The target must be on screen.
+  - **Not possible from here:** `claude -p` with `--mcp-config .mcp.json`
+    (401: the shell has no login), so Claude Code over the relay still
+    needs a session the owner starts; Claude in Chrome was not connected,
+    so the deployed page reaching the hub and the weights staying cached
+    were not checked in Chrome; Pi with a local model (a throwaway config
+    dir via `PI_CODING_AGENT_DIR` with an Ollama provider) ran four minutes
+    without loading the model or calling a tool and was stopped.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is
