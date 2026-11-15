@@ -84,10 +84,10 @@ test('a quick turn: few tools, a short prompt, over when its calls worked, words
   assert.deepEqual(wordIds('all', objects()), [note, line]);
   assert.deepEqual(wordIds('selected', objects(), [line]), [line]);
   assert.equal(wordIds('o77', objects()), null);
-  assert.ok(asks('how many lines are there? answer with the number') && asks('is it red?') && !asks('draw one short line'));
+  assert.ok(asks('how many lines are there? answer with the number') && asks('is it red?') && !asks('draw one short line') && !asks('can you make it red?'));
 
   const got = [], rounds = [];
-  const engine = { name: 'fake', complete: async ({ messages, tools: defs }) => { got.push({ system: messages[0].content, tools: defs.map((d) => d.function.name), n: messages.length }); return rounds.shift(); } };
+  const engine = { name: 'fake', complete: async ({ messages, tools: defs }) => { got.push({ system: messages[0].content, tools: defs?.map((d) => d.function.name), n: messages.length }); return rounds.shift(); } };
   const port = { call, tools, held: () => false, has: (id) => state.objects.has(id), objects, selection: () => [...state.selection] };
   // the model names the note by word; the call works, so it is not asked again
   rounds.push({ content: '', tool_calls: [{ id: 'a', name: 'object_move', arguments: { ids: ['note'], dx: 5, dy: 0 } }] });
@@ -107,4 +107,5 @@ test('a quick turn: few tools, a short prompt, over when its calls worked, words
   const r = await runTurn({ text: 'how many objects are there?', quick: true, engine, port });
   assert.equal(r.say, '1');
   assert.equal(got.length, 4);
+  assert.equal(got[3].tools, undefined); // and it is given no tools to misuse
 });

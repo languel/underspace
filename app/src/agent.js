@@ -107,8 +107,10 @@ const parse = (v) => { if (v && typeof v === 'object') return v; try { return JS
 // One turn: the person's words in, tool calls until the model answers in words.
 // port: { call(name, args, by) (may be async), tools(), held() }; on(event): what happens, for the panel
 //   { type: 'call', name, args } | { type: 'result', name, text, ok } | { type: 'stream', text (so far) } | { type: 'say', text } | { type: 'error', text }
-// Is it a question? (In a quick turn a question answered in words is an answer, not a model that forgot to act.)
-export const asks = (text) => /\?\s*$|\?\s|^\s*(how|what|which|where|who|why|is|are|does|do|can)\b/i.test(String(text));
+// Is it a plain question about the drawing ("how many lines are there?", "what is selected")? A quick turn
+// gives such a request no tools at all: a small model handed tools uses one (LFM3, asked how many lines
+// there were, removed them). "can you make it red?" is a request and is not caught here.
+export const asks = (text) => /^\s*(how many|how much|how big|how long|what|which|where|who|why|is|are)\b/i.test(String(text));
 // quick: the short prompt and the few tools of QUICK, no history, at most six rounds.
 export async function runTurn({ text, history = [], engine, port, by = 'assistant', context = '', signal, on = () => {}, rounds = 16, quick = false }) {
   if (quick) { history = []; rounds = Math.min(rounds, 6); }
@@ -120,7 +122,7 @@ export async function runTurn({ text, history = [], engine, port, by = 'assistan
   const seen = new Map();
   for (let round = 0; round < rounds; round++) {
     if (signal?.aborted) throw new Error('stopped');
-    const reply = await engine.complete({ messages, tools: defs, signal, onText: (t) => on({ type: 'stream', text: t }) });
+    const reply = await engine.complete({ messages, tools: quick && asks(text) ? undefined : defs, signal, onText: (t) => on({ type: 'stream', text: t }) });
     const calls = reply.tool_calls ?? [];
     messages.push({ role: 'assistant', content: reply.content ?? '', ...(calls.length ? { tool_calls: calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: typeof c.arguments === 'string' ? c.arguments : JSON.stringify(c.arguments ?? {}) } })) } : {}) });
     if (!calls.length) {

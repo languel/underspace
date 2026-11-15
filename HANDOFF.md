@@ -1557,10 +1557,23 @@ Also asked for:
   - **`eval.run {runs, quick}`** in the page: each case asked `runs` times,
     `byCase` giving passes of runs. Tried in the page with `gemma4`, quick,
     two runs: 21 of 22 (the score once had a line outside its frame).
-  - Not done: LFM3 in the browser on quick turns (the weights were not
-    loaded this session: `setting.set assistEngine browser`, then
-    `eval.run {quick: true, runs: 3}`); a quick turn has no way to say "this
-    needs the whole loop" and hand over to it.
+  - **LFM3 in the browser, measured in the page** (`eval.run`, three runs;
+    it generates greedily, so every run of a case is the same and one run
+    is enough): the whole loop 27 of 33, 6.6 s a request (it failed the
+    score, writing `object.code` twelve times, and "delete the lines, keep
+    the rest"); quick turns 30 of 33, 1.7 s a request, the only miss being
+    the question: asked "how many lines are there?" it called
+    `object.remove`. So a plain question in a quick turn is now given no
+    tools at all (`asks`: it begins how many, what, which, where, who, why,
+    is, are; "can you make it red?" is a request). After that: **11 of 11,
+    about 1.5 s each** (the answer in 0.4 s). For this model the quick turn
+    is both the faster and the more accurate one.
+  - Loading the weights took 209 s the first time this session and 132 s
+    after a reload of the page, in the app's browser pane: they are read
+    again at each reload, and whether they are fetched again is still to
+    check in Chrome proper.
+  - Not done: a quick turn has no way to say "this needs the whole loop"
+    and hand over to it.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is
