@@ -965,6 +965,17 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   away. `line.set` takes `closed`. The file also holds the mesh
   operations (take away, dissolve, subdivide edges, merge, fill), wired
   in step (d).
+- **One editor, step (d): one selection.** In the points tool a mesh's
+  corners are points like a line's: picked, boxed, dragged (through the
+  magnet), moved with G, R, S (`putPoints` writes a line or a mesh). An
+  edge is picked when its two ends are, a face when all its corners are;
+  clicking an edge or a face picks those corners (`meshHit`, `faceAt`),
+  and both are drawn picked. The edit keys read the same selection:
+  Shift+K puts a corner in the middle of picked edges, J makes a face of
+  three or more picked corners (two merge), M merges, Backspace takes
+  corners and their faces away, Cmd+Backspace dissolves (faces keep the
+  corners they have left). Not checked: the colour of a picked face's
+  fill ('accent' as a fill) in both themes.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a
@@ -1044,7 +1055,7 @@ in 3D connect and hold as they do on the canvas (the solver in
 `joints.js` is 2D: it needs a rigid motion in 3D, or a first version
 that only keeps the points together); (c) done: edit operations on points in
 both spaces under the same keys (delete and dissolve, subdivide, join,
-cut; threegrease `editops.ts`, `polyops.ts`); (d) the selection of
+cut; threegrease `editops.ts`, `polyops.ts`); (d) done: the selection of
 points, edges and faces as one thing the transform (G, R, S), sculpt and
 the operations all read; (e) sculpt tools and brushes as code you can
 write (AMS's panels), then performance: tools and their settings as

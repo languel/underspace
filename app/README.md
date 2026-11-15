@@ -258,6 +258,9 @@ In the points tool (Shift+V) the picked points can be edited, on the
 canvas and in a target alike: Shift+K adds a point between picked
 neighbours, K cuts the line there, J joins two picked ends (or closes one
 line), Backspace deletes.
+A mesh's corners are points too: click an edge to pick its ends, a face
+to pick its corners; drag them, or G, R, S. Shift+K splits picked edges,
+J makes a face of picked corners, M merges them, Cmd+Backspace dissolves.
 
 ## Scores
 

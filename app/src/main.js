@@ -205,8 +205,15 @@ function walk(space, xf) {
         const vs = ptsOf(me), mst = me.style ?? {}, msel = state.selection.has(me.id), used = new Set(me.faces.flat());
         for (const f of me.faces) marks.push({ pts: [...f.map((i) => vs[i]), vs[f[0]]], color: 'ink', width: 0, fill: mst.fill ?? '#8f8a80', opacity: mst.opacity ?? 0.55 });
         for (const e of edgesOf(me.faces)) { const pts = [vs[e.a], vs[e.b]]; marks.push({ pts, color: msel ? 'accent' : mst.stroke ?? 'ink', width: e.faces === 1 ? 1.8 : 1.1 }); ink3d.push({ id: me.id, scene: o.id, pts }); }
+        if (wantPoints()) pointSrc.push({ o: me, pts: vs, scene: o.id });
+        // what is picked of it (points tool): an edge whose two ends are picked, a face whose corners all are
+        const pk = tool === 'points' ? pickedOf(me.id) : null;
+        if (pk?.size > 1) {
+          for (const f of me.faces) if (f.every((i) => pk.has(i))) marks.push({ pts: [...f.map((i) => vs[i]), vs[f[0]]], color: 'accent', width: 0, fill: 'accent', opacity: 0.3 });
+          for (const e of edgesOf(me.faces)) if (pk.has(e.a) && pk.has(e.b)) marks.push({ pts: [vs[e.a], vs[e.b]], color: 'accent', width: 2.6 });
+        }
         vs.forEach((v, i) => {
-          if (!(tool === 'poly' || msel || !used.has(i))) return;
+          if (tool === 'points' || !(tool === 'poly' || msel || !used.has(i))) return;
           const d = 0.07, color = msel ? 'accent' : 'hot';
           for (let k = 0; k < 3; k++) { const a = v.slice(), b = v.slice(); a[k] -= d; b[k] += d; marks.push({ pts: [a, b], color, width: 2 }); if (!used.has(i)) ink3d.push({ id: me.id, scene: o.id, pts: [a, b] }); }
         });
@@ -701,6 +708,29 @@ function showMagnet(s, m) {
 // ---- the points tool --------------------------------------------------------
 
 const handlesEl = $('handles'), handles = createPoints(handlesEl);
+// The picked points of one object, as a set of indices (null: none).
+const pickedOf = (id) => { let out = null; for (const k of handles.picked) if (k.startsWith(id + ':')) (out ??= new Set()).add(Number(k.slice(id.length + 1))); return out; };
+// New points for whatever owns them: a line's, or a mesh's corners.
+const putPoints = (id, points, pen) => (get(id)?.kind === 'mesh' ? call('mesh.set', { id, verts: points }) : call('line.set', { id, points, ...(pen && pen.length === points.length ? { pen } : {}) }));
+// The face of a mesh under a stage point: the smallest one that holds it (so one in front of a larger is reached).
+function faceAt(s, p) {
+  let best = null, ba = Infinity;
+  for (const me of state.objects.values()) {
+    if (me.kind !== 'mesh' || me.space !== s.id || me.hidden) continue;
+    const sv = ptsOf(me).map((v) => view.sceneToScreen(s.id, v));
+    for (const f of me.faces) {
+      const q = f.map((i) => sv[i]);
+      if (q.some((x) => !x)) continue;
+      let inside = false, area = 0;
+      for (let i = 0, j = q.length - 1; i < q.length; j = i++) {
+        if ((q[i][1] > p[1]) !== (q[j][1] > p[1]) && p[0] < ((q[j][0] - q[i][0]) * (p[1] - q[i][1])) / (q[j][1] - q[i][1]) + q[i][0]) inside = !inside;
+        area += q[j][0] * q[i][1] - q[i][0] * q[j][1];
+      }
+      if (inside && Math.abs(area) < ba) { ba = Math.abs(area); best = { mesh: me, face: f }; }
+    }
+  }
+  return best;
+}
 const wantPoints = () => tool === 'points' || settings.showPoints;
 // The handles of the selected lines, or with no line selected, of every line.
 function showPoints() {
@@ -736,11 +766,12 @@ function movedPoints(g, dx, dy) {
   }
   return out;
 }
-function removePoints() {
+function removePoints(dissolve = false) {
   batch(() => {
     for (const [id, idx] of handles.byLine()) {
       const o = get(id);
       if (!o) continue;
+      if (o.kind === 'mesh') { const r = (dissolve ? dissolveVerts : removeVerts)(o.verts, o.faces, idx); if (r.verts.length) call('mesh.set', { id, verts: r.verts, faces: r.faces }); else call('object.remove', { ids: [id] }); continue; }
       const left = without(ptsOf(o), o.pen, idx);
       if (left) call('line.set', { id, points: left.points.map((p) => p.map(round)), ...(left.pen ? { pen: left.pen } : {}) });
       else call('object.remove', { ids: [id] });
@@ -759,6 +790,7 @@ function subdividePicked() {
   batch(() => {
     for (const [id, idx] of handles.byLine()) {
       const o = get(id);
+      if (o?.kind === 'mesh') { const r = subdivideEdges(o.verts, o.faces, idx); if (r) { call('mesh.set', { id, verts: r.verts.map((v) => v.map(round)), faces: r.faces }); pickOnly(id, r.picked); } continue; }
       if (!isLine(o) || o.bind) continue;
       const r = subdivide(ptsOf(o), o.pen, idx, { closed: !!o.closed, curved: o.style?.path !== 'straight' });
       if (r) { setLine(id, r); pickOnly(id, r.picked); }
@@ -780,7 +812,22 @@ function cutPicked() {
   });
 }
 // J: two picked ends become one line; the two ends of one line close it.
+function mergePicked() {
+  batch(() => {
+    for (const [id, idx] of handles.byLine()) {
+      const o = get(id), r = o?.kind === 'mesh' ? mergeVerts(o.verts, o.faces, idx) : null;
+      if (r) { call('mesh.set', { id, verts: r.verts.map((v) => v.map(round)), faces: r.faces }); pickOnly(id, r.picked); }
+    }
+  });
+}
 function joinPicked() {
+  // on a mesh: three or more picked corners become a face; two become one
+  const meshes = [...handles.byLine()].filter(([id]) => get(id)?.kind === 'mesh');
+  if (meshes.length) {
+    batch(() => { for (const [id, idx] of meshes) { const o = get(id), r = idx.length > 2 ? fill(o.verts, o.faces, idx) : null; if (r) call('mesh.set', { id, faces: r.faces }); } });
+    if (meshes.some(([, idx]) => idx.length === 2)) mergePicked();
+    return true;
+  }
   const by = [...handles.byLine()].filter(([id]) => isLine(get(id)) && !get(id).bind);
   if (by.length === 1 && by[0][1].length === 2) {
     const [id, idx] = by[0], o = get(id), n = ptsOf(o).length;
@@ -841,7 +888,7 @@ const modal = createModal({
   commit(items, t) {
     this.cancel();
     if (items.some((it) => it.idx)) {
-      batch(() => { for (const it of items) call('line.set', { id: it.id, points: transformed(it, t).map((p) => p.map(round)), ...(it.pen?.length === it.pts.length ? { pen: it.pen } : {}) }); if (laidOut !== state.version) frame(); joinTouching(items.map((it) => it.id)); });
+      batch(() => { for (const it of items) putPoints(it.id, transformed(it, t).map((p) => p.map(round)), it.pen); if (laidOut !== state.version) frame(); joinTouching(items.map((it) => it.id)); });
       return;
     }
     const a = { ids: items.map((it) => it.id), pivot: t.pivot.map(round) };
@@ -1306,6 +1353,15 @@ pad.addEventListener('pointerdown', (e) => {
       gesture = { kind: 'points', lines, start: p, moved: false, next: null };
       return;
     }
+    // On a mesh: an edge picks its two ends, a face its corners (Shift adds, or takes away what is all picked).
+    const ms = spaceAt(p[0], p[1]), mh = ms.kind === 'scene' ? meshHit(ms, p) ?? faceAt(ms, p) : null;
+    if (mh && mh.i == null) {
+      const keys = (mh.face ?? [mh.a, mh.b]).map((i) => handles.key(mh.mesh.id, i)), all = keys.every((k) => handles.picked.has(k));
+      if (!e.shiftKey) handles.picked.clear();
+      for (const k of keys) { if (e.shiftKey && all) handles.picked.delete(k); else handles.picked.add(k); }
+      dragSig = 'picked' + Math.random();
+      return;
+    }
     // A line picks that line, so only its points show; anywhere else boxes points.
     const id = pick(p[0], p[1]);
     if (id && isLine(get(id))) { if (!e.shiftKey) handles.picked.clear(); call('select.set', { ids: e.shiftKey ? [...new Set([...state.selection, id])] : [id] }); }
@@ -1515,7 +1571,7 @@ function endGesture(e) {
   if (g.kind === 'pinch' && g.scene) { commitCam(); return; }
   if (g.kind === 'points') {
     setLive(null); dragSig = '';
-    if (g.moved && g.next) batch(() => { for (const [id, m] of g.next) call('line.set', { id, points: m.points, ...(m.pen && m.pen.length === m.points.length ? { pen: m.pen } : {}) }); if (!(e.ctrlKey || e.metaKey)) joinTouching([...g.next.keys()]); });
+    if (g.moved && g.next) batch(() => { for (const [id, m] of g.next) putPoints(id, m.points, m.pen); if (!(e.ctrlKey || e.metaKey)) joinTouching([...g.next.keys()]); });
     return;
   }
   if (g.kind === 'pmarquee') {
@@ -1914,7 +1970,9 @@ const ACTIONS = [
   { id: 'hide', title: 'Hide', icon: 'hide', keys: 'shift+h', group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.flag', { ids: ids(c.sel), hidden: true }) },
   { id: 'lock', title: 'Lock', icon: 'lock', keys: 'shift+l', group: 'edit', menu: true, when: (c) => c.sel.length, run: (c) => call('object.flag', { ids: ids(c.sel), locked: true }) },
   { id: 'showall', title: 'Show and unlock everything', icon: 'clean', group: 'edit', when: () => [...state.objects.values()].some((o) => o.hidden || o.locked), run: () => call('object.flag', { ids: [...state.objects.values()].filter((o) => o.hidden || o.locked).map((o) => o.id), hidden: false, locked: false }) },
-  { id: 'points.remove', title: 'Delete points', icon: 'remove', keys: ['backspace', 'delete'], group: 'edit', hidden: true, when: () => tool === 'points' && handles.picked.size, run: removePoints },
+  { id: 'points.remove', title: 'Delete points', icon: 'remove', keys: ['backspace', 'delete'], group: 'edit', hidden: true, when: () => tool === 'points' && handles.picked.size, run: () => removePoints() },
+  { id: 'points.dissolve', title: 'Points: dissolve (a mesh keeps its faces, with fewer corners)', icon: 'remove', keys: ['mod+backspace', 'mod+delete'], group: 'edit', menu: 'Points', when: () => tool === 'points' && handles.picked.size, run: () => removePoints(true) },
+  { id: 'points.merge', title: 'Points: merge a mesh\'s picked corners into one', icon: 'sc.pinch', keys: 'm', group: 'edit', menu: 'Points', when: () => tool === 'points' && [...handles.byLine()].some(([id, idx]) => get(id)?.kind === 'mesh' && idx.length > 1), run: mergePicked },
   { id: 'view.code', title: 'Code on objects', icon: 'overlay', keys: ';', group: 'show', menu: true, on: () => settings.codeOverlay, run: () => setSetting('codeOverlay', !settings.codeOverlay) },
   { id: 'showcode', title: 'Show code', icon: 'code', group: 'show', menu: true, when: (c) => c.one && hasCode(c.one), run: () => panels.show('code') },
   { id: 'showprops', title: 'Show properties', icon: 'props', group: 'show', menu: true, when: (c) => c.sel.length, run: () => panels.show('properties') },
@@ -1948,7 +2006,7 @@ const ACTIONS = [
   { id: 'enter', title: 'Go into', icon: 'enter', keys: 'enter', group: 'nav', menu: true, when: (c) => c.one?.rect || (c.one && blanketOf(c.one)), run: (c) => frameIds([c.one.id], 0.82) },
   { id: 'points.subdivide', title: 'Points: add one between picked neighbours', icon: 'sc.resample', keys: 'shift+k', group: 'edit', menu: 'Points', when: () => tool === 'points' && handles.picked.size > 1, run: subdividePicked },
   { id: 'points.cut', title: 'Points: cut the line here', icon: 'cut', keys: 'k', group: 'edit', menu: 'Points', when: () => tool === 'points' && handles.picked.size > 0, run: cutPicked },
-  { id: 'points.join', title: 'Points: join two ends (the two ends of one line close it)', icon: 'joint', keys: 'j', group: 'edit', menu: 'Points', when: () => tool === 'points' && handles.picked.size > 1, run: joinPicked },
+  { id: 'points.join', title: 'Points: join two ends (one line\'s two ends close it; a mesh\'s corners make a face)', icon: 'joint', keys: 'j', group: 'edit', menu: 'Points', when: () => tool === 'points' && handles.picked.size > 1, run: joinPicked },
   { id: 'points.none', title: 'Unpick points', keys: 'escape', group: 'nav', hidden: true, when: () => tool === 'points' && handles.picked.size, run: () => handles.picked.clear() },
   { id: 'points.all', title: 'Pick every point shown', keys: 'mod+a', group: 'nav', hidden: true, when: () => tool === 'points', run: () => { for (const h of handles.shown) handles.picked.add(handles.key(h.id, h.i)); } },
   { id: 'deselect', title: 'Deselect', keys: 'escape', group: 'nav', when: (c) => c.sel.length, run: () => call('select.set', { ids: [] }) },
