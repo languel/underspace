@@ -569,13 +569,61 @@ function wrapDraw(b) {
 
 /** Full parameter set for an element: brush defaults overlaid with the element's params. */
 export function resolveParams(brushId, params = {}) {
-  const b = BRUSHES[brushId] || BRUSHES.ink;
+  const b = (typeof brushId === 'object' ? brushId : BRUSHES[brushId]) || BRUSHES.ink; // by name, or a brush being written
   const out = {};
   for (const s of b.params) {
     const v = params?.[s.key];
     out[s.key] = Number.isFinite(Number(v)) ? Math.min(s.max, Math.max(s.min, Number(v))) : s.default;
   }
   return out;
+}
+
+// ---- brushes as code -------------------------------------------------------------------------
+// A brush you write is plain JavaScript that calls brush() once with its definition:
+//   brush({ id, label, doc, roles: ['line'], params: { name: [min, max, default, doc] }, draw(ctx, e, p, k) { ... } })
+// The built-in ones read the same way (brushSource), so any of them can be copied and changed.
+const BUILTIN = new Set(Object.keys(BRUSHES));
+export const isBuiltinBrush = (id) => BUILTIN.has(id);
+
+/** The definition a brush's source makes. Throws with what is wrong. */
+export function compileBrush(source) {
+  let def = null;
+  new Function('brush', source)((d) => { def = d; });
+  if (!def || typeof def !== 'object') throw new Error('call brush({ id, label, draw(ctx, e, p, k) { ... } })');
+  if (!/^[a-z][\w-]*$/i.test(def.id ?? '')) throw new Error('id: a name (letters, digits, - and _)');
+  if (typeof def.draw !== 'function') throw new Error('draw(ctx, e, p, k): a function that paints the mark');
+  const roles = Array.isArray(def.roles) && def.roles.length ? def.roles.map(String) : ['line', 'gesture'];
+  const params = Array.isArray(def.params) ? def.params
+    : Object.entries(def.params ?? {}).map(([key, v]) => {
+      if (!Array.isArray(v) || !v.slice(0, 3).every(Number.isFinite)) throw new Error(`params.${key}: [min, max, default, doc]`);
+      return param(key, key[0].toUpperCase() + key.slice(1), v[0], v[1], +((v[1] - v[0]) / 100).toPrecision(2), v[2], v[3] ?? '');
+    });
+  return wrapDraw({ id: def.id, label: def.label ?? def.id, doc: def.doc ?? '', roles, texture: Boolean(def.texture), params, draw: def.draw, custom: true, source });
+}
+
+/** A brush as source: what was written, or for a built-in one, the same thing written out. */
+export function brushSource(id) {
+  const b = BRUSHES[id];
+  if (!b) return '';
+  if (b.source) return b.source;
+  const q = (v) => JSON.stringify(v);
+  const params = b.params.map((p) => `    ${p.key}: [${p.min}, ${p.max}, ${p.default}, ${q(p.doc)}]`).join(',\n');
+  return `brush({\n  id: ${q(id)},\n  label: ${q(b.label)},\n  doc: ${q(b.doc)},\n  roles: ${q(b.roles)},${b.texture ? '\n  texture: true,' : ''}\n  params: {\n${params}\n  },\n  ${(b.rawDraw ?? b.draw).toString()}\n})\n`;
+}
+
+/**
+ * The brushes written in a drawing ({ id: source }) put among the built-in ones; those no longer there go.
+ * A built-in brush is never replaced. Returns what failed: { id: message }.
+ */
+export function syncBrushes(sources = {}) {
+  const errors = {};
+  for (const id of Object.keys(BRUSHES)) if (BRUSHES[id].custom && !(id in sources)) delete BRUSHES[id];
+  for (const [id, source] of Object.entries(sources)) {
+    if (BUILTIN.has(id)) { errors[id] = 'a built-in brush has this id'; continue; }
+    if (BRUSHES[id]?.source === source) continue;
+    try { const def = compileBrush(source); if (def.id !== id) throw new Error(`its id is ${def.id}`); BRUSHES[id] = def; } catch (err) { errors[id] = err.message; delete BRUSHES[id]; }
+  }
+  return errors;
 }
 
 /** Brushes that suit a line ('line') or a filled shape ('plane'). */

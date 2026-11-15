@@ -268,6 +268,9 @@ a sample line as you type. A tool you write is saved with the drawing.
 Event and junction code can set the tools in hand with
 `tool('sculptRadius', 80)` (also `sculpt`, `sculptStrength`, `width`,
 `stroke`, `fill`, `magnet`), so a score can change the brush as it plays.
+Ink brushes are code in the same way: the panel "Brushes as code" shows
+any brush, previews what you write on a sample stroke, and a brush you
+write is saved with the drawing and listed with the others.
 
 ## Scores
 

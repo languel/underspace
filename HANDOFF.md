@@ -994,9 +994,23 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
     `magnet` (`driveTool`; `tool(name)` reads). These are settings, not
     part of the take. Example: Music › Travelers and events › A score
     sets the brush.
-  - Not done: ink brushes as code in the same way (the brush kit in
-    `ink/brushes.js` still has no editor), and tools driven by connectors
-    (a port into a tool) rather than by event code.
+  - Not done: tools driven by connectors (a port into a tool) rather
+    than by event code.
+- **Ink brushes as code**, the same way. A brush is JavaScript that calls
+  `brush({ id, label, doc, roles, params, draw(ctx, e, p, k) })`
+  (`compileBrush`, `brushSource`, `syncBrushes` in `ink/brushes.js`; the
+  built-in draws use only the kit `k`, so their source stands alone).
+  `state.brushes`, `brush.define`, `brush.remove`. Unlike sculpt tools,
+  space.js puts a brush among the brushes as the command runs, because
+  the next command may draw with it (`line.add` checks the id); removing
+  one takes it off the marks that had it. `main.js` only keeps the
+  actions in step (`brushAction`, `syncBrushActions`). The panel is
+  `panels/brushes.js`; it and the sculpt one are `panels/toolcode.js`
+  with a config each (the second user made it shared code). The preview
+  draws a sample stroke with speed and pressure in it, or a sample shape
+  for a brush of planes.
+- The brush ring follows `[`, `]` and a score's `tool()` at once
+  (`onSettings`), not at the next pointer move.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was
   drawn); live audio recording (offline export exists); MIDI clock; a
   nested space with its own context; continuous cursor messages (a
@@ -1078,7 +1092,7 @@ that only keeps the points together); (c) done: edit operations on points in
 both spaces under the same keys (delete and dissolve, subdivide, join,
 cut; threegrease `editops.ts`, `polyops.ts`); (d) done: the selection of
 points, edges and faces as one thing the transform (G, R, S), sculpt and
-the operations all read; (e) done for sculpt tools (brushes not yet): sculpt tools and brushes as code you can
+the operations all read; (e) done: sculpt tools and brushes as code you can
 write (AMS's panels), then performance: tools and their settings as
 things a score can drive.
 

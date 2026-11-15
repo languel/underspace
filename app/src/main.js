@@ -53,6 +53,7 @@ import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
 import { SCULPTS, MESH_SCULPTS, sculptMark, effectiveSculpt, syncSculpts } from './ink/sculpt.js';
 import { sculptsPanel } from './panels/sculpts.js';
+import { brushesPanel } from './panels/brushes.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage'), pad = $('pad'), marquee = $('marquee'), dotLayer = $('dots');
@@ -1836,6 +1837,36 @@ async function ask(text) {
   return plan.say;
 }
 
+// One ink brush as an action (a built-in one, or one written in the drawing): a brush of lines goes on the
+// selected lines, or with none selected, on the lines drawn next; a brush of planes on shapes.
+function brushAction(id) {
+  const b = INK[id];
+  if (id && !b) return null;
+  if (!id || b.roles.includes('line')) return {
+    id: 'brush.' + (id || 'none'), brushId: id, title: id ? `Brush: ${b.label}` : 'Brush: plain line', short: id ? b.label : 'Plain line', icon: 'brush', group: 'brush', menu: 'Brush', menuWhen: (c) => c.lines.some((o) => !o.bind),
+    run: (c) => { const on = c.lines.filter((o) => !o.bind); if (on.length) call('object.brush', { ids: ids(on), id: id || null }); else { setSetting('brush', id); setTool('draw'); } },
+  };
+  if (!b.roles.includes('plane')) return null;
+  return { id: 'brush.' + id, brushId: id, title: `Fill brush: ${b.label}`, icon: 'brush', group: 'brush',
+    run: (c) => { const on = c.shapes.filter((o) => o.role === 'visual'); if (on.length) call('object.brush', { ids: ids(on), id }); else setSetting('planeBrush', id); } };
+}
+// The brushes written in the drawing are among the brushes already (space.js puts them there as they
+// are defined); here each gets its action, and a setting that names a brush that is gone lets go of it.
+let brushSig = '{}';
+function syncBrushActions() {
+  const sig = JSON.stringify(state.brushes);
+  if (sig === brushSig) return;
+  brushSig = sig;
+  for (let i = ACTIONS.length - 1; i >= 0; i--) { const a = ACTIONS[i]; if (a.brushId && !INK[a.brushId]) ACTIONS.splice(i, 1); }
+  for (const id of Object.keys(INK)) {
+    const old = ACTIONS.find((a) => a.brushId === id), fresh = brushAction(id);
+    if (old && fresh) { old.title = fresh.title; old.short = fresh.short; } else if (fresh) ACTIONS.push(fresh);
+  }
+  if (settings.brush && !INK[settings.brush]) setSetting('brush', '');
+  if (settings.planeBrush && !INK[settings.planeBrush]) setSetting('planeBrush', '');
+  settingsVersion++;
+}
+
 // One sculpt tool as an action (a built-in one, or one written in the drawing).
 function sculptAction(id) {
   const t = SCULPTS[id];
@@ -1854,6 +1885,7 @@ const PANELS = [
   { id: 'docs', title: 'Docs', icon: 'book', make: docsPanel },
   { id: 'help', title: 'Shortcuts', icon: 'help', keys: 'shift+?', make: helpPanel },
   { id: 'sculpts', title: 'Sculpt tools as code', icon: 'sculpt', make: sculptsPanel },
+  { id: 'brushes', title: 'Brushes as code', icon: 'brush', make: brushesPanel },
   { id: 'settings', title: 'Settings', icon: 'gear', keys: 'mod+,', make: settingsPanel },
 ];
 
@@ -1983,14 +2015,7 @@ const ACTIONS = [
   { id: 'midi.export', title: 'Export recorded clips as MIDI', icon: 'save', group: 'play', menu: true, when: (c) => !c.hit && state.clips.size > 0, run: () => exportMidi() },
   { id: 'midi.connect', title: 'Send notes to MIDI', icon: 'connector', group: 'play', run: () => connectMidi() },
   // ink brushes: on the selection, or with nothing selected, for the lines drawn next
-  ...['', ...brushesFor('line')].map((id) => ({
-    id: 'brush.' + (id || 'none'), title: id ? `Brush: ${INK[id].label}` : 'Brush: plain line', short: id ? INK[id].label : 'Plain line', icon: 'brush', group: 'brush', menu: 'Brush', menuWhen: (c) => c.lines.some((o) => !o.bind),
-    run: (c) => { const on = c.lines.filter((o) => !o.bind); if (on.length) call('object.brush', { ids: ids(on), id: id || null }); else { setSetting('brush', id); setTool('draw'); } },
-  })),
-  ...brushesFor('plane').filter((id) => !brushesFor('line').includes(id)).map((id) => ({
-    id: 'brush.' + id, title: `Fill brush: ${INK[id].label}`, icon: 'brush', group: 'brush',
-    run: (c) => { const on = c.shapes.filter((o) => o.role === 'visual'); if (on.length) call('object.brush', { ids: ids(on), id }); else setSetting('planeBrush', id); },
-  })),
+  ...['', ...Object.keys(INK)].map(brushAction).filter(Boolean),
   // structure
   { id: 'collapse', title: 'Collapse into a group', icon: 'collapse', keys: 'mod+g', group: 'edit', menu: true, when: (c) => c.sel.some((o) => !o.bind), run: (c) => call('group.collapse', { ids: ids(c.sel) }) },
   { id: 'expand', title: 'Expand group', icon: 'expand', keys: ['mod+shift+g', 'e'], group: 'edit', menu: true, when: (c) => c.groups.length, run: (c) => batch(() => c.groups.forEach((g) => call('group.expand', { id: g.id }))) },
@@ -2156,6 +2181,10 @@ function toolPopover(name, anchor) {
 }
 onChange(() => pop?.refresh());
 onChange(syncSculptTools);
+onChange(syncBrushActions);
+setTimeout(syncBrushActions, 0);
+// the brush ring follows its settings as they change ([ and ], a score), not only when the pointer next moves
+onSettings((key) => { if ((key === 'sculptRadius' || key === 'sculptStrength') && tool === 'sculpt' && !ring.hidden) { ring.style.width = ring.style.height = `${settings.sculptRadius * 2}px`; ring.style.setProperty('--k', settings.sculptStrength); if (pointer) toolMark.style.transform = `translate(${(pointer[0] + settings.sculptRadius * 0.72 + 6).toFixed(1)}px, ${(pointer[1] + settings.sculptRadius * 0.72 + 6).toFixed(1)}px)`; } });
 setTimeout(syncSculptTools, 0); // a drawing opened with tools of its own
 onSettings(() => pop?.refresh());
 // a stack whose members are one tool in several kinds (sculpt) shows the kind in use

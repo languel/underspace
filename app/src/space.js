@@ -11,7 +11,7 @@ import { bindFor, wirePoints } from './bind.js';
 import { collapse, expand } from './collapse.js';
 import { PRESETS } from './presets.js';
 import { BRUSHES } from './brushes.js';
-import { BRUSHES as INK } from './ink/brushes.js';
+import { BRUSHES as INK, syncBrushes } from './ink/brushes.js';
 import { spec, apply, applyRect } from './transform.js';
 import { settle, JUNCTION, isCurve, curveOf, measure, atU } from './joints.js';
 import { DEFAULT_MUSIC, scaleName } from './music.js';
@@ -22,6 +22,7 @@ export const state = {
   objects: new Map(),   // id -> object, see object.js
   music: { ...DEFAULT_MUSIC }, // the context everything is heard in (music.js)
   grid: { ...DEFAULT_GRID },
+  brushes: {},                 // ink brushes written in this drawing: id -> source (ink/brushes.js)
   sculpts: {},                 // sculpt tools written in this drawing: id -> source (ink/sculpt.js)   // the global grid: how space, time and pitch are quantized (grid.js)
   clips: new Map(),     // id -> a recorded clip: { id, name, at (beats), notes: [{ beat, midi, vel, len }] }
   selection: new Set(),
@@ -228,6 +229,21 @@ define({
     if (a.style) o.style = { ...a.style };
     state.objects.set(o.id, o);
     return o.id;
+  },
+});
+// A brush is put among the brushes as it is defined (not later, by the view): the next command may draw with it.
+define({
+  name: 'brush.define', doc: 'Write an ink brush, or change one written here. code is JavaScript that calls brush({ id, label, doc, roles: ["line"] or ["plane"], params: { name: [min, max, default, doc] }, draw(ctx, e, p, k) { } }) with the same id.',
+  args: { id: { type: 'string' }, code: { type: 'string' } }, required: ['id', 'code'],
+  run(a) { if (!/^[a-z][\w-]*$/i.test(a.id) || !a.code.trim()) return false; state.brushes = { ...state.brushes, [a.id]: a.code }; syncBrushes(state.brushes); return a.id; },
+});
+define({
+  name: 'brush.remove', doc: 'Remove an ink brush written in this drawing. Marks drawn with it go back to plain lines.', args: { id: { type: 'string' } }, required: ['id'],
+  run(a) {
+    if (!(a.id in state.brushes)) return false;
+    const { [a.id]: _, ...rest } = state.brushes; state.brushes = rest; syncBrushes(state.brushes);
+    for (const o of state.objects.values()) if (o.brush?.id === a.id) delete o.brush;
+    return true;
   },
 });
 define({
@@ -634,7 +650,7 @@ define({
 // Run a command from inside another, without recording it separately.
 export const exec = (name, args) => commands.get(name).run(args);
 
-function reset() { state.objects.clear(); state.selection.clear(); state.n = 0; state.music = { ...DEFAULT_MUSIC }; state.grid = { ...DEFAULT_GRID }; state.sculpts = {}; state.clips.clear(); }
+function reset() { state.objects.clear(); state.selection.clear(); state.n = 0; state.music = { ...DEFAULT_MUSIC }; state.grid = { ...DEFAULT_GRID }; state.sculpts = {}; state.brushes = {}; syncBrushes({}); state.clips.clear(); }
 
 // ---- the take ---------------------------------------------------------------
 
