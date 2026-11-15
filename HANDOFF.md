@@ -1593,6 +1593,20 @@ Also asked for:
   - LFM3 in the browser now, one run (it is deterministic): quick 11 of 12
     (it misses the score: lines outside the frame), whole loop 9 of 12
     (triangle, score, delete). 133 tests.
+  - **`lfm3` on Ollama** (1.7 GB; `node app/eval.mjs --model lfm3:latest
+    --runs 2`, twelve cases): quick 20 of 24, 6.7 s a request (it drew the
+    triangle as three lines, and stopped at the score's frame); the whole
+    loop 22 of 24, 16 s a request (only the score failed, after 12 to 15
+    rounds and two minutes). So on Ollama this model is slower than the same
+    model in the browser (1.5 s a quick request there) and, unlike there,
+    more accurate with the whole loop. The endpoint engine does not use its
+    deferred tools (only the browser engine sets `defers`): to try.
+  - Ollama on this machine: `ollama pull lfm3` failed with "requires
+    v0.40.12" because the Homebrew service had been running since October
+    with the old binary; `brew services restart ollama` put 0.40.16 in
+    place. Ollama.app's own server also runs, on the same port (it binds
+    every address, the service 127.0.0.1): one of them should go. LM Studio
+    did not answer on port 1234 and was not used.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is
