@@ -1309,7 +1309,7 @@ function setTool(name) {
   }
   pad.dataset.tool = name;
   if (name !== 'points') { handles.clear(); handles.hover(null); }
-  if (name !== 'sculpt') ring.hidden = true;
+  showRing();
   toolMark.hidden = true; toolMarkSig = '';
 }
 function showMarquee(a, b) {
@@ -1468,8 +1468,8 @@ pad.addEventListener('pointermove', (e) => {
     }
     touches.set(e.pointerId, p);
   }
-  ring.hidden = tool !== 'sculpt';
-  if (tool === 'sculpt') { ring.style.cssText = `left:${p[0]}px;top:${p[1]}px;width:${settings.sculptRadius * 2}px;height:${settings.sculptRadius * 2}px;--k:${settings.sculptStrength}`; ring.dataset.mode = e.altKey ? 'invert' : ''; ring.dataset.down = gesture?.kind === 'sculpt' ? '1' : ''; }
+  ring.dataset.mode = tool === 'sculpt' && e.altKey ? 'invert' : ''; ring.dataset.down = gesture?.kind === 'sculpt' ? '1' : '';
+  showRing();
   showToolMark(p, e);
   if (!gesture && poly) previewPoly(p);
   if (!gesture && build && tool === 'poly') buildPreview(p);
@@ -1837,6 +1837,32 @@ async function ask(text) {
   return plan.say;
 }
 
+// ---- the pen's size, and the ring that shows it ----------------------------------------------
+const PEN_TOOLS = ['draw', 'line', 'polyline'];
+const sizeKeyOf = (id) => INK[id]?.params.find((p) => p.key === 'width' || p.key === 'size');
+function penSize(factor) {
+  const id = settings.brush, key = sizeKeyOf(id);
+  const next = (cur, lo, hi, step) => { const v = Math.round(cur * factor * 100) / 100; return Math.max(lo, Math.min(hi, v === cur ? cur + Math.sign(factor - 1) * step : v)); };
+  if (key) setSetting('brushParams', { ...settings.brushParams, [id]: { ...settings.brushParams[id], [key.key]: next(settings.brushParams[id]?.[key.key] ?? key.default, key.min, key.max, key.step) } });
+  else setSetting('width', next(settings.width, 0.5, 80, 0.2));
+}
+// How wide the pen's mark is on the stage (px): a brush's width is in brush units.
+function penPx(at) {
+  const id = settings.brush, key = sizeKeyOf(id);
+  if (!key) return settings.width;
+  const s = at ? spaceAt(at[0], at[1], true) : spaces[0];
+  return (settings.brushParams[id]?.[key.key] ?? key.default) * (s.xf?.k ?? 1) / (UNIT * view.unitsPerPx());
+}
+// The ring at the pointer: the sculpt brush's reach and strength, or the pen's width. It follows its settings.
+function showRing() {
+  const sc = tool === 'sculpt', pen = PEN_TOOLS.includes(tool);
+  ring.hidden = !(sc || pen) || !pointer || (!!gesture && !(gesture.kind === 'sculpt'));
+  if (ring.hidden) return;
+  const d = sc ? settings.sculptRadius * 2 : Math.max(2, penPx(pointer));
+  ring.style.cssText = `left:${pointer[0]}px;top:${pointer[1]}px;width:${d}px;height:${d}px;--k:${sc ? settings.sculptStrength : 0}`;
+  ring.dataset.kind = sc ? 'sculpt' : 'pen';
+}
+
 // One ink brush as an action (a built-in one, or one written in the drawing): a brush of lines goes on the
 // selected lines, or with none selected, on the lines drawn next; a brush of planes on shapes.
 function brushAction(id) {
@@ -1950,6 +1976,9 @@ const ACTIONS = [
   ...MAGNETS.filter((m) => m !== 'off').map((m) => ({ id: 'magnet.' + m, title: `Magnet: ${MAGNET_TITLE[m]}`, short: MAGNET_TITLE[m], icon: 'magnet', group: 'plane', menu: 'Magnet', on: () => settings.magnet === m, run: () => setSetting('magnet', m) })),
   { id: 'view.crossings', title: 'Show where lines cross', icon: 'crossing', group: 'show', menu: true, when: (c) => !c.hit, on: () => settings.showCrossings, run: () => setSetting('showCrossings', !settings.showCrossings) },
   { id: 'tool.sculpt', title: 'Sculpt', icon: 'sculpt', keys: 'u', group: 'tool', tool: 'sculpt' },
+  // the pen's size: its brush's width (or size), else the plain line's width
+  { id: 'pen.smaller', title: 'Pen: thinner', keys: '[', group: 'brush', hidden: true, when: () => PEN_TOOLS.includes(tool), run: () => penSize(1 / 1.2) },
+  { id: 'pen.larger', title: 'Pen: thicker', keys: ']', group: 'brush', hidden: true, when: () => PEN_TOOLS.includes(tool), run: () => penSize(1.2) },
   { id: 'sculpt.smaller', title: 'Sculpt: smaller', keys: '[', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptRadius', Math.max(6, Math.round(settings.sculptRadius / 1.2))) },
   { id: 'sculpt.larger', title: 'Sculpt: larger', keys: ']', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptRadius', Math.min(400, Math.round(settings.sculptRadius * 1.2))) },
   { id: 'sculpt.weaker', title: 'Sculpt: weaker', keys: 'shift+{', group: 'brush', hidden: true, when: () => tool === 'sculpt', run: () => setSetting('sculptStrength', Math.max(0.05, +(settings.sculptStrength - 0.1).toFixed(2))) },
@@ -2184,7 +2213,7 @@ onChange(syncSculptTools);
 onChange(syncBrushActions);
 setTimeout(syncBrushActions, 0);
 // the brush ring follows its settings as they change ([ and ], a score), not only when the pointer next moves
-onSettings((key) => { if ((key === 'sculptRadius' || key === 'sculptStrength') && tool === 'sculpt' && !ring.hidden) { ring.style.width = ring.style.height = `${settings.sculptRadius * 2}px`; ring.style.setProperty('--k', settings.sculptStrength); if (pointer) toolMark.style.transform = `translate(${(pointer[0] + settings.sculptRadius * 0.72 + 6).toFixed(1)}px, ${(pointer[1] + settings.sculptRadius * 0.72 + 6).toFixed(1)}px)`; } });
+onSettings((key) => { if (['sculptRadius', 'sculptStrength', 'width', 'brush', 'brushParams'].includes(key)) { showRing(); if (pointer && tool === 'sculpt') toolMark.style.transform = `translate(${(pointer[0] + settings.sculptRadius * 0.72 + 6).toFixed(1)}px, ${(pointer[1] + settings.sculptRadius * 0.72 + 6).toFixed(1)}px)`; } });
 setTimeout(syncSculptTools, 0); // a drawing opened with tools of its own
 onSettings(() => pop?.refresh());
 // a stack whose members are one tool in several kinds (sculpt) shows the kind in use
@@ -2260,6 +2289,7 @@ $('peek').onclick = () => document.body.classList.toggle('clean');
 let settingsVersion = 0;
 onSettings(() => settingsVersion++);
 const app = {
+  simplifyIds: (ids, px) => simplifyLines({ lines: ids.map(get).filter(Boolean) }, px),
   state, call, batch, get, tools, PRESETS, BRUSHES, INK, SCULPTS, sculptErrors: () => sculptErrors, brushesFor, actions: ACTIONS, onParam, onCode, frameIds, runAction,
   run: () => run, setRole, keysShown: (a) => showKey(a), tool: () => tool, settingsVersion: () => settingsVersion,
   presetsFor: (o) => (o.role === 'target' ? TARGET_PRESETS : o.role === 'score' ? BRUSHES : o.role === 'junction' ? JUNCTIONS : o.role === 'event' ? EVENTS : o.role === 'grid' ? GRID_PRESETS : PRESETS),

@@ -45,3 +45,17 @@ test('a brush that throws is drawn plainly and says why', () => {
   bad.draw(ctx(), { points: [[0, 0, 0, 0.5], [5, 5, 10, 0.5]], role: 'line' }, {}, {});
   assert.equal(bad.lastError, 'no paint');
 });
+
+test('a line of two points, or a straight one, has samples along its length (the Ink brush swells and tapers it)', async () => {
+  const { smoothPath, densify } = await import('../src/ink/walk.js');
+  const two = [[0, 0, 0, 0.2], [60, 0, 100, 0.8]], out = smoothPath(two, false);
+  assert.ok(out.length > 10);
+  assert.deepEqual(out[0], [0, 0, 0, 0.2]); assert.deepEqual(out.at(-1), [60, 0, 100, 0.8]);
+  assert.ok(out.every((q, i) => !i || (q[0] > out[i - 1][0] && q[3] >= out[i - 1][3]))); // in order, pressure ramps
+  const corner = densify([[0, 0], [30, 0], [30, 30]]);
+  assert.ok(corner.some((q) => q[0] === 30 && q[1] === 0)); // corners are kept
+  // the Ink brush: the same two points now draw a swelling shape, not a thin line
+  let widths = 0; const g = new Proxy({}, { get: (t, k) => (k === 'lineTo' ? () => { widths++; } : () => {}), set: () => true });
+  BRUSHES.ink.draw(g, { points: two, closed: false, color: '#000', role: 'line' }, resolveParams('ink'), {});
+  assert.ok(widths > 10, String(widths));
+});

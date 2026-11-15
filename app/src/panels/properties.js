@@ -38,6 +38,10 @@ export function toolProps(app, tool) {
   if (tool === 'polygon') look.push(row('sides', numberField(settings.polySides, (v) => setSetting('polySides', Math.max(3, Math.min(24, Math.round(v)))), { step: 1, min: 3, max: 24 })), row('star', check('polyStar')));
   if (['rect', 'ellipse', 'polygon'].includes(tool)) look.push(row('fill', colorField(settings.fill, (c) => setSetting('fill', c))));
   if (tool === 'draw') look.push(row('smooth', check('smooth')), row('simplify', numberField(settings.simplify, (v) => setSetting('simplify', Math.max(0, v)), { step: 0.5, min: 0 })));
+  if (['draw', 'line', 'polyline'].includes(tool) && settings.brush && app.INK[settings.brush]) {
+    const key = app.INK[settings.brush].params.find((p) => p.key === 'width' || p.key === 'size');
+    if (key) look.push(row('size', numberField(settings.brushParams[settings.brush]?.[key.key] ?? key.default, (v) => setSetting('brushParams', { ...settings.brushParams, [settings.brush]: { ...settings.brushParams[settings.brush], [key.key]: Math.min(key.max, Math.max(key.min, v)) } }), { step: key.step, min: key.min, max: key.max })));
+  }
   if (look.length) look.push(row('width', numberField(settings.width, (v) => setSetting('width', Math.max(0.5, v)), { step: 0.2, min: 0.5 })));
   if (tool === 'code') look.push(row('preset', choice(Object.keys(app.PRESETS).filter((k) => !['path', 'wave'].includes(k)), settings.codePreset, (v) => setSetting('codePreset', v))));
   if (tool === 'score') look.push(row('brush', choice(Object.keys(app.BRUSHES), settings.scoreBrush, (v) => setSetting('scoreBrush', v))));
@@ -94,6 +98,15 @@ export function selectionProps(app, sel, live = null) {
     if (brushable.length && brushable.length === sel.length) {
       const role = shared(sel, (o) => (o.kind === 'line' ? 'line' : 'plane')), id = shared(sel, (o) => o.brush?.id ?? null);
       if (role) out.push(brushSection(app, role, id, one?.brush?.params ?? sel[0].brush?.params, (v) => app.call('object.brush', { ids, id: v }), (k, v) => app.call('object.brush', { ids, params: { [k]: v } })));
+    }
+    // smoothing: of the selected lines now (points within so many pixels of the line are dropped), and of the lines drawn next
+    if (sel.some((o) => o.kind === 'line' && !o.bind && !app.isWire?.(o))) {
+      const lines = sel.filter((o) => o.kind === 'line' && !o.bind), chk = (key) => { const c = h('input'); c.type = 'checkbox'; c.checked = settings[key]; c.addEventListener('change', () => setSetting(key, c.checked)); return c; };
+      const simple = row('simplify', numberField(0, (v) => { if (v > 0) app.simplifyIds(lines.map((o) => o.id), v); }, { step: 0.5, min: 0 }));
+      simple.title = 'Drop the points that sit within this many pixels of the line, now';
+      const next = row('next: smooth', chk('smooth')), tol = row('next: simplify', numberField(settings.simplify, (v) => setSetting('simplify', Math.max(0, v)), { step: 0.5, min: 0 }));
+      next.title = 'New lines are drawn smooth, not as straight segments'; tol.title = 'New lines drop the points within this many pixels of the stroke';
+      out.push(section('Smoothing', simple, next, tol));
     }
     if (one?.rect) {
       const r = one.rect, set = (k) => (v) => app.call('object.resize', { id: one.id, rect: { ...one.rect, [k]: v } });

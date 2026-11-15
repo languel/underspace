@@ -1009,6 +1009,18 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   with a config each (the second user made it shared code). The preview
   draws a sample stroke with speed and pressure in it, or a sample shape
   for a brush of planes.
+- **Pen size and two-point lines.** `[` and `]` set the pen's size
+  while drawing (`penSize`: the brush's width or size parameter, else
+  the plain line's width), and the ring at the pointer shows it
+  (`showRing`; the sculpt brush's ring and the pen's are one element).
+  Cause of "a straight line is a thin line": a drawn stroke is
+  simplified, a near-straight one to two points, and brushes shape a mark
+  along its length from the samples `smoothPath` gives them, which it only
+  made for three points or more. `densify` in `ink/walk.js` now samples
+  straight stretches (corners kept), for two-point lines and for straight
+  strokes. The Alt+right-click properties of a selected line have a
+  Smoothing section: simplify it now (px), and the two settings for the
+  next lines drawn (smooth, simplify).
 - The brush ring follows `[`, `]` and a score's `tool()` at once
   (`onSettings`), not at the next pointer move.
 - Not yet: gestures recorded in time (a stroke replayed at the speed it was

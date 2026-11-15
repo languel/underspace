@@ -3,9 +3,25 @@
  * pressure. Brushes read it (k.smoothPath, k.frames); p5 exports embed this file with them.
  */
 
+/**
+ * Straight stretches given samples along their length (about one per 3 units, up to 96 a stretch), the
+ * corners kept: time and pressure interpolate. A brush shapes a mark along its length (the Ink brush swells
+ * and tapers it), so a line of two points, or a straight one, needs them as much as a curve does.
+ */
+function densify(points, closed = false) {
+  const n = points.length, out = [], segs = closed ? n : n - 1;
+  for (let i = 0; i < segs; i++) {
+    const a = points[i], b = points[(i + 1) % n], k = Math.max(1, Math.min(96, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 3)));
+    for (let s = 0; s < k; s++) { const t = s / k; out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, (a[2] ?? 0) + ((b[2] ?? 0) - (a[2] ?? 0)) * t, (a[3] ?? 0.5) + ((b[3] ?? 0.5) - (a[3] ?? 0.5)) * t]); }
+  }
+  if (!closed) out.push(points[n - 1].slice());
+  return out;
+}
+
 /** Catmull-Rom resampling so hand-drawn and scripted paths render smoothly. */
 function smoothPath(points, closed, samplesPerSeg) {
-  if (points.length < 3) return points.map(p => p.slice());
+  if (points.length < 2) return points.map(p => p.slice());
+  if (points.length < 3) return densify(points);
   const out = [];
   const n = points.length;
   const get = i => (closed ? points[(i + n) % n] : points[Math.max(0, Math.min(n - 1, i))]);
@@ -46,4 +62,4 @@ function walkFrames(e, samples = 4, smoothing = 0.5) {
   });
 }
 
-export { smoothPath, walkFrames };
+export { smoothPath, walkFrames, densify };
