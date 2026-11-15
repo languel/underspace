@@ -115,10 +115,11 @@ body.clean #peek { display: grid; }
 .glyph-button { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; }
 .glyph-row.text button { padding: 2px 8px; }
 .color-field { display: flex; flex-wrap: wrap; gap: 3px; max-width: 176px; justify-content: flex-end; }
-.swatch { width: 16px; height: 16px; padding: 0; border: 1px solid var(--line); border-radius: 3px; }
-.swatch[aria-pressed=true] { outline: 2px solid var(--accent); outline-offset: 1px; }
-.swatch.none { background: linear-gradient(135deg, var(--field) 45%, var(--accent) 45% 55%, var(--field) 55%); }
-.color-field input[type=color] { width: 16px; height: 16px; padding: 0; border: 1px solid var(--line); background: none; }
+.swatch { box-sizing: border-box; width: 16px; height: 16px; padding: 0; border: 1px solid var(--line); border-radius: 3px; }
+/* the picked one is ringed inside itself, so none of them is larger than the rest */
+.swatch[aria-pressed=true] { box-shadow: inset 0 0 0 2px var(--bg), inset 0 0 0 3.5px var(--accent); }
+.swatch.none { background: linear-gradient(135deg, var(--field) 46%, var(--muted) 46% 54%, var(--field) 54%); }
+.color-field input[type=color] { box-sizing: border-box; width: 16px; height: 16px; padding: 0; border: 1px solid var(--line); background: none; }
 .note-text { min-height: 90px; resize: vertical; }
 .tree-row { display: flex; align-items: center; gap: 6px; padding: 1px 4px 1px 6px; border-radius: 5px; cursor: default; }
 .tree-row:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
@@ -276,3 +277,14 @@ body.with-timeline #debug { bottom: calc(8px + var(--tl-h, 96px)); }
 .toolcode .toolcode-code { min-height: 220px; resize: vertical; font: 11px/1.45 var(--mono, ui-monospace, monospace); white-space: pre; tab-size: 2; }
 .toolcode .toolcode-code[readonly] { opacity: 0.75; }
 .toolcode .toolcode-status { min-height: 1.3em; margin: 0; font-size: 11px; }
+
+/* folding groups: a small title that takes one line */
+.group { gap: 3px; }
+.group-head { display: flex; align-items: center; gap: 4px; width: 100%; margin: 4px 0 0; padding: 0 2px; border: 0; border-radius: 3px; text-align: left; font-size: 10px; line-height: 14px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); background: none; }
+.group-head::before { content: ''; width: 0; height: 0; border: 3.5px solid transparent; border-left: 5px solid currentColor; border-right: 0; transition: transform 80ms; }
+.group-head[aria-expanded=true]::before { transform: rotate(90deg); }
+.group-body { display: flex; flex-direction: column; gap: 5px; }
+.group[data-folded='1'] .group-body { display: none; }
+/* Cmd-drag on a number */
+:root[data-cmd='1'] input[type=number] { cursor: ew-resize; }
+input[type=number][data-dragging] { cursor: ew-resize; user-select: none; }

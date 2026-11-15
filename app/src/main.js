@@ -1,7 +1,8 @@
 // Wiring: layout by zoom, gestures, and the action table that the toolbar,
 // keys, context menus and palette all read.
 
-import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, history, travel, stats, argTypes as T } from './space.js';
+import { state, call, batch, define, undo, redo, take, onChange, loadTake, tools, history, travel, stats, argTypes as T, beginStep, endStep } from './space.js';
+
 import './patch.js';
 import { stepsOnScreen, TARGET_PRESETS, pressureRuns } from './object.js';
 import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplifyIndex, along, setDrag, setLive, setMoved, penOf, isLine, isTarget, hasCode, isWire } from './object.js';
@@ -54,6 +55,7 @@ import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
 import { SCULPTS, MESH_SCULPTS, sculptMark, effectiveSculpt, syncSculpts } from './ink/sculpt.js';
 import { sculptsPanel } from './panels/sculpts.js';
 import { brushesPanel } from './panels/brushes.js';
+import { dragStep } from './controls.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage'), pad = $('pad'), marquee = $('marquee'), dotLayer = $('dots');
@@ -2288,6 +2290,7 @@ $('peek').onclick = () => document.body.classList.toggle('clean');
 // What the panels may use.
 let settingsVersion = 0;
 onSettings(() => settingsVersion++);
+dragStep.begin = beginStep; dragStep.end = endStep;
 const app = {
   simplifyIds: (ids, px) => simplifyLines({ lines: ids.map(get).filter(Boolean) }, px),
   state, call, batch, get, tools, PRESETS, BRUSHES, INK, SCULPTS, sculptErrors: () => sculptErrors, brushesFor, actions: ACTIONS, onParam, onCode, frameIds, runAction,

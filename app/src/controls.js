@@ -67,11 +67,59 @@ export function row(label, ...controls) {
   el.append(h('span', '', label), ...controls);
   return el;
 }
+// A titled group folds up to its title (kept per title, in this browser: not part of the drawing).
+const FOLD = 'underspace-folded';
+const folded = () => { try { return new Set(JSON.parse(localStorage.getItem(FOLD) || '[]')); } catch { return new Set(); } };
 export function section(title, ...children) {
   const el = h('section', 'group');
-  if (title) el.append(h('h3', '', title));
-  el.append(...children);
+  if (!title) { el.append(...children); return el; }
+  const head = h('button', 'group-head'), body = h('div', 'group-body');
+  head.type = 'button'; head.textContent = title; head.title = `${title}: fold or unfold`;
+  body.append(...children);
+  const set = (shut) => { el.dataset.folded = shut ? '1' : ''; head.setAttribute('aria-expanded', String(!shut)); };
+  set(folded().has(title));
+  head.addEventListener('click', () => {
+    const all = folded(), shut = !all.has(title);
+    if (shut) all.add(title); else all.delete(title);
+    try { localStorage.setItem(FOLD, JSON.stringify([...all])); } catch { /* it still folds for now */ }
+    set(shut);
+  });
+  el.append(head, body);
   return el;
+}
+
+// Cmd (or Ctrl) and drag on a number: it grows to the right and shrinks to the left, a step for every few
+// pixels (Shift: ten steps, Alt: a tenth). The whole drag is one step of undo; `dragStep` is set by the app.
+export const dragStep = { begin() {}, end() {} };
+const cmdWatch = (e) => { document.documentElement.dataset.cmd = e.metaKey || e.ctrlKey ? '1' : ''; };
+if (typeof document !== 'undefined') { addEventListener('keydown', cmdWatch); addEventListener('keyup', cmdWatch); addEventListener('blur', () => { document.documentElement.dataset.cmd = ''; }); }
+function dragNumber(input, step, onCommit) {
+  input.addEventListener('pointerdown', (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.button !== 0) return;
+    e.preventDefault();
+    const v0 = Number(input.value) || 0, x0 = e.clientX, unit0 = Number(step) || (Math.abs(v0) >= 10 ? 1 : 0.1);
+    const places = Number(step) ? (String(step).split('.')[1] ?? '').length : 3, lo = input.min === '' ? -Infinity : Number(input.min), hi = input.max === '' ? Infinity : Number(input.max);
+    let queued = 0, last = v0, done = false;
+    const value = (ev) => {
+      const unit = unit0 * (ev.shiftKey ? 10 : ev.altKey ? 0.1 : 1), v = v0 + Math.round((ev.clientX - x0) / 3) * unit;
+      return Math.max(lo, Math.min(hi, +v.toFixed(Math.max(places, ev.altKey ? places + 1 : places))));
+    };
+    try { input.setPointerCapture(e.pointerId); } catch { /* the drag still follows the pointer over the field */ }
+    dragStep.begin();
+    input.dataset.dragging = '1';
+    const move = (ev) => {
+      last = value(ev); input.value = last;
+      if (!queued) queued = requestAnimationFrame(() => { queued = 0; if (!done) onCommit(last); });
+    };
+    const up = () => {
+      done = true; cancelAnimationFrame(queued);
+      input.removeEventListener('pointermove', move); input.removeEventListener('pointerup', up); input.removeEventListener('pointercancel', up); input.removeEventListener('lostpointercapture', up);
+      delete input.dataset.dragging;
+      if (last !== v0) onCommit(last);
+      dragStep.end();
+    };
+    input.addEventListener('pointermove', move); input.addEventListener('pointerup', up); input.addEventListener('pointercancel', up); input.addEventListener('lostpointercapture', up);
+  });
 }
 export function numberField(value, onCommit, { step = 'any', min, max } = {}) {
   const input = h('input');
@@ -79,6 +127,7 @@ export function numberField(value, onCommit, { step = 'any', min, max } = {}) {
   if (min != null) input.min = min;
   if (max != null) input.max = max;
   input.addEventListener('change', () => { const v = Number(input.value); if (input.value !== '' && Number.isFinite(v)) onCommit(v); });
+  dragNumber(input, step, onCommit);
   return input;
 }
 export function textField(value, onCommit, placeholder = '') {

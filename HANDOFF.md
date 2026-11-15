@@ -1009,6 +1009,14 @@ Added in a twelfth pass (14 Nov 2026), the timeline, music and recording:
   with a config each (the second user made it shared code). The preview
   draws a sample stroke with speed and pressure in it, or a sample shape
   for a brush of planes.
+- **Fields and groups (controls.js).** Cmd (or Ctrl) and drag on any
+  number field changes it live: a step for every 3 px, Shift ten steps,
+  Alt a tenth; one step of undo for the whole drag (`beginStep` and
+  `endStep` in `space.js` keep a batch open; the control only knows
+  `dragStep`). A titled group folds to its one-line title, remembered
+  per title in this browser (`underspace-folded`). The picked colour
+  swatch is ringed inside itself, so the none swatch is no larger than
+  the others.
 - **Pen size and two-point lines.** `[` and `]` set the pen's size
   while drawing (`penSize`: the brush's width or size parameter, else
   the plain line's width), and the ring at the pointer shows it

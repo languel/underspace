@@ -697,6 +697,11 @@ export function batch(fn) {
   try { return fn(); } finally { batchId = 0; }
 }
 
+// A step of undo that stays open across calls, for a drag (a number dragged with Cmd): beginStep() ... endStep().
+export function beginStep() { if (!batchId) { batchId = Date.now() * 100 + (++batchSeq % 100); heldStep = true; } }
+export function endStep() { if (heldStep) { batchId = 0; heldStep = false; } }
+let heldStep = false;
+
 function changed() { state.version++; for (const fn of listeners) fn(); }
 
 function rerun() {
