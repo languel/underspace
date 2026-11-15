@@ -27,6 +27,7 @@ Examples of calls:
 - a closed shape (a triangle): line_add {"points": [[0, 0], [2, 0], [1, 1.7]], "closed": true, "style": {"path": "straight"}}
 - a square 4 wide: line_add {"points": [[0, 0], [4, 0], [4, 4], [0, 4]], "closed": true, "style": {"path": "straight"}}
 - a curve is a line with several points and no "path" in its style.
+- make a line red: object_style {"ids": ["o1"], "style": {"stroke": "#ff0000"}}
 - A drawn figure (a triangle, a square, any outline) is line_add with "closed": true. shape_add is for frames that hold code, scores, 3D scenes or notes.`;
 
 // A command given an id that names nothing does nothing and says nothing, which reads as success.

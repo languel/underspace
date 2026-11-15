@@ -1438,6 +1438,12 @@ Also asked for:
     asked once, but does not read ids from the list or answer questions
     from it. LFM3 in the browser is not in the eval (it needs the page):
     the next thing to add is a way to run these cases in the page.
+  - LFM3 in the browser, the same eleven requests run by hand in the page:
+    9 of 11, three to nine seconds each once loaded. It missed the score
+    (three lines for two) and "make the line red" (it sent
+    `fill: {color: …}`, which `object.style` stored without complaint; the
+    command now refuses a colour that is not a string, and the prompt has
+    the example). Not re-run after that fix.
   - **Security pass (the first; the audit proper is still to come).** One
     hole closed without limiting the owner's agents: the hub answered any
     web page (`access-control-allow-origin: *`), so any site open in the

@@ -401,9 +401,15 @@ define({
 });
 
 define({
-  name: 'object.style', doc: 'Set how objects look. Only the given keys change; null puts a key back to its default.',
+  name: 'object.style', doc: 'Set how objects look. Only the given keys change; null puts a key back to its default. A line\'s colour is its stroke: { "stroke": "#ff0000" }; fill colours the inside of a closed line or a shape. Colours are CSS strings.',
   args: { ids: T.ids, style: T.style }, required: ['ids', 'style'],
   run(a) {
+    // a look that cannot be drawn is refused, not kept: a colour is a string, a width and an opacity numbers
+    for (const [k, v] of Object.entries(a.style ?? {})) {
+      if (v == null || v === '') continue;
+      if ((k === 'stroke' || k === 'fill') && typeof v !== 'string') throw new Error(`style.${k} must be a colour as a string, like "#ff0000" (got ${JSON.stringify(v)})`);
+      if ((k === 'width' || k === 'opacity') && !Number.isFinite(v)) throw new Error(`style.${k} must be a number (got ${JSON.stringify(v)})`);
+    }
     for (const id of a.ids) {
       const o = state.objects.get(id);
       if (!o) continue;
