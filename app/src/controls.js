@@ -104,7 +104,9 @@ function dragNumber(input, step, onCommit) {
       const unit = unit0 * (ev.shiftKey ? 10 : ev.altKey ? 0.1 : 1), v = v0 + Math.round((ev.clientX - x0) / 3) * unit;
       return Math.max(lo, Math.min(hi, +v.toFixed(Math.max(places, ev.altKey ? places + 1 : places))));
     };
-    try { input.setPointerCapture(e.pointerId); } catch { /* the drag still follows the pointer over the field */ }
+    // The gesture belongs to the window, not the field: it goes on wherever the pointer goes, and
+    // when the panel is rebuilt by a commit (the field replaced), it still goes on.
+    try { input.setPointerCapture(e.pointerId); } catch { /* the window still follows the pointer */ }
     dragStep.begin();
     input.dataset.dragging = '1';
     const move = (ev) => {
@@ -113,12 +115,14 @@ function dragNumber(input, step, onCommit) {
     };
     const up = () => {
       done = true; cancelAnimationFrame(queued);
-      input.removeEventListener('pointermove', move); input.removeEventListener('pointerup', up); input.removeEventListener('pointercancel', up); input.removeEventListener('lostpointercapture', up);
+      for (const w of [window]) { w.removeEventListener('pointermove', move, true); w.removeEventListener('pointerup', up, true); w.removeEventListener('pointercancel', up, true); }
+      document.documentElement.style.cursor = '';
       delete input.dataset.dragging;
       if (last !== v0) onCommit(last);
       dragStep.end();
     };
-    input.addEventListener('pointermove', move); input.addEventListener('pointerup', up); input.addEventListener('pointercancel', up); input.addEventListener('lostpointercapture', up);
+    window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', up, true); window.addEventListener('pointercancel', up, true);
+    document.documentElement.style.cursor = 'ew-resize';
   });
 }
 export function numberField(value, onCommit, { step = 'any', min, max } = {}) {
