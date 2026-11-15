@@ -173,7 +173,11 @@ test('events: crossing direction, exit, lockout, launch; rng repeats from the st
 
 test('channels pick instruments; recorded notes keep their channel', () => {
   call('space.clear');
-  call('music.set', { channels: { 2: 'bell', 3: 'nonsense' } });
+  // a name that is none of them is refused whole, so an agent is not told "done" for nothing
+  assert.throws(() => call('music.set', { channels: { 2: 'bell', 3: 'nonsense' } }), /no instrument "nonsense"/);
+  assert.equal(state.music.channels?.[2], undefined);
+  assert.throws(() => call('music.set', { scale: 'Nonsense Scale' }), /no scale named/);
+  call('music.set', { channels: { 2: 'bell' } });
   assert.equal(state.music.channels[2], 'bell');
   assert.equal(state.music.channels[3], undefined);
   const id = call('clip.add', { notes: [{ beat: 0, midi: 36, vel: 100, len: 0.25, ch: 10 }] });

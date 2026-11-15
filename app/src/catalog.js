@@ -14,6 +14,8 @@
 
 // ---- pure ---------------------------------------------------------------------
 
+import { codeHelp, CODE_ROLES } from './codedoc.js';
+
 // Letters of the query in order; earlier and tighter matches score higher. -1: no match.
 export function score(query, text) {
   let i = 0, s = 0, last = -1;
@@ -165,6 +167,9 @@ export function install(h) {
       }
       return { image: c.toDataURL('image/png'), width: c.width, height: c.height, view: where() };
     } });
+
+  define({ ...ui, name: 'code.help', doc: 'What the code of an object is given and may return, before writing any (object.code). No role: the kinds of code. role: what that code gets (ev, ways, voices, note(), pitch() ...), what it returns and the names of its presets. role and preset: that preset\'s source, to copy and change.', args: { role: { enum: CODE_ROLES }, preset: T.str },
+    run: (a) => codeHelp(a.role, a.preset) });
 
   define({ ...ui, name: 'example.list', doc: 'The examples that can be added, each with its index, path and title.', run: () => h.EXAMPLES.map((e, i) => ({ index: i, path: e.path, title: e.title })) });
   define({ name: 'example.add', record: false, doc: 'Add an example by its index or its title (example.list), below what is drawn or at a canvas point. Its commands are recorded in the take.', args: { index: T.num, title: T.str, at: { type: 'array' } },

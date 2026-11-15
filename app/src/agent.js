@@ -32,13 +32,17 @@ Examples of calls:
 
 // A command given an id that names nothing does nothing and says nothing, which reads as success.
 // For an agent that is the worst answer, so its calls are checked first: -> a message, or ''.
-export function missingIds(args, has) {
-  const ids = [...(Array.isArray(args?.ids) ? args.ids : []), ...['id', 'on'].map((k) => args?.[k]).filter((v) => typeof v === 'string')];
+// schema: the command's own (its inputSchema). Some commands take an `id` that is not an object's
+// (an action's, a panel's, a brush's): only what the schema calls an object id is checked.
+export function missingIds(args, has, schema) {
+  const names = (k) => !schema || /^object ids?$/.test(schema.properties?.[k]?.description ?? '') || (k === 'on' && !!schema.properties?.on);
+  const ids = [...(Array.isArray(args?.ids) && names('ids') ? args.ids : []), ...['id', 'on'].filter(names).map((k) => args?.[k]).filter((v) => typeof v === 'string')];
   const bad = ids.filter((id) => typeof id !== 'string' || !has(id));
   return bad.length ? `no object with id ${bad.map((x) => JSON.stringify(x)).join(', ')}. Ids look like "o3"; they are listed under "Now" and by space_read.` : '';
 }
 
 const mcp = (n) => n.replaceAll('.', '_');
+const schemaOf = (tools, name) => tools.find((t) => t.name === name || mcp(t.name) === name)?.inputSchema;
 // The tools for a model, in the OpenAI shape, and the way back from its names to ours.
 // defers: for a model whose chat template knows deferred tools (LFM3): every other command is given
 // too, marked defer_loading, so it stays out of the prompt until tools_search names it; then the
@@ -96,7 +100,7 @@ export async function runTurn({ text, history = [], engine, port, by = 'assistan
       let picture = null, raw;
       try {
         if (signal?.aborted || port.held()) throw new Error('stopped by the person');
-        const miss = port.has ? missingIds(args, port.has) : ''; if (miss) throw new Error(miss);
+        const miss = port.has ? missingIds(args, port.has, schemaOf(port.tools(), name)) : ''; if (miss) throw new Error(miss);
         const r = await port.call(name, args, by); raw = r;
         if (engine.sees && typeof r?.image === 'string') { picture = r.image; out = JSON.stringify({ ...r, image: '(the picture follows)' }); } else out = 'OK. Result: ' + asText(r);
       } catch (e) { ok = false; out = 'Error: ' + (e?.message ?? e); }
@@ -207,7 +211,7 @@ export function install(h) {
   return {
     run, say, emit,
     // an agent's call from outside the page (the relay, WebMCP): refused while held, and checked for ids that name nothing
-    guard(args) { if (held) throw new Error('stopped by the person: agents are held until they let them go on'); const miss = missingIds(args, (id) => !!h.get(id)); if (miss) throw new Error(miss); },
+    guard(args, name) { if (held) throw new Error('stopped by the person: agents are held until they let them go on'); const miss = missingIds(args, (id) => !!h.get(id), name ? schemaOf(h.tools(), name) : undefined); if (miss) throw new Error(miss); },
     stop() { running?.abort(); settle(null); },
     forget() { history = []; },
     busy: () => !!running, held: () => held,

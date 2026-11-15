@@ -15,7 +15,7 @@ import { BRUSHES } from './brushes.js';
 import { BRUSHES as INK, syncBrushes } from './ink/brushes.js';
 import { spec, apply, applyRect } from './transform.js';
 import { settle, JUNCTION, isCurve, curveOf, measure, atU } from './joints.js';
-import { DEFAULT_MUSIC, scaleName } from './music.js';
+import { DEFAULT_MUSIC, scaleName, scaleNames } from './music.js';
 import { DEFAULT_GRID, GRID, GRID_KEYS } from './grid.js';
 import { INSTRUMENTS } from './instruments.js';
 
@@ -117,7 +117,7 @@ define({
 });
 
 define({
-  name: 'traveler.add', doc: 'Put a traveler on a line: a shape that moves along it while playing. u is where it starts (0..1). Its parameters: dur (seconds for the whole line), loop (0 once, 1 loop, 2 there and back).',
+  name: 'traveler.add', doc: 'Put a traveler on a line: a shape that moves along it while playing. u is where it starts (0..1). Its parameters: dur (beats for the whole line, default 8; 0: its time comes from the grid its line is in), loop (0 once, 1 loop, 2 there and back). More with object.set: at (the beat it sets off on), speed (grid cells a beat, in place of dur), drawn (above 0: at the pace the line was drawn), drives (0: a signal that node logic can stop). Null when `on` is not a line.',
   args: { on: { type: 'string', description: 'id of the line to travel' }, u: T.num, size: T.num, dur: T.num, loop: T.num }, required: ['on'],
   run(a) {
     const line = state.objects.get(a.on);
@@ -321,7 +321,7 @@ define({
 
 define({
   name: 'object.role',
-  doc: 'Change what an object is. A line: "ink", "connector" (binds to the ports nearest its ends, within tol), "path". A shape: "visual", "target", "code", "score", "note".',
+  doc: 'Change what an object is, keeping its shape. A line: "ink", "connector" (binds to the ports nearest its ends, within tol), "path" (code that reads the line), "event" (a traveler crossing it fires it). A shape: "visual", "target", "code", "score", "grid", "note", "event". ("traveler" only for what traveler.attach put on a line.) False when the role is not one its kind can take.',
   args: { id: T.id, role: { enum: [...ROLES.line, ...ROLES.shape] }, tol: T.num },
   required: ['id', 'role'],
   run(a) {
@@ -350,11 +350,12 @@ define({
 });
 
 define({
-  name: 'object.code', doc: 'Set the code of a code container or a path. The header comments declare its ports and parameters.',
+  name: 'object.code', doc: 'Set the code of an object that has code: a code container, a path, a score (its brush), an event, a joint (a junction), a grid frame or a render target. The header comments declare its ports and parameters. code.help says what each kind of code is given and returns. False when the object has no code (give it a role first: object.role).',
   args: { id: T.id, code: T.str }, required: ['id', 'code'],
   run(a) {
     const o = state.objects.get(a.id);
     if (!o || !['code', 'path', 'score', 'event', 'junction', 'grid', 'target'].includes(o.role)) return false;
+    if (typeof a.code !== 'string') throw new Error('code must be a string of JavaScript');
     o.code = a.code; o.params ??= {};
     parseBlanket(o.code);
     prune(o);
@@ -363,8 +364,8 @@ define({
 });
 
 define({
-  name: 'object.set', doc: 'Set a parameter of a code object.', args: { id: T.id, name: T.str, value: T.num }, required: ['id', 'name', 'value'],
-  run(a) { const o = state.objects.get(a.id); if (o?.params) o.params[a.name] = a.value; },
+  name: 'object.set', doc: 'Set a parameter of an object: one its code declares (// param: name value), or a traveler\'s (start, dur, loop, at, speed, drawn, drives). False when the object has no parameters.', args: { id: T.id, name: T.str, value: T.num }, required: ['id', 'name', 'value'],
+  run(a) { const o = state.objects.get(a.id); if (!o?.params) return false; o.params[a.name] = a.value; return true; },
 });
 
 define({
@@ -645,9 +646,15 @@ define({ name: 'space.clear', doc: 'Remove everything.', run: () => reset() });
 // ---- music: the context, and recorded clips (music.js) -------------------------
 
 define({
-  name: 'music.set', doc: 'Set the musical context everything plays in: bpm, meter [beats in a bar, note value], scale (a name, or a list of steps in semitones from the root, fractions allowed), root (a MIDI note), low and high (the range that heights and places 0..1 map to), channels ({ 1..16: instrument }; instruments: ' + INSTRUMENTS.join(', ') + ').',
+  name: 'music.set', doc: 'Set the musical context everything plays in: bpm, meter [beats in a bar, note value], scale (one of the names below, or a list of steps in semitones from the root, fractions allowed), root (a MIDI note), low and high (the range that heights and places 0..1 map to), channels ({ 1..16: instrument }; instruments: ' + INSTRUMENTS.join(', ') + '). Scales: ' + scaleNames().join(', ') + '.',
   args: { bpm: T.num, meter: { type: 'array', items: { type: 'number' } }, scale: { type: ['string', 'array'] }, root: T.num, low: T.num, high: T.num, channels: { type: 'object' } },
   run(a) {
+    // what cannot be meant is refused, not passed over: a wrong name would read as done
+    if (typeof a.scale === 'string' && !scaleName(a.scale)) throw new Error(`no scale named "${a.scale}" (one of ${scaleNames().join(', ')}; or give its steps as a list)`);
+    for (const [c, inst] of Object.entries(a.channels && typeof a.channels === 'object' ? a.channels : {})) {
+      if (!(+c >= 1 && +c <= 16)) throw new Error(`channels: ${c} is not a channel (1 to 16)`);
+      if (!INSTRUMENTS.includes(inst)) throw new Error(`no instrument "${inst}" (one of ${INSTRUMENTS.join(', ')})`);
+    }
     const m = state.music;
     if (a.bpm > 0) m.bpm = Math.min(400, Math.max(10, a.bpm));
     if (Array.isArray(a.meter) && a.meter[0] > 0 && a.meter[1] > 0) m.meter = [Math.round(a.meter[0]), Math.round(a.meter[1])];

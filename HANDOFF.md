@@ -1390,10 +1390,9 @@ Also asked for:
   `http://localhost:5310/app/?relay`; with the relay running, `curl -X POST
   127.0.0.1:5311/call -d '{"name":"view.look","args":{}}'` is the quickest
   check that a tab answers.
-  Still to try, in this order: (1) Claude Code in a new session in this
-  folder driving the tab over `.mcp.json` (the real test of the tool set:
-  have it build a score and play it, and note every command it had to guess
-  at); (2) Pi with a provider that has credits or a local one, and an
+  Still to try, in this order: (1) done, see the fourth pass below: Claude
+  Code in a new session in this folder driving the tab over `.mcp.json`;
+  (2) Pi with a provider that has credits or a local one, and an
   opencode session; (3) the deployed https page reaching the hub on
   localhost; (4) whether the 1.1 GB weights stay cached across reloads in
   Chrome proper; (5) WebMCP in a browser that has it.
@@ -1492,6 +1491,47 @@ Also asked for:
     were not checked in Chrome; Pi with a local model (a throwaway config
     dir via `PI_CODING_AGENT_DIR` with an Ollama provider) ran four minutes
     without loading the model or calling a tool and was stopped.
+- **Controls: the fourth pass (15 Nov 2026), Claude Code over `.mcp.json`.**
+  The test that was waiting for a session the owner starts: Claude Code in
+  this folder, with the relay as its MCP server, built a score (a frame,
+  four lines, pentatonic minor on A at 96), played it, read it with
+  `play.state` (the pitches were on the scale), then a line with four note
+  events and a looping traveler (notes on channels 1 and 2 at the beats
+  expected), and looked at it with `view.look`. It worked the first time.
+  What the agent had to guess, and what was changed for it:
+  - **What object code may call.** Nothing said what `ev`, `ways`, `voices`
+    or `note()` are. `app/src/codedoc.js` now holds that for every kind of
+    code (code, path, sketch, event, junction, score, target, grid), with
+    the presets read from where they live. `code.help {role, preset}` gives
+    it to an agent (no role: the kinds; a role: what the code gets and
+    returns, and its presets; with a preset: its source). The Docs panel's
+    Code topic is drawn from the same table (it had gone stale).
+  - **Descriptions that were wrong or thin:** `traveler.add` said dur was
+    seconds (it is beats) and did not name at, speed, drawn, drives;
+    `object.code` named two of the seven kinds it takes; `object.role` left
+    out event and grid; `object.set` did not say it sets a traveler's
+    parameters; `music.set` did not list the scale names.
+  - **Wrong input that read as done:** `music.set` with a scale or an
+    instrument that does not exist returned null and changed nothing; it now
+    refuses and lists the names. `object.set`, `score.play` return false
+    when they did nothing; `play.toggle` returns whether it plays.
+  - **A bug:** the check for ids that name nothing (`missingIds`) took every
+    `id` for an object's, so over the relay `panel.show`, `action.run`
+    (undo and redo among them) and `brush.define` were refused. It now
+    reads the command's schema and checks only what is called an object id.
+  - **A dropped tab:** the tab's stream was gone for one call mid-session
+    (the tab had just been replaced) and the call failed at once. The hub
+    now waits up to 6 s for a tab to join again (`REJOIN` in `relay.mjs`;
+    tried on a spare port). The hub that is running must be restarted to
+    have it.
+  - Seen, left: `view.frame` centres on the canvas not covered by the side
+    panel, while `view.look` pictures the whole stage, so with a panel open
+    the right of the picture is empty; `tools.search` returns whole schemas
+    (long, but the agent needs them). 130 tests.
+  Still to try: Pi and opencode sessions of some length; the deployed https
+  page reaching the hub, and the weights staying cached, in Chrome proper;
+  WebMCP. Still to build: a runs argument for `eval.run`; a short prompt for
+  one-line edits; tools driven by connectors; the security audit.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

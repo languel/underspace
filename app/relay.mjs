@@ -22,6 +22,7 @@ import readline from 'node:readline';
 
 const argv = process.argv.slice(2), flag = (n) => argv.includes(n), opt = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 const PORT = Number(opt('--port', process.env.UNDERSPACE_RELAY_PORT ?? 5311)), HOST = '127.0.0.1', BASE = `http://${HOST}:${PORT}`;
+const REJOIN = 6000; // how long a call waits for a tab to come back
 const WAIT = 10 * 60 * 1000; // a call may wait for the person (user.ask), so it is given time
 const log = (...a) => process.stderr.write('[underspace relay] ' + a.join(' ') + '\n');
 
@@ -32,8 +33,10 @@ const pending = new Map(); // call id -> { resolve, timer }
 let seq = 0, onTools = () => {};
 const newest = () => [...tabs.values()].filter((t) => t.res).sort((a, b) => b.since - a.since)[0];
 
-function hubCall({ name, args = {}, by = 'agent', tab }) {
-  const t = tab ? tabs.get(tab) : newest();
+async function hubCall({ name, args = {}, by = 'agent', tab }) {
+  let t = tab ? tabs.get(tab) : newest();
+  // a tab whose stream dropped (a reload, a sleeping laptop) joins again by itself within seconds: wait for it
+  for (let i = 0; !t?.res && i < REJOIN / 250; i++) { await new Promise((r) => setTimeout(r, 250)); t = tab ? tabs.get(tab) : newest(); }
   if (!t?.res) return Promise.resolve({ ok: false, error: `no underspace tab is connected. Open the app with ?relay added to its address (for example http://localhost:5310/app/?relay) and try again.` });
   const id = 'c' + (++seq);
   return new Promise((resolve) => {

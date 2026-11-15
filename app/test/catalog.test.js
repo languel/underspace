@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseArgs, searchTools, signature, brief, score } from '../src/catalog.js';
 import { tools } from '../src/space.js';
+import { codeHelp, CODE_ROLES } from '../src/codedoc.js';
 
 const schema = (name) => tools().find((t) => t.name === name).inputSchema;
 
@@ -26,4 +27,16 @@ test('an object in short says what and where it is', () => {
   const b = brief({ id: 'o1', kind: 'line', role: 'ink', space: null, points: [[0, 0], [2, 1]], closed: true }, () => ({ cx: 1, cy: 0.5, w: 2, h: 1 }));
   assert.deepEqual(b, { id: 'o1', kind: 'line', role: 'ink', space: null, box: [0, 0, 2, 1], points: 2, closed: true });
   assert.ok(score('la', 'line.add') > score('la', 'place a label'));
+});
+
+test('code.help says what each kind of code is given, and hands out presets', () => {
+  assert.deepEqual(Object.keys(codeHelp()), CODE_ROLES);
+  const ev = codeHelp('event');
+  assert.ok('ev' in ev.gets && 'pitch(v)' in ev.gets && ev.presets.includes('reflect'));
+  assert.match(ev.example, /note\(/);
+  assert.ok('ways' in codeHelp('junction').gets && 'voices' in codeHelp('score').gets);
+  assert.match(codeHelp('score', 'pizzicato').code, /^\/\/ pizzicato/);
+  for (const r of CODE_ROLES) assert.ok(codeHelp(r).what && codeHelp(r).returns, r);
+  assert.throws(() => codeHelp('event', 'nope'), /one of note/);
+  assert.throws(() => codeHelp('nope'), /no such kind/);
 });

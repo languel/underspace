@@ -2,6 +2,7 @@
 // and command. The lists are generated from the code, so they cannot go stale.
 
 import { h } from '../controls.js';
+import { CODE_DOC } from '../codedoc.js';
 
 const OBJECTS = [
   ['line · ink', 'A drawing. It does nothing until it is given a role.'],
@@ -12,7 +13,7 @@ const OBJECTS = [
   ['shape · render target', 'A 3D space. Draw in it on its drawing plane; its spin and tilt inputs turn it.'],
   ['shape · score', 'A frame: the lines inside are played, across as time and up as pitch. Its code is a brush.'],
   ['shape · note', 'Text on the canvas.'],
-  ['shape · traveler', 'Moves along a line while playing. Attach one with A on a selected line, or by right-clicking the line. Its outputs x, y and u follow it; dur is the seconds for the whole line, loop is 0 once, 1 loop, 2 there and back.'],
+  ['shape · traveler', 'Moves along a line while playing. Attach one with A on a selected line, or by right-clicking the line. Its outputs x, y and u follow it; dur is the beats for the whole line (0: from its grid), loop is 0 once, 1 loop, 2 there and back.'],
   ['shape · event', 'A region that fires when a traveler enters it, once until it leaves. Its code says what happens: by default a note whose pitch is how high on the path the traveler was. Outputs gate (1 while a traveler is inside) and count.'],
   ['group', 'Made by collapsing a selection. The connectors that were cut become its ports. Zoom in to see what is inside.'],
 ];
@@ -21,25 +22,6 @@ const CODE = `// name
 // out: y
 // param: gain 0.5
 return { y: (inp.a + inp.b) * p.gain };`;
-const CODE_NOTES = [
-  ['inp', 'the declared inputs: a number, or a path (an array of points)'],
-  ['p', 'the declared parameters'],
-  ['t', 'time in seconds'],
-  ['mem', 'an object that persists between frames'],
-  ['geom', 'for a path: { points, at(u) }'],
-  ['along(points, u)', 'a point u (0..1) along any path'],
-  ['return', 'an object of outputs, or one number for the first output'],
-];
-const EVENT_NOTES = [
-  ['ev', '{ x, y, u, speed, traveler }: where on the path (0..1, y up), how far along, how fast, which traveler'],
-  ['note(midi, velocity, seconds)', 'plays a note'],
-  ['p, mem', 'as in other code'],
-];
-const SKETCH_NOTES = [
-  ['inp, p', 'the inputs and parameters, kept up to date'],
-  ['out({ y: 1 })', 'sets outputs'],
-];
-
 export function docsPanel(el, app) {
   const search = h('input'), body = h('div', 'docs');
   search.type = 'search'; search.placeholder = '⌕'; search.setAttribute('aria-label', 'Search');
@@ -52,9 +34,7 @@ export function docsPanel(el, app) {
 
   const topics = [
     topic('Objects', pairs(OBJECTS)),
-    topic('Code', h('p', '', 'Code is plain JavaScript. A function body starts with comments that declare its ports and parameters:'), source(CODE), pairs(CODE_NOTES),
-      h('p', '', 'An event\'s code runs when a traveler enters it:'), pairs(EVENT_NOTES),
-      h('p', '', 'A whole p5.js or three.js sketch also works: paste it on the canvas. In a sketch:'), pairs(SKETCH_NOTES)),
+    topic('Code', h('p', '', 'Code is plain JavaScript. A function body starts with comments that declare its ports and parameters:'), source(CODE), ...Object.entries(CODE_DOC).map(([role, d]) => topic(role, h('p', '', d.what), pairs(d.gets), pairs([['return', d.returns]])))),
     topic('Presets', ...Object.entries(app.PRESETS).map(([k, code]) => { const d = topic(k, source(code)); if (!['path', 'wave'].includes(k)) d.append(add('add', () => app.runAction('add.' + k))); return d; })),
     topic('Ink brushes', h('p', '', 'A line or a visual shape can be drawn by an ink brush (Properties, or the palette: "Brush: charcoal"). Each is a small program with a few bounded parameters.'),
       ...Object.entries(app.INK).map(([k, b]) => topic(b.label, h('p', '', b.doc), pairs(b.params.map((s) => [s.key, `${s.doc} (${s.min} to ${s.max})`]))))),

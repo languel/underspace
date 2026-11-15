@@ -2549,7 +2549,7 @@ const catalog = installCatalog({
   EXAMPLES, addExample: (e, at) => app.addExample(e, at),
 });
 // Agents outside the page (relay.js): on with ?relay or the relay action, and then kept on.
-const relay = createRelay({ base: settings.relay, tools, call: (name, args, by) => { agent.guard(args); return call(name, args, by); }, onState: (s) => { document.documentElement.dataset.relay = s; } });
+const relay = createRelay({ base: settings.relay, tools, call: (name, args, by) => { agent.guard(args, name); return call(name, args, by); }, onState: (s) => { document.documentElement.dataset.relay = s; } });
 if (new URLSearchParams(location.search).has('relay')) setSetting('relayOn', true);
 if (settings.relayOn) relay.open(settings.relay);
 const palette = createPalette($('palette'), { ask, more: catalog, getActions: () => { const c = context(); return ACTIONS.filter((a) => !a.hidden && a.id !== 'palette' && allowed(a, c)).map((a) => asItem(a, c)); } });
@@ -2667,7 +2667,7 @@ function pasteText(code, c) {
 define({ name: 'view.fit', doc: 'Show everything.', record: false, run: () => fit() });
 define({ name: 'view.zoom', doc: 'Zoom by a factor about the middle of the view.', args: { factor: T.num }, required: ['factor'], record: false, run: (a) => view.zoomAt(...centre(), a.factor) });
 define({ name: 'tool.set', doc: 'Choose the pointer tool.', args: { name: { enum: ['select', 'pan', 'draw', 'line', 'rect', 'ellipse', 'sculpt', 'note', 'code', 'target', 'score', 'event'] } }, required: ['name'], record: false, run: (a) => setTool(a.name) });
-define({ name: 'score.play', doc: 'Play a score on the transport, pass after pass. What is drawn or changed while it plays is heard from the next pass.', args: { id: T.id }, required: ['id'], record: false, run: (a) => { if (get(a.id)?.role !== 'score') return; if (scoreSet) scoreSet.add(a.id); if (!transport.playing) { lastBeat = transport.beat; transport.play(); } scoreTick(); } });
+define({ name: 'score.play', doc: 'Play a score on the transport, pass after pass. What is drawn or changed while it plays is heard from the next pass. False when the id is not a score; play.state then says what sounds.', args: { id: T.id }, required: ['id'], record: false, run: (a) => { if (get(a.id)?.role !== 'score') return false; if (scoreSet) scoreSet.add(a.id); if (!transport.playing) { lastBeat = transport.beat; transport.play(); } scoreTick(); return true; } });
 // The same inside a render target: as the tool does there, the stroke runs on the screen (the
 // scene seen through the target's camera) and each moved point is lifted back onto the plane
 // that faces the camera through where it was.
@@ -2758,7 +2758,7 @@ define({ name: 'play.state', doc: 'What is sounding, read instead of heard. play
     const voices = (o) => (scoreOf(o.id)?.voices ?? []).map((v) => { const e = v.events, step = Math.max(1, Math.ceil(e.length / n)); return { line: v.id, from: round(e[0]?.time ?? 0), to: round(e.at(-1)?.time ?? 0), pitch: e.filter((_, i) => i % step === 0 || i === e.length - 1).map((x) => [round(x.time), Math.round(x.midi * 100) / 100]) }; });
     return { playing: transport.playing, beat: round(transport.beat), bpm: state.music.bpm, scores: scores().map((o) => ({ id: o.id, playing: transport.playing && scorePlaying(o), seconds: round(scoreOf(o.id)?.duration ?? 0), voices: voices(o) })), notes: heard.slice(-16) };
   } });
-define({ name: 'play.toggle', doc: 'Start or stop playing: scores loop and travelers set off along their lines.', record: false, run: () => togglePlay() });
+define({ name: 'play.toggle', doc: 'Start or stop playing: scores loop and travelers set off along their lines. Returns whether it plays now.', record: false, run: () => { togglePlay(); return transport.playing; } });
 define({ name: 'score.stop', doc: 'Stop one score (the others play on), or pause everything when no id is given.', args: { id: T.id }, record: false, run: (a) => { if (!a.id) { if (transport.playing) togglePlay(); return; } scoreSet = new Set(scores().filter((o) => o.id !== a.id && scorePlaying(o)).map((o) => o.id)); sound.silence(a.id); scorePlan.delete(a.id); } });
 define({ name: 'assistant.ask', doc: 'Ask the built-in assistant to build something from a sentence.', args: { text: T.str }, required: ['text'], record: false, run: (a) => ask(a.text) });
 
@@ -2768,7 +2768,7 @@ window.underspace = { agent, relay, call, batch, tools, commands: tools, state, 
 try {
   const mc = document.modelContext ?? navigator.modelContext;
   const result = (r) => (typeof r?.image === 'string' && r.image.startsWith('data:image/') ? [{ type: 'image', data: r.image.slice(r.image.indexOf(',') + 1), mimeType: 'image/png' }, { type: 'text', text: JSON.stringify({ ...r, image: undefined }) }] : [{ type: 'text', text: JSON.stringify(r ?? null) }]);
-  if (mc?.registerTool) for (const t of tools()) mc.registerTool({ name: t.name.replaceAll('.', '_'), description: t.description, inputSchema: t.inputSchema, execute: async (args) => { agent.guard(args); return { content: result(await call(t.name, args, 'webmcp')) }; } });
+  if (mc?.registerTool) for (const t of tools()) mc.registerTool({ name: t.name.replaceAll('.', '_'), description: t.description, inputSchema: t.inputSchema, execute: async (args) => { agent.guard(args, t.name); return { content: result(await call(t.name, args, 'webmcp')) }; } });
 } catch (e) { console.warn('webmcp:', e.message); }
 
 // ---- keep the take between visits; ?demo builds a small example ------------

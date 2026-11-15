@@ -59,3 +59,17 @@ test('a model that repeats a call is told once, then the turn ends', async () =>
   assert.equal(events.filter((e) => e.type === 'result' && e.ok).length + events.filter((e) => e.type === 'result' && /^Error/.test(e.text)).length, 1); // run once only
   assert.match(events.filter((e) => e.type === 'result')[1].text, /already made this exact call/);
 });
+
+test('an id that names nothing is refused, but only where the command means an object', async () => {
+  const { missingIds } = await import('../src/agent.js');
+  const { tools } = await import('../src/space.js');
+  const schema = (n) => tools().find((t) => t.name === n).inputSchema, has = (id) => id === 'o1';
+  assert.match(missingIds({ id: 'o9', code: '' }, has, schema('object.code')), /no object with id "o9"/);
+  assert.equal(missingIds({ id: 'o1', code: '' }, has, schema('object.code')), '');
+  assert.match(missingIds({ on: 'o9' }, has, schema('traveler.add')), /"o9"/);
+  assert.match(missingIds({ ids: ['o1', 'o7'] }, has, schema('object.remove')), /"o7"/);
+  // an action's, a panel's or a brush's id is not an object's
+  assert.equal(missingIds({ id: 'undo' }, has, { properties: { id: { type: 'string' } } }), '');
+  assert.equal(missingIds({ id: 'mine', code: '' }, has, schema('brush.define')), '');
+  assert.match(missingIds({ id: 'o9' }, has), /"o9"/); // no schema known: checked as before
+});
