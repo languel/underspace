@@ -6,11 +6,11 @@
 // The model's own chat template writes the tools into the prompt; what comes back is the raw
 // text, tool calls and all, for engines.js to read (parseToolCalls).
 
-// Transformers.js comes from the CDN at a fixed version, when a model is first asked for (the
-// rest of the app loads nothing from outside). It is not vendored: GitHub's push protection
-// takes a string in its minified file for an API key and refuses the push (a false alarm; see
-// HANDOFF). Its wasm comes from the same CDN either way.
-import { AutoTokenizer, AutoModelForCausalLM, InterruptableStoppingCriteria } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2/dist/transformers.min.js';
+// Transformers.js and the ONNX runtime's wasm are vendored (vendor/transformers), so only the
+// model's weights come from outside, once; after that the brain works offline.
+import { AutoTokenizer, AutoModelForCausalLM, InterruptableStoppingCriteria, env } from '../../vendor/transformers/transformers.min.js';
+
+env.backends.onnx.wasm.wasmPaths = new URL('../../vendor/transformers/', import.meta.url).href;
 
 let tokenizer = null, model = null, loaded = '';
 const stopper = new InterruptableStoppingCriteria();

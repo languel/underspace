@@ -1348,15 +1348,13 @@ Also asked for:
   (a picture is named, not sent), the mark staying lit while a question
   waits, per-agent undo.
 - **Controls, step 4 done: a brain in the browser (`app/src/brain.worker.js`,
-  `browserEngine` in `engines.js`).** Transformers.js 4.3.2 is loaded
-  from jsdelivr at a fixed version when a model is first asked for (its
-  wasm comes from there too). It was vendored at first
-  (`dist/transformers.min.js`, 0.6 MB, self-contained), but GitHub's push
-  protection reads a string on line 40 of that file as a Mistral API key
-  and refuses the push. It is a false alarm (model class names), but
-  allowing it is the owner's call: to vendor it for offline use, add the
-  file under `vendor/transformers/`, allow it at the URL GitHub prints, and
-  change the import in the worker.
+  `browserEngine` in `engines.js`).** Transformers.js 4.3.2 and the
+  ONNX runtime's wasm (27 MB) are vendored in `vendor/transformers/`, and
+  the worker points `wasmPaths` there, so only the weights come from
+  outside. GitHub's push protection reads a string on line 40 of
+  `transformers.min.js` as a Mistral API key (it is model class names);
+  the owner allowed it on 15 Nov 2026. A new version of the file may need
+  allowing again.
   A module worker loads `onnx-community/LFM3-1.7B-ONNX` at `q4f16` (1.1 GB,
   from Hugging Face) on WebGPU, applies the model's own chat template with
   the tools, generates greedily, and returns the raw text; `parseToolCalls`
