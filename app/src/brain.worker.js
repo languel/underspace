@@ -1,14 +1,14 @@
 // The brain in this browser: a language model run by Transformers.js on WebGPU, in a worker so
 // the drawing never waits for it. The page talks to it by messages (engines.js, browserEngine):
 //   { type: 'load', model, dtype }                 -> 'progress' { text, done } ..., then 'ready' | 'error'
-//   { type: 'complete', id, messages, tools, max } -> 'reply' { id, text } | 'error' { id, text }
+//   { type: 'complete', id, messages, tools, max } -> 'token' { id, text (so far) } ..., then 'reply' { id, text } | 'error' { id, text }
 //   { type: 'stop' }                               the reply being written ends where it is
 // The model's own chat template writes the tools into the prompt; what comes back is the raw
 // text, tool calls and all, for engines.js to read (parseToolCalls).
 
 // Transformers.js and the ONNX runtime's wasm are vendored (vendor/transformers), so only the
 // model's weights come from outside, once; after that the brain works offline.
-import { AutoTokenizer, AutoModelForCausalLM, InterruptableStoppingCriteria, env } from '../../vendor/transformers/transformers.min.js';
+import { AutoTokenizer, AutoModelForCausalLM, InterruptableStoppingCriteria, TextStreamer, env } from '../../vendor/transformers/transformers.min.js';
 
 env.backends.onnx.wasm.wasmPaths = new URL('../../vendor/transformers/', import.meta.url).href;
 
@@ -37,7 +37,9 @@ async function complete({ id, messages, tools, max = 1024 }) {
   stopper.reset();
   const inputs = tokenizer.apply_chat_template(forTemplate(messages), { tools, add_generation_prompt: true, return_dict: true, enable_thinking: false });
   const n = inputs.input_ids.dims[1];
-  const out = await model.generate({ ...inputs, max_new_tokens: max, do_sample: false, repetition_penalty: 1.1, stopping_criteria: stopper });
+  let soFar = '';
+  const streamer = new TextStreamer(tokenizer, { skip_prompt: true, skip_special_tokens: false, callback_function: (t) => { soFar += t; postMessage({ type: 'token', id, text: soFar }); } });
+  const out = await model.generate({ ...inputs, max_new_tokens: max, do_sample: false, repetition_penalty: 1.1, stopping_criteria: stopper, streamer });
   const text = tokenizer.batch_decode(out.slice(null, [n, null]), { skip_special_tokens: false })[0];
   postMessage({ type: 'reply', id, text, tokens: n });
 }

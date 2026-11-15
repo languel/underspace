@@ -30,6 +30,7 @@ import { install as installAgent } from './agent.js';
 import { endpointEngine, browserEngine, listModels, seesPictures } from './engines.js';
 import { assistantPanel } from './panels/assistant.js';
 import { describe } from './catalog.js';
+import { cases as evalCases } from './evalcases.js';
 import { sketchKind } from './sketch.js';
 import { PRESETS } from './presets.js';
 import { BRUSHES } from './brushes.js';
@@ -2667,15 +2668,57 @@ define({ name: 'view.fit', doc: 'Show everything.', record: false, run: () => fi
 define({ name: 'view.zoom', doc: 'Zoom by a factor about the middle of the view.', args: { factor: T.num }, required: ['factor'], record: false, run: (a) => view.zoomAt(...centre(), a.factor) });
 define({ name: 'tool.set', doc: 'Choose the pointer tool.', args: { name: { enum: ['select', 'pan', 'draw', 'line', 'rect', 'ellipse', 'sculpt', 'note', 'code', 'target', 'score', 'event'] } }, required: ['name'], record: false, run: (a) => setTool(a.name) });
 define({ name: 'score.play', doc: 'Play a score on the transport, pass after pass. What is drawn or changed while it plays is heard from the next pass.', args: { id: T.id }, required: ['id'], record: false, run: (a) => { if (get(a.id)?.role !== 'score') return; if (scoreSet) scoreSet.add(a.id); if (!transport.playing) { lastBeat = transport.beat; transport.play(); } scoreTick(); } });
+// The same inside a render target: as the tool does there, the stroke runs on the screen (the
+// scene seen through the target's camera) and each moved point is lifted back onto the plane
+// that faces the camera through where it was.
+function sculptStroke3d(a, id, path, by) {
+  const sid = a.space, scr = (v) => view.sceneToScreen(sid, [v[0], v[1], v[2] ?? 0]);
+  const walk0 = path.map(scr);
+  if (walk0.some((q) => !q)) throw new Error('the target is not on screen (or the path is behind its camera): frame it first with view.frame');
+  const p0 = [path[0][0], path[0][1], path[0][2] ?? 0], r = a.radius > 0 ? a.radius : 0;
+  const reach = r ? Math.max(...[[r, 0, 0], [0, r, 0], [0, 0, r]].map((d) => { const q = scr([p0[0] + d[0], p0[1] + d[1], p0[2] + d[2]]); return q ? Math.hypot(q[0] - walk0[0][0], q[1] - walk0[0][1]) : 0; })) || settings.sculptRadius : settings.sculptRadius;
+  const strength = Number.isFinite(a.strength) ? Math.max(0, Math.min(1, a.strength)) : settings.sculptStrength, vals = { ...settings.sculptParams[id], ...a.params };
+  const marks = [];
+  for (const o of state.objects.values()) {
+    if (o.space !== sid || o.locked || o.bind || (a.ids?.length && !a.ids.includes(o.id))) continue;
+    if (o.kind !== 'mesh' && !(o.kind === 'line' && o.points?.length > 1)) continue;
+    const pts = ptsOf(o).map((v, i) => { const q = scr(v); return q && [q[0], q[1], o.pen?.[i]?.[0] ?? 0, o.pen?.[i]?.[1] ?? 0.5, v[0], v[1], v[2] ?? 0]; });
+    if (pts.some((q) => !q)) continue;
+    let mean = null;
+    if (o.kind === 'mesh') { const nb = pts.map(() => []); for (const e of edgesOf(o.faces)) { nb[e.a].push(e.b); nb[e.b].push(e.a); } mean = (list, i) => (nb[i].length < 2 ? null : [nb[i].reduce((t, j) => t + list[j][0], 0) / nb[i].length, nb[i].reduce((t, j) => t + list[j][1], 0) / nb[i].length]); }
+    marks.push({ o, pts, orig: pts, state: {}, changed: false, mean });
+  }
+  const walk = [walk0[0]];
+  for (let i = 1; i < walk0.length; i++) { const p = walk0[i - 1], q = walk0[i], n = Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / (reach / 4))); for (let k = 1; k <= n; k++) walk.push([p[0] + (q[0] - p[0]) * k / n, p[1] + (q[1] - p[1]) * k / n]); }
+  if (walk.length === 1) walk.push(walk0[0]);
+  const lift = (q) => { const l = view.sceneToLocal(sid, q[0], q[1], 'view', [q[4], q[5], q[6]]); return l ? [q[0], q[1], q[2], q[3], l[0], l[1], l[2]] : q; };
+  for (let i = 1; i < walk.length; i++) {
+    const p = walk[i - 1], q = walk[i], stroke = { x: q[0], y: q[1], dx: q[0] - p[0], dy: q[1] - p[1], radius: reach, strength, pressure: 1, invert: !!a.invert, boost: false, first: i === 1, start: walk[0] };
+    for (const mk of marks) {
+      const mesh = mk.o.kind === 'mesh';
+      if (mesh && !MESH_SCULPTS.has(id)) continue;
+      const out = sculptMark(id, { points: mk.pts, closed: !!mk.o.closed, path: mesh ? 'straight' : mk.o.style?.path, mean: mk.mean }, stroke, mesh ? { ...vals, detail: 0 } : vals, Math.random, mk);
+      if (out && out.every((x) => x.length >= 7) && !(mesh && out.length !== mk.pts.length)) { mk.pts = out.map(lift); mk.changed = true; }
+    }
+  }
+  const changed = marks.filter((mk) => mk.changed);
+  batch(() => { for (const mk of changed) {
+    const at = mk.pts.map((q) => [round(q[4]), round(q[5]), round(q[6])]);
+    if (mk.o.kind === 'mesh') call('mesh.set', { id: mk.o.id, verts: at }, by);
+    else call('line.set', { id: mk.o.id, points: at, ...(mk.o.pen ? { pen: mk.pts.map((q) => [Math.round(q[2] ?? 0), +(q[3] ?? 0.5).toFixed(3)]) } : {}) }, by);
+  } });
+  return changed.map((mk) => mk.o.id);
+}
 // A sculpt stroke as a command: what dragging the sculpt tool along a path does, for an agent
 // (or a score). The path is walked in steps a quarter of the radius long, as a hand would.
-define({ name: 'sculpt.stroke', record: false, doc: 'Sculpt lines as the sculpt tool does when dragged along a path. tool: ' + Object.keys(SCULPTS).join(', ') + ' (default: the tool in use). path: [[x, y], ...] in the units of the lines\' space (one point is a dab). ids: the lines (default: every line on the canvas). radius: the brush\'s reach in those units; strength 0..1; invert: the tool\'s opposite way (as Alt); params: the tool\'s own settings. Flat lines only (not inside a 3D target). Returns the ids of the lines it changed; one step of undo.',
-  args: { tool: T.str, path: { type: 'array' }, ids: T.ids, radius: T.num, strength: T.num, invert: { type: 'boolean' }, params: { type: 'object' } }, required: ['path'],
+define({ name: 'sculpt.stroke', record: false, doc: 'Sculpt lines as the sculpt tool does when dragged along a path. tool: ' + Object.keys(SCULPTS).join(', ') + ' (default: the tool in use). path: [[x, y], ...] in the units of the lines\' space (one point is a dab). ids: the lines (default: every line on the canvas). radius: the brush\'s reach in those units; strength 0..1; invert: the tool\'s opposite way (as Alt); params: the tool\'s own settings. With space: a render target\'s id, the path is [[x, y, z], ...] in its scene and the stroke works on its lines and meshes as seen from its camera (the target must be on screen). Returns the ids of the lines it changed; one step of undo.',
+  args: { tool: T.str, path: { type: 'array' }, ids: T.ids, space: T.str, radius: T.num, strength: T.num, invert: { type: 'boolean' }, params: { type: 'object' } }, required: ['path'],
   run(a, by) {
     const id = a.tool ?? settings.sculpt;
     if (!SCULPTS[id]) throw new Error(`no sculpt tool: ${id}`);
     const path = (a.path ?? []).filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]));
     if (!path.length) throw new Error('path needs at least one [x, y]');
+    if (a.space && get(a.space)?.role === 'target') return sculptStroke3d(a, id, path, by);
     const lines = (a.ids?.length ? a.ids.map(get) : [...state.objects.values()].filter((o) => o.space === null)).filter((l) => l && isLine(l) && !l.bind && !l.locked && !(get(l.space)?.role === 'target'));
     const radius = a.radius > 0 ? a.radius : settings.sculptRadius * view.unitsPerPx(), strength = Number.isFinite(a.strength) ? Math.max(0, Math.min(1, a.strength)) : settings.sculptStrength;
     const marks = lines.map((l) => { const pts = element(ptsOf(l), l.pen).points; return { o: l, pts, orig: pts, state: {}, changed: false }; });
@@ -2690,6 +2733,24 @@ define({ name: 'sculpt.stroke', record: false, doc: 'Sculpt lines as the sculpt 
     const changed = marks.filter((mk) => mk.changed);
     batch(() => { for (const mk of changed) call('line.set', { id: mk.o.id, points: mk.pts.map((q) => [round(q[0] / UNIT), round(-q[1] / UNIT)]), pen: mk.pts.map((q) => [Math.round(q[2] ?? 0), +(q[3] ?? 0.5).toFixed(3)]) }, by); });
     return changed.map((mk) => mk.o.id);
+  } });
+// The evaluation in the page (evalcases.js), against the brain the Assistant is set to. The drawing
+// is put aside and brought back after, since every case starts from an empty canvas.
+define({ name: 'eval.run', record: false, doc: 'Run the evaluation requests against the Assistant\'s current brain (set it with setting.set assistEngine "endpoint" or "browser"): each is asked on an empty canvas and what it drew is checked. only: one case by name. Returns each case with pass, seconds, the commands called and, when it failed, what was wrong. The drawing is put aside and restored after. Takes a minute or more.', args: { only: T.str },
+  async run(a) {
+    const kept = JSON.stringify(take), out = [];
+    try {
+      for (const c of evalCases({ state, call }).filter((x) => !a.only || x.name === a.only)) {
+        call('space.clear'); agent.forget(); c.setup?.();
+        const called = [], off = agent.on((e) => { if (e.type === 'call') called.push(e.name); }), t0 = performance.now();
+        let say = '', err = '';
+        try { say = await agent.run(c.ask, await engine(), { context: moment() }); } catch (e) { err = e.message; }
+        off();
+        const verdict = err ? `error: ${err}` : c.check(say ?? '');
+        out.push({ name: c.name, pass: verdict === true, seconds: Math.round((performance.now() - t0) / 100) / 10, called, ...(verdict === true ? {} : { wrong: verdict }) });
+      }
+    } finally { loadTake(JSON.parse(kept)); agent.forget(); }
+    return { passed: out.filter((x) => x.pass).length, of: out.length, engine: settings.assistEngine, cases: out };
   } });
 define({ name: 'play.state', doc: 'What is sounding, read instead of heard. playing, the beat it is at, the tempo; scores: each score with whether it plays, its pass length in seconds and its voices (one a line: the line\'s id, and its pitch over time as [seconds, midi] samples, up to `samples` a voice, default 8); notes: the last discrete notes played by travelers, events and clips (beat, midi, vel, ch).', args: { samples: T.num }, record: false,
   run(a) {

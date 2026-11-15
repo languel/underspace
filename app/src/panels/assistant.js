@@ -15,15 +15,17 @@ export function assistantPanel(el, app) {
   el.append(log, input, bar);
 
   const line = (cls, text, title) => { const d = h('div', 'chat-' + cls, text); if (title) d.title = title; log.append(d); log.scrollTop = log.scrollHeight; return d; };
-  let lastCall = null;
+  let lastCall = null, live = null; // live: the line being written as the words come
   app.agent().on((e) => {
     if (e.type === 'begin') { line('me', e.text); el.classList.add('busy'); }
-    else if (e.type === 'say' && e.text) line('say', e.text);
+    else if (e.type === 'stream') { if (!live) live = line('say', ''); live.textContent = e.text; log.scrollTop = log.scrollHeight; }
+    else if (e.type === 'say') { if (live) { if (e.text) live.textContent = e.text; else live.remove(); live = null; } else if (e.text) line('say', e.text); }
+    else if (e.type === 'call' && live) { if (!live.textContent.trim()) live.remove(); live = null; lastCall = line('call', e.name, JSON.stringify(e.args).slice(0, 600)); }
     else if (e.type === 'call') lastCall = line('call', e.name, JSON.stringify(e.args).slice(0, 600));
     else if (e.type === 'result' && lastCall) { lastCall.dataset.ok = e.ok ? '1' : '0'; lastCall.title += '\n→ ' + e.text.slice(0, 600); }
     else if (e.type === 'error') line('err', e.text);
     else if (e.type === 'progress') { let p = log.querySelector('.chat-progress'); if (!p) p = line('progress', ''); p.textContent = e.text; if (e.done) p.remove(); }
-    else if (e.type === 'end') el.classList.remove('busy');
+    else if (e.type === 'end') { el.classList.remove('busy'); live = null; }
   });
 
   async function send() {

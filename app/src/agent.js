@@ -40,10 +40,15 @@ export function missingIds(args, has) {
 
 const mcp = (n) => n.replaceAll('.', '_');
 // The tools for a model, in the OpenAI shape, and the way back from its names to ours.
-export function toolset(all, core = CORE) {
+// defers: for a model whose chat template knows deferred tools (LFM3): every other command is given
+// too, marked defer_loading, so it stays out of the prompt until tools_search names it; then the
+// model calls it by its own name, and `call` is not needed.
+export function toolset(all, core = CORE, defers = false) {
+  const fn = (t, extra = {}) => ({ type: 'function', ...extra, function: { name: mcp(t.name), description: (t.description ?? '').slice(0, 500), parameters: t.inputSchema ?? { type: 'object', properties: {} } } });
   const pick = core.map((n) => all.find((t) => t.name === n)).filter(Boolean);
-  const defs = pick.map((t) => ({ type: 'function', function: { name: mcp(t.name), description: (t.description ?? '').slice(0, 500), parameters: t.inputSchema ?? { type: 'object', properties: {} } } }));
-  defs.push({ type: 'function', function: { name: 'call', description: 'Run any command by its name (from tools_search), with its arguments.', parameters: { type: 'object', properties: { name: { type: 'string' }, args: { type: 'object' } }, required: ['name'] } } });
+  const defs = pick.map((t) => fn(t));
+  if (defers) for (const t of all) { if (!core.includes(t.name)) defs.push(fn(t, { defer_loading: true })); }
+  else defs.push({ type: 'function', function: { name: 'call', description: 'Run any command by its name (from tools_search), with its arguments.', parameters: { type: 'object', properties: { name: { type: 'string' }, args: { type: 'object' } }, required: ['name'] } } });
   const names = new Map(all.map((t) => [mcp(t.name), t.name]));
   return { defs, resolve: (n, a) => (n === 'call' ? { name: a?.name, args: a?.args ?? {} } : { name: names.get(n) ?? n, args: a ?? {} }) };
 }
@@ -58,16 +63,17 @@ const parse = (v) => { if (v && typeof v === 'object') return v; try { return JS
 
 // One turn: the person's words in, tool calls until the model answers in words.
 // port: { call(name, args, by) (may be async), tools(), held() }; on(event): what happens, for the panel
-//   { type: 'call', name, args } | { type: 'result', name, text, ok } | { type: 'say', text } | { type: 'error', text }
+//   { type: 'call', name, args } | { type: 'result', name, text, ok } | { type: 'stream', text (so far) } | { type: 'say', text } | { type: 'error', text }
 export async function runTurn({ text, history = [], engine, port, by = 'assistant', context = '', signal, on = () => {}, rounds = 16 }) {
-  const { defs, resolve } = toolset(port.tools(), engine.sees ? [...CORE, 'view.look'] : CORE);
-  const messages = [{ role: 'system', content: SYSTEM + (context ? '\n\nNow:\n' + context : '') }, ...history, { role: 'user', content: text }];
+  const { defs, resolve } = toolset(port.tools(), engine.sees ? [...CORE, 'view.look'] : CORE, !!engine.defers);
+  const system = engine.defers ? SYSTEM.replace('Every other command is found with tools_search {query} and run with call {name, args}.', 'Every other command is found with tools_search {query}; the tools it finds can then be called by their own names.').replace('call {name: "action.list", args: {query}}', 'tools_search') : SYSTEM;
+  const messages = [{ role: 'system', content: system + (context ? '\n\nNow:\n' + context : '') }, ...history, { role: 'user', content: text }];
   let used = false, nudged = false;
   const pictures = [];
   const seen = new Map();
   for (let round = 0; round < rounds; round++) {
     if (signal?.aborted) throw new Error('stopped');
-    const reply = await engine.complete({ messages, tools: defs, signal });
+    const reply = await engine.complete({ messages, tools: defs, signal, onText: (t) => on({ type: 'stream', text: t }) });
     const calls = reply.tool_calls ?? [];
     messages.push({ role: 'assistant', content: reply.content ?? '', ...(calls.length ? { tool_calls: calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: typeof c.arguments === 'string' ? c.arguments : JSON.stringify(c.arguments ?? {}) } })) } : {}) });
     if (!calls.length) {
@@ -87,15 +93,17 @@ export async function runTurn({ text, history = [], engine, port, by = 'assistan
       const key = name + JSON.stringify(args), times = (seen.get(key) ?? 0) + 1; seen.set(key, times);
       if (times === 2) { out = 'Not run: you already made this exact call in this turn and it worked. Do not repeat it. If the task is done, answer in one short sentence with no tool call.'; on({ type: 'result', name, text: out, ok: false }); messages.push({ role: 'tool', tool_call_id: c.id, content: out }); continue; }
       if (times > 2) { on({ type: 'say', text: '…' }); return { say: '', messages: messages.slice(1) }; }
-      let picture = null;
+      let picture = null, raw;
       try {
         if (signal?.aborted || port.held()) throw new Error('stopped by the person');
         const miss = port.has ? missingIds(args, port.has) : ''; if (miss) throw new Error(miss);
-        const r = await port.call(name, args, by);
+        const r = await port.call(name, args, by); raw = r;
         if (engine.sees && typeof r?.image === 'string') { picture = r.image; out = JSON.stringify({ ...r, image: '(the picture follows)' }); } else out = 'OK. Result: ' + asText(r);
       } catch (e) { ok = false; out = 'Error: ' + (e?.message ?? e); }
       on({ type: 'result', name, text: out, ok });
-      messages.push({ role: 'tool', tool_call_id: c.id, content: out });
+      // a model with deferred tools is handed what a search found as references: its template then shows it those tools
+      const found = engine.defers && ok && name === 'tools.search' && Array.isArray(raw) ? raw.map((t) => mcp(t.name)) : null;
+      messages.push({ role: 'tool', tool_call_id: c.id, content: found ? [{ type: 'text', text: `Found ${found.length} tools: ${found.join(', ')}.` }, ...found.map((n) => ({ type: 'tool_reference', name: n }))] : out });
       if (picture) pictures.push(picture);
     }
     // a model that can see is shown the pictures its calls returned (a tool result cannot carry one, so they come as the person's)
