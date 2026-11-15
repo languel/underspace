@@ -26,15 +26,16 @@ export function score(query, text) {
   return s - text.length * 0.01;
 }
 
-// Commands found by words: every word must be in the name or the doc; the name counts more.
+// Commands found by words: those with the most of the words in their name or doc come first
+// (the name counts more); a command with none of them is left out.
 export function searchTools(tools, query, limit = 8) {
   const words = String(query ?? '').toLowerCase().split(/[^a-z0-9.]+/).filter(Boolean);
   if (!words.length) return tools.slice(0, limit);
   return tools.map((t) => {
     const name = t.name.toLowerCase(), doc = (t.description ?? '').toLowerCase();
-    let s = 0;
-    for (const w of words) { if (name.includes(w)) s += 3; else if (doc.includes(w)) s += 1; else return null; }
-    return { t, s: s - name.length * 0.001 };
+    let s = 0, hits = 0;
+    for (const w of words) { if (name.includes(w)) { s += 3; hits++; } else if (doc.includes(w)) { s += 1; hits++; } }
+    return hits ? { t, s: s + hits * 4 - name.length * 0.001 } : null;
   }).filter(Boolean).sort((a, b) => b.s - a.s).slice(0, limit).map((r) => r.t);
 }
 
@@ -101,7 +102,7 @@ export function install(h) {
   const { define, T } = h, ui = { record: false };
   const action = (id) => h.actions.find((a) => a.id === id);
 
-  define({ ...ui, name: 'tools.search', doc: 'Find commands by what they do: words that must be in a command\'s name or description. Returns each with its arguments. Use it before guessing a name.', args: { query: T.str, limit: T.num }, run: (a) => searchTools(h.tools(), a.query, a.limit > 0 ? a.limit : 8).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
+  define({ ...ui, name: 'tools.search', doc: 'Find commands by what they do: words from a command\'s name or description (the more of them match, the higher it comes). Returns each with its arguments. Use it before guessing a name.', args: { query: T.str, limit: T.num }, run: (a) => searchTools(h.tools(), a.query, a.limit > 0 ? a.limit : 8).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
 
   define({ ...ui, name: 'action.list', doc: 'Every action a key, a menu or a toolbar can do, with its id, title and key; available: whether it applies to what is selected or under the pointer now. query: words to find.', args: { query: T.str, available: { type: 'boolean' } },
     run(a) {
@@ -131,21 +132,28 @@ export function install(h) {
   define({ ...ui, name: 'view.set', doc: 'Move the canvas view: its middle (cx, cy) and zoom.', args: { cx: T.num, cy: T.num, zoom: T.num },
     run(a) { const c = h.view.cam; if (Number.isFinite(a.cx)) c.cx = a.cx; if (Number.isFinite(a.cy)) c.cy = a.cy; if (a.zoom > 0) c.zoom = Math.min(200, Math.max(0.02, a.zoom)); return where(); } });
   define({ ...ui, name: 'view.frame', doc: 'Show these objects filling the view; with no ids, everything.', args: { ids: T.ids }, run(a) { if (a.ids?.length) h.frameIds(a.ids, a.ids.length === 1 ? 0.82 : 0.6); else h.fit(); return where(); } });
-  define({ ...ui, name: 'view.look', doc: 'A picture of the view as it is now (PNG): the ink and the 3D scenes, with the frames of code and text objects outlined and titled. width: its width in pixels (default 900).', args: { width: T.num },
+  define({ ...ui, name: 'view.look', doc: 'A picture of the view as it is now (PNG): the ink, brushed strokes and 3D scenes, with code objects and frames outlined and titled, and the text of a note written in it. (Code is read with space.read, not from the picture.) width: its width in pixels (default 900).', args: { width: T.num },
     run(a) {
       const src = h.view.grab(), box = h.stage.getBoundingClientRect(), k = Math.min(2, Math.max(0.1, (a.width > 0 ? a.width : 900) / box.width));
       const c = document.createElement('canvas'), g = c.getContext('2d'), css = getComputedStyle(document.documentElement), v = (n) => css.getPropertyValue(n).trim();
       c.width = Math.round(box.width * k); c.height = Math.round(box.height * k);
       g.fillStyle = v('--bg') || '#111'; g.fillRect(0, 0, c.width, c.height);
+      for (const under of h.stage.querySelectorAll(':scope > canvas')) if (under !== src && under.width) g.drawImage(under, 0, 0, c.width, c.height); // the brushed ink is its own canvas, under the lines
       g.drawImage(src, 0, 0, c.width, c.height);
-      g.font = `${Math.max(9, 11 * k)}px ui-monospace, monospace`; g.textBaseline = 'top'; g.lineWidth = 1;
+      const size = Math.max(9, 11 * k), lh = size * 1.25;
+      g.font = `${size}px ui-monospace, monospace`; g.textBaseline = 'top'; g.lineWidth = 1;
       for (const el of h.stage.querySelectorAll('.face')) { // faces are DOM: drawn here as what they are, a frame and its words
         const r = el.getBoundingClientRect();
         if (!r.width || r.right < box.left || r.left > box.right || r.bottom < box.top || r.top > box.bottom) continue;
-        const x = (r.left - box.left) * k, y = (r.top - box.top) * k;
-        if (!el.classList.contains('kind-line')) { g.strokeStyle = el.classList.contains('sel') ? v('--accent') : v('--line'); g.strokeRect(x + 0.5, y + 0.5, r.width * k, r.height * k); }
-        const words = (el.head?.textContent || el.note?.textContent || '').trim().slice(0, 40);
-        if (words) { g.fillStyle = v('--muted') || '#999'; g.fillText(words, x + 4, y + 3); }
+        const x = (r.left - box.left) * k, y = (r.top - box.top) * k, w = r.width * k, ht = r.height * k;
+        if (!el.classList.contains('kind-line')) { g.strokeStyle = el.classList.contains('sel') ? v('--accent') : v('--line'); g.strokeRect(x + 0.5, y + 0.5, w, ht); }
+        // its title, then what is written in it (a note's text, a code object's code), as many lines as fit
+        const title = (el.head?.textContent || '').trim().slice(0, 40), per = Math.max(8, Math.floor((w - 8) / (size * 0.6)));
+        const wrap = (t) => { const out = []; for (const para of t.split('\n')) { let line = ''; for (const word of para.split(/\s+/)) { if ((line + ' ' + word).trim().length > per && line) { out.push(line); line = word; } else line = (line + ' ' + word).trim(); } out.push(line); } return out; };
+        const lines = [title, ...wrap((el.note?.innerText || '').trim())].filter((t) => t.trim());
+        g.save(); g.beginPath(); g.rect(x, y, w, ht); g.clip();
+        lines.slice(0, Math.max(1, Math.floor((ht - 4) / lh))).forEach((t, i) => { g.fillStyle = i === 0 && title ? v('--muted') || '#999' : v('--ink') || '#ddd'; g.fillText(t.slice(0, 120), x + 4, y + 3 + i * lh); });
+        g.restore();
       }
       return { image: c.toDataURL('image/png'), width: c.width, height: c.height, view: where() };
     } });

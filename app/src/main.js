@@ -428,11 +428,13 @@ function musicHooks() {
   const m = state.music;
   return { pointsOf: shownPath, paramsOf, note: playNote, hold: holdNote, tool: driveTool, cc: (n, v, ch = 1) => midiOut.send([0xb0 | ((ch - 1) & 15), n & 127, Math.max(0, Math.min(127, Math.round(v)))]), spb: secPerBeat(m), grid: gridCell(), gridAt: (space, p) => gridHere(space, p), pitch: (v) => pitchOf(v, m), step: (n, k) => stepOf(n, k, m.scale, m.root), snap: (n) => snapOf(n, m.scale, m.root) };
 }
+const heard = []; // the last notes played, for play.state: an agent cannot listen, but it can read
 // The instrument a channel plays (the timeline's choice, else the default).
 const instrumentOf = (ch = 1) => state.music.channels?.[ch] ?? DEFAULT_CHANNELS[ch] ?? 'triangle';
 function playNote(midi, vel = 100, seconds = 0.3, ch = 1) {
   if (!Number.isFinite(midi)) return;
   sound.note(midi, vel, seconds, instrumentOf(ch)); midiOut.note(midi, vel, seconds, ch);
+  heard.push({ beat: round(transport.beat), midi: round(midi), vel, ch }); if (heard.length > 64) heard.shift();
   if (transport.recording && transport.playing) recNotes.push({ beat: transport.beat, midi, vel, len: seconds / transport.spb, ch });
 }
 // A note held until it is let go (an event's gate): heard, sent, and recorded with its length.
@@ -2665,6 +2667,36 @@ define({ name: 'view.fit', doc: 'Show everything.', record: false, run: () => fi
 define({ name: 'view.zoom', doc: 'Zoom by a factor about the middle of the view.', args: { factor: T.num }, required: ['factor'], record: false, run: (a) => view.zoomAt(...centre(), a.factor) });
 define({ name: 'tool.set', doc: 'Choose the pointer tool.', args: { name: { enum: ['select', 'pan', 'draw', 'line', 'rect', 'ellipse', 'sculpt', 'note', 'code', 'target', 'score', 'event'] } }, required: ['name'], record: false, run: (a) => setTool(a.name) });
 define({ name: 'score.play', doc: 'Play a score on the transport, pass after pass. What is drawn or changed while it plays is heard from the next pass.', args: { id: T.id }, required: ['id'], record: false, run: (a) => { if (get(a.id)?.role !== 'score') return; if (scoreSet) scoreSet.add(a.id); if (!transport.playing) { lastBeat = transport.beat; transport.play(); } scoreTick(); } });
+// A sculpt stroke as a command: what dragging the sculpt tool along a path does, for an agent
+// (or a score). The path is walked in steps a quarter of the radius long, as a hand would.
+define({ name: 'sculpt.stroke', record: false, doc: 'Sculpt lines as the sculpt tool does when dragged along a path. tool: ' + Object.keys(SCULPTS).join(', ') + ' (default: the tool in use). path: [[x, y], ...] in the units of the lines\' space (one point is a dab). ids: the lines (default: every line on the canvas). radius: the brush\'s reach in those units; strength 0..1; invert: the tool\'s opposite way (as Alt); params: the tool\'s own settings. Flat lines only (not inside a 3D target). Returns the ids of the lines it changed; one step of undo.',
+  args: { tool: T.str, path: { type: 'array' }, ids: T.ids, radius: T.num, strength: T.num, invert: { type: 'boolean' }, params: { type: 'object' } }, required: ['path'],
+  run(a, by) {
+    const id = a.tool ?? settings.sculpt;
+    if (!SCULPTS[id]) throw new Error(`no sculpt tool: ${id}`);
+    const path = (a.path ?? []).filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]));
+    if (!path.length) throw new Error('path needs at least one [x, y]');
+    const lines = (a.ids?.length ? a.ids.map(get) : [...state.objects.values()].filter((o) => o.space === null)).filter((l) => l && isLine(l) && !l.bind && !l.locked && !(get(l.space)?.role === 'target'));
+    const radius = a.radius > 0 ? a.radius : settings.sculptRadius * view.unitsPerPx(), strength = Number.isFinite(a.strength) ? Math.max(0, Math.min(1, a.strength)) : settings.sculptStrength;
+    const marks = lines.map((l) => { const pts = element(ptsOf(l), l.pen).points; return { o: l, pts, orig: pts, state: {}, changed: false }; });
+    const walk = [path[0]];
+    for (let i = 1; i < path.length; i++) { const p = path[i - 1], q = path[i], n = Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / (radius / 4))); for (let k = 1; k <= n; k++) walk.push([p[0] + (q[0] - p[0]) * k / n, p[1] + (q[1] - p[1]) * k / n]); }
+    if (walk.length === 1) walk.push(path[0]);
+    for (let i = 1; i < walk.length; i++) {
+      const p = walk[i - 1], q = walk[i];
+      const stroke = { x: q[0] * UNIT, y: -q[1] * UNIT, dx: (q[0] - p[0]) * UNIT, dy: -(q[1] - p[1]) * UNIT, radius: radius * UNIT, strength, pressure: 1, invert: !!a.invert, boost: false, first: i === 1, start: [path[0][0] * UNIT, -path[0][1] * UNIT] };
+      for (const mk of marks) { const out = sculptMark(id, { points: mk.pts, closed: !!mk.o.closed, path: mk.o.style?.path }, stroke, { ...settings.sculptParams[id], ...a.params }, Math.random, mk); if (out) { mk.pts = out; mk.changed = true; } }
+    }
+    const changed = marks.filter((mk) => mk.changed);
+    batch(() => { for (const mk of changed) call('line.set', { id: mk.o.id, points: mk.pts.map((q) => [round(q[0] / UNIT), round(-q[1] / UNIT)]), pen: mk.pts.map((q) => [Math.round(q[2] ?? 0), +(q[3] ?? 0.5).toFixed(3)]) }, by); });
+    return changed.map((mk) => mk.o.id);
+  } });
+define({ name: 'play.state', doc: 'What is sounding, read instead of heard. playing, the beat it is at, the tempo; scores: each score with whether it plays, its pass length in seconds and its voices (one a line: the line\'s id, and its pitch over time as [seconds, midi] samples, up to `samples` a voice, default 8); notes: the last discrete notes played by travelers, events and clips (beat, midi, vel, ch).', args: { samples: T.num }, record: false,
+  run(a) {
+    const n = a.samples > 0 ? Math.min(64, Math.round(a.samples)) : 8;
+    const voices = (o) => (scoreOf(o.id)?.voices ?? []).map((v) => { const e = v.events, step = Math.max(1, Math.ceil(e.length / n)); return { line: v.id, from: round(e[0]?.time ?? 0), to: round(e.at(-1)?.time ?? 0), pitch: e.filter((_, i) => i % step === 0 || i === e.length - 1).map((x) => [round(x.time), Math.round(x.midi * 100) / 100]) }; });
+    return { playing: transport.playing, beat: round(transport.beat), bpm: state.music.bpm, scores: scores().map((o) => ({ id: o.id, playing: transport.playing && scorePlaying(o), seconds: round(scoreOf(o.id)?.duration ?? 0), voices: voices(o) })), notes: heard.slice(-16) };
+  } });
 define({ name: 'play.toggle', doc: 'Start or stop playing: scores loop and travelers set off along their lines.', record: false, run: () => togglePlay() });
 define({ name: 'score.stop', doc: 'Stop one score (the others play on), or pause everything when no id is given.', args: { id: T.id }, record: false, run: (a) => { if (!a.id) { if (transport.playing) togglePlay(); return; } scoreSet = new Set(scores().filter((o) => o.id !== a.id && scorePlaying(o)).map((o) => o.id)); sound.silence(a.id); scorePlan.delete(a.id); } });
 define({ name: 'assistant.ask', doc: 'Ask the built-in assistant to build something from a sentence.', args: { text: T.str }, required: ['text'], record: false, run: (a) => ask(a.text) });
