@@ -5,6 +5,8 @@ import { state, call, batch, define, undo, redo, take, onChange, onCall, loadTak
 
 import './patch.js';
 import './quantize.js';
+import { publishedOf, paramsOf as publishable } from './publish.js';
+import { faceOf, levelsOf } from './levels.js';
 import { createAskHere, hereText } from './askhere.js';
 import { startWebMCP } from './webmcp.js';
 import { stepsOnScreen, TARGET_PRESETS, pressureRuns } from './object.js';
@@ -77,7 +79,8 @@ const gridCell = () => state.grid.cell; // the global grid's cell, in canvas uni
 
 const onParam = (id, name, value) => call('object.set', { id, name, value });
 const onCode = (id, code) => { step.restart(id); call('object.code', { id, code }); };
-const faces = createFaces($('faces'), { onParam, onCode });
+const onPublish = (id, name, on) => call('object.publish', { id, name, on });
+const faces = createFaces($('faces'), { onParam, onCode, onPublish });
 const step = createRunner();
 const ink = createInk($('ink'));
 const playEngine = createPlay();
@@ -100,7 +103,6 @@ const ROOT = { k: 1, ox: 0, oy: 0 };
 const FOV = 40 * Math.PI / 180; // a target's camera's field of view (view.js uses the same)
 const at = (xf, p) => [xf.ox + p[0] * xf.k, xf.oy + p[1] * xf.k];
 const back = (xf, p) => [(p[0] - xf.ox) / xf.k, (p[1] - xf.oy) / xf.k];
-const FAR = 48; // below this many pixels an object shows its far face
 
 let vis = new Map();  // id -> { o, face, px, xf, blanket }
 let spaces = [];      // open spaces, outermost first: { id, kind, xf, px, plane }
@@ -171,10 +173,11 @@ function walk(space, xf) {
       if (o.brush) inkItems.push(inkItem(o, element(edge.slice(0, -1), null, { closed: true, role: 'plane', color: st.fill ?? st.stroke ?? inkColor }), xf, { ...st, path: o.shape === 'rect' ? 'straight' : null }));
       lines.push({ id: o.id, pts: edge.map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'ink', width: o.brush ? (sel ? 1 : 0) : st.width ?? 2.2, opacity: o.brush ? 1 : st.opacity, fill: o.brush ? null : st.fill });
     }
-    const face = Math.max(px.w, px.h) < FAR ? 'far' : (px.w > view.size.w * 0.42 || px.h > view.size.h * 0.5) ? 'near' : 'mid';
-    // a group that holds an out part is an instrument: its face shows the out's glyph and publishes its channel and gain
-    const inner = o.kind === 'group' ? outOfGroup(o.id) : null;
-    vis.set(o.id, { o, face, px, xf, blanket, ...(inner ? { inst: { o: inner, blanket: blanketOf(inner) } } : {}) });
+    const face = faceOf(o, px, view.size); // glyph, interface or inside: by its size on screen, and its own levels (levels.js)
+    // a group that holds an out part is an instrument: its face shows the out's glyph and channel.
+    // pub: the parameters published to a group from inside; up: it is itself in a group (publish.js)
+    const inner = o.kind === 'group' ? outOfGroup(o.id) : null, pub = o.kind === 'group' ? pubOfGroup(o.id) : null;
+    vis.set(o.id, { o, face, px, xf, blanket, ...(inner ? { inst: { o: inner, blanket: blanketOf(inner) } } : {}), ...(pub?.length ? { pub } : {}), up: get(space)?.kind === 'group' });
     if (o.role === 'grid') {
       // a grid frame: its outline, and its cells (sub-points as dots would be too many)
       const g = paramsOf(o), cell = Math.max(0.01, g.cell ?? 1), x0 = r.cx - r.w / 2, y0 = r.cy - r.h / 2, nx = Math.floor(r.w / cell + 1e-6), ny = Math.floor(r.h / cell + 1e-6);
@@ -445,7 +448,9 @@ const instrumentOf = (ch = 1) => claimOf(state.objects, ch) ?? state.music.chann
 // Drawn synths (synth.js) play through the same voice() as the built-in instruments. The plan is read
 // from the drawing once and kept until something changes, so a note costs only its Web Audio nodes.
 const synthPlans = new Map(), groupOuts = new Map();
-onChange(() => { synthPlans.clear(); groupOuts.clear(); });
+const groupPubs = new Map();
+onChange(() => { synthPlans.clear(); groupOuts.clear(); groupPubs.clear(); });
+function pubOfGroup(gid) { if (!groupPubs.has(gid)) groupPubs.set(gid, publishedOf(state.objects, gid)); return groupPubs.get(gid); }
 function outOfGroup(gid) { if (!groupOuts.has(gid)) groupOuts.set(gid, outInside(state.objects, gid)); const id = groupOuts.get(gid); return id ? get(id) : null; }
 setCustomVoices((name) => {
   const id = instrumentId(state.objects, name);
@@ -1981,6 +1986,9 @@ function context(hitId) {
   return { sel, one: sel.length === 1 ? sel[0] : null, hit, p, here, target, lines: sel.filter(isLine), shapes: sel.filter((o) => o.kind === 'shape'), groups: sel.filter((o) => o.kind === 'group') };
 }
 const ids = (list) => list.map((o) => o.id);
+// The selected objects that are on screen with a blanket (so with levels: levels.js), and their near level scaled.
+const seen = (c) => c.sel.map((o) => vis.get(o.id)).filter((v) => v?.px && v.blanket && v.face !== 'joint' && v.face !== 'line');
+const nearBy = (c, k) => batch(() => seen(c).forEach((v) => call('object.levels', { ids: [v.o.id], near: Math.max(v.o.levels?.far ?? 0, levelsOf(v.o, v.px, view.size).near * k) })));
 const setRole = (list, role) => batch(() => { for (const o of list) { call('object.role', { id: o.id, role, ...(role === 'connector' ? { tol: round(40 * view.unitsPerPx()) } : {}) }); if (role === 'target' && o.kind === 'shape') takeInto(o.id); } });
 // A render target over marks takes them in: the lines of its space that lie wholly inside its frame.
 function takeInto(id) {
@@ -2121,6 +2129,18 @@ const ACTIONS = [
     when: (c) => (LINE_PARTS.includes(k) ? c.lines.some((o) => !o.bind && kindOf(o) !== k) : c.shapes.some((o) => kindOf(o) !== k && o.role !== 'traveler')),
     run: (c) => batch(() => { for (const o of LINE_PARTS.includes(k) ? c.lines.filter((x) => !x.bind) : c.shapes.filter((x) => x.role !== 'traveler')) call('synth.make', { id: o.id, kind: k }); }) })),
   { id: 'synth.audition', title: 'Play a note on this instrument', short: 'Play a note', icon: 'play', group: 'edit', menu: 'Synth', when: (c) => isOut(c.one), run: (c) => call('synth.play', { id: c.one.id }) },
+  // The interface: what of an object shows one level up, and at what size it is glyph, interface or inside.
+  { id: 'publish.all', title: 'Interface: its parameters on the face one level up', short: 'Parameters one level up', icon: 'up', group: 'edit', menu: 'Interface',
+    when: (c) => c.one && get(c.one.space)?.kind === 'group' && publishable(state.objects, c.one).length > 0, on: (c) => publishable(state.objects, c.one).every((q) => c.one.publish?.includes(q.key)),
+    run: (c) => call('object.publish', { id: c.one.id, on: !publishable(state.objects, c.one).every((q) => c.one.publish?.includes(q.key)) }) },
+  { id: 'level.far', title: 'Interface: a glyph at this size and smaller', short: 'A glyph from here down', icon: 'zoomout', group: 'edit', menu: 'Interface', when: (c) => seen(c).length > 0,
+    run: (c) => batch(() => seen(c).forEach((v) => call('object.levels', { ids: [v.o.id], far: Math.ceil(Math.max(v.px.w, v.px.h)) + 1 }))) },
+  { id: 'level.near', title: 'Interface: its inside at this size and larger', short: 'Its inside from here up', icon: 'zoomin', group: 'edit', menu: 'Interface', when: (c) => seen(c).length > 0,
+    run: (c) => batch(() => seen(c).forEach((v) => call('object.levels', { ids: [v.o.id], near: Math.floor(Math.max(v.px.w, v.px.h)) }))) },
+  { id: 'level.sooner', title: 'Interface: its inside sooner', short: 'Its inside sooner', icon: 'expand', keys: 'alt+]', group: 'edit', menu: 'Interface', when: (c) => seen(c).length > 0, run: (c) => nearBy(c, 1 / 1.25) },
+  { id: 'level.later', title: 'Interface: its inside later', short: 'Its inside later', icon: 'collapse', keys: 'alt+[', group: 'edit', menu: 'Interface', when: (c) => seen(c).length > 0, run: (c) => nearBy(c, 1.25) },
+  { id: 'level.reset', title: 'Interface: sizes as everywhere', short: 'Sizes as everywhere', icon: 'level', group: 'edit', menu: 'Interface', when: (c) => c.sel.some((o) => o.levels),
+    run: (c) => call('object.levels', { ids: ids(c.sel.filter((o) => o.levels)), far: null, near: null }) },
   { id: 'front', title: 'Bring to front', icon: 'front', keys: 'mod+shift+]', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'front' }) },
   { id: 'forward', title: 'Bring forward', icon: 'front', keys: 'mod+]', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'forward' }) },
   { id: 'backward', title: 'Send backward', icon: 'back', keys: 'mod+[', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'backward' }) },

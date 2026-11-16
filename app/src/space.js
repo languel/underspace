@@ -376,6 +376,7 @@ define({
     const body = a.preset != null ? READYMADES[a.kind]?.[a.preset] : null;
     if (a.preset != null && body == null) throw new Error(`no ${a.kind} readymade "${a.preset}" (one of ${Object.keys(READYMADES[a.kind] ?? {}).join(', ') || 'none: only lines have them'})`);
     o.role = 'synth'; o.code = SYNTH_PARTS[a.kind] + (body ? '\n' + body : ''); o.params ??= {};
+    if (a.kind === 'out') o.publish ??= ['channel', 'gain']; // an instrument's face: what it plays and how loud (publish.js)
     if (body && o.kind === 'line') { o.points = formulaPoints(o, body); o.off = [0, 0]; delete o.pen; }
     prune(o);
     return true;

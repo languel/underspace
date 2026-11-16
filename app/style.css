@@ -144,6 +144,10 @@ div.menu-item { cursor: default; }
 /* ---- shared controls ---- */
 .params { display: flex; flex-direction: column; gap: 3px; }
 .param { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--muted); }
+.param .pub { flex: none; width: 16px; height: 16px; padding: 0; border: 0; background: none; color: var(--muted); opacity: 0.35; pointer-events: auto; cursor: pointer; }
+.param .pub svg { width: 12px; height: 12px; }
+.param:hover .pub { opacity: 0.8; }
+.param .pub.on { color: var(--accent); opacity: 1; }
 .param input { width: 5em; padding: 1px 4px; background: var(--field); border-color: var(--line); pointer-events: auto; }
 .code { width: 100%; min-height: 0; padding: 6px; resize: none; background: var(--field); border-color: var(--line);
   white-space: pre; tab-size: 2; line-height: 1.45; pointer-events: auto; }

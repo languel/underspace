@@ -300,6 +300,19 @@ into groups (⌘G), and groups into groups: the group holding the out is the ins
 name is what a channel can name. Examples › Sound › Synths you draw: subtractive, FM,
 additive, waveshaping, and a nested instrument (oscillators inside a voice inside the instrument), each with a traveler loop that plays it on Space.
 
+
+## Interfaces at every scale
+Every object is seen three ways by its size on screen: far off its glyph, nearer its interface
+(name, ports, parameters), nearest its inside. Two things are yours to set, per object
+(right-click › Interface ›):
+- **What is on the interface.** A parameter of something inside a group can be put on the group's
+  face: the small up mark beside the parameter. The group can pass it up again the same way, so a
+  filter's cutoff can be set from the voice, and from the instrument. It is one value everywhere.
+  Command: `object.publish`.
+- **At what size each level shows.** A glyph from here down, its inside from here up (both take
+  the size it has now), its inside sooner or later (⌥] and ⌥[), sizes as everywhere.
+  Command: `object.levels`.
+
 ## For agents
 
 `underspace.tools()` lists every command with a JSON schema;

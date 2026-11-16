@@ -3,6 +3,7 @@
 //   build(c, at): c(name, args) runs a command; at is [x, y], the centre.
 //   path: where it sits in the collection, 'Music/Grids' (categories nest).
 
+import './publish.js'; // the nested synth example publishes parameters
 import { PRESETS } from './presets.js';
 import { GRID_PRESETS } from './grid.js';
 import { JUNCTIONS } from './joints.js';
@@ -62,7 +63,8 @@ const FALLING = Array.from({ length: 16 }, (_, i) => [i / 15, 2 / (i + 1) - 1]);
 // parts: [{ key, line: unit points | shape: true, kind, preset?, at: [dx, dy], w, h, params }]; wires: ['a.out -> b.in']
 // A traveler on a loop below rings four notes on the instrument's channel, so Space plays it.
 // nest: [[name, [keys]], ...] folds parts into groups in that order (a key may name a group made before).
-function synthExample(c, at, ch, parts, wires, notes = [0, 2, 4, 7], nest = []) {
+// publish: [[key, parameter], ...] puts a parameter on the face one level up, after the folding (publish.js).
+function synthExample(c, at, ch, parts, wires, notes = [0, 2, 4, 7], nest = [], publish = []) {
   const id = {};
   for (const q of parts) {
     const pos = [at[0] + q.at[0], at[1] + q.at[1]];
@@ -82,6 +84,7 @@ function synthExample(c, at, ch, parts, wires, notes = [0, 2, 4, 7], nest = []) 
     c('line.add', { points: Array.from({ length: 12 }, (_, i) => { const u = i / 11; return [+(p[0] + (q[0] - p[0]) * u).toFixed(4), +(p[1] + (q[1] - p[1]) * u + Math.sin(u * Math.PI) * 0.4).toFixed(4)]; }), tol: 0.05 });
   }
   for (const [name, keys] of nest) id[name] = c('group.collapse', { ids: keys.map((k) => id[k]), name });
+  for (const [k, name] of publish) c('object.publish', { id: id[k], name });
 }
 
 export const EXAMPLES = [
@@ -368,7 +371,8 @@ export const EXAMPLES = [
     { key: 'aenv', line: ADSR, kind: 'env', preset: 'adsr', at: [0.5, -0.6], params: { dur: 1, sync: 1, release: 0.5 } },
     { key: 'out', kind: 'out', at: [6.5, 2.5], params: { bpm: 0 } },
   ], ['osc.audio -> mix.a', 'sub.audio -> mix.b', 'mix.audio -> filter.audio', 'fenv.level -> filter.cutoff', 'filter.audio -> amp.audio', 'aenv.level -> amp.level', 'amp.audio -> out.audio'], [0, 3, 7, 10],
-  [['oscillators', ['osc', 'sub', 'mix']], ['voice', ['oscillators', 'filter', 'fenv', 'amp', 'aenv']], ['instrument', ['voice', 'out']]]) },
+  [['oscillators', ['osc', 'sub', 'mix']], ['voice', ['oscillators', 'filter', 'fenv', 'amp', 'aenv']], ['instrument', ['voice', 'out']]],
+  [['filter', 'hz'], ['filter', 'q'], ['voice', 'hz']]) }, // the filter's cutoff on the voice's face, and from there on the instrument's
   { path: 'Sound/Synths you draw', title: 'Waveshaping: a curve bends the sound', icon: 'syn.shaper', build: (c, at) => synthExample(c, at, 14, [
     { key: 'osc', line: SINE, kind: 'osc', at: [-7, 1.5] },
     { key: 'shape', line: TANH, kind: 'shaper', at: [-3.5, 1.5], params: { drive: 3 } },

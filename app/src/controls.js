@@ -10,25 +10,43 @@ export function h(tag, cls, text) {
   return el;
 }
 
-// Keeps `box` showing one number field per parameter of object `o`.
-export function syncParams(box, o, blanket, onParam) {
-  const sig = o.id + ':' + blanket.params.map((p) => p.name).join(' ');
+// Keeps `box` showing one number field per row. rows: [{ name, value, id, param, on }], where id
+// and param say which object's parameter holds the value (its own, or for a group one published
+// to it from inside: publish.js) and `on` whether the row is published one level up.
+// pub: { owner, onPublish(owner, name, on) } gives each row a mark that publishes it; null: none.
+export function syncRows(box, key, rows, onParam, pub) {
+  const sig = key + ':' + rows.map((r) => r.name).join(' ') + (pub ? ':pub' : '');
+  box.rows = rows;
   if (box.dataset.sig !== sig) {
     box.dataset.sig = sig;
-    box.replaceChildren(...blanket.params.map((p) => {
-      const row = h('label', 'param'), input = h('input');
-      input.type = 'number'; input.step = 'any'; input.dataset.name = p.name; input.title = p.name;
-      input.addEventListener('input', () => { const v = Number(input.value); if (input.value !== '' && Number.isFinite(v)) onParam(o.id, p.name, v); });
-      row.append(h('span', '', p.name), input);
+    box.replaceChildren(...rows.map((r) => {
+      const row = h('label', 'param'), input = h('input'), now = () => box.rows.find((q) => q.name === r.name);
+      input.type = 'number'; input.step = 'any'; input.dataset.name = r.name; input.title = r.name;
+      input.addEventListener('input', () => { const v = Number(input.value), q = now(); if (q && input.value !== '' && Number.isFinite(v)) onParam(q.id, q.param, v); });
+      row.append(h('span', '', r.name), input);
+      if (pub) {
+        const b = h('button', 'pub'); b.type = 'button'; b.dataset.name = r.name; b.innerHTML = icon('up');
+        b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); const q = now(); if (q) pub.onPublish(pub.owner, q.key ?? q.name, !q.on); });
+        row.append(b);
+      }
       return row;
     }));
   }
   for (const input of box.querySelectorAll('input')) {
     if (input === document.activeElement) continue;
-    const p = blanket.params.find((q) => q.name === input.dataset.name);
-    const v = String(o.params?.[p.name] ?? p.value);
+    const r = rows.find((q) => q.name === input.dataset.name), v = String(r?.value ?? '');
     if (input.value !== v) input.value = v;
   }
+  for (const b of box.querySelectorAll('button.pub')) {
+    const r = rows.find((q) => q.name === b.dataset.name), t = r?.on ? `${b.dataset.name}: on the face one level up` : `Show ${b.dataset.name} on the face one level up`;
+    b.classList.toggle('on', !!r?.on);
+    if (b.title !== t) { b.title = t; b.setAttribute('aria-label', t); }
+  }
+}
+
+// One object's own parameters as rows (the sidebar's use).
+export function syncParams(box, o, blanket, onParam, pub) {
+  syncRows(box, o.id, blanket.params.map((p) => ({ key: p.name, name: p.name, value: o.params?.[p.name] ?? p.value, id: o.id, param: p.name, on: !!o.publish?.includes(p.name) })), onParam, pub);
 }
 
 // A plain code area. Edits are committed shortly after typing stops.

@@ -5,7 +5,7 @@
 // A sketch container shows its running sketch at mid and near.
 // One DOM element per visible object, placed over the canvas every frame.
 
-import { h, syncParams, codeArea, syncCode } from './controls.js';
+import { h, syncRows, codeArea, syncCode } from './controls.js';
 import { hasCode } from './object.js';
 import { sketchKind, sketchDoc } from './sketch.js';
 import { icon } from './icons.js';
@@ -14,7 +14,7 @@ const fmt = (v) => (Array.isArray(v) ? `[${v.length}]` : typeof v === 'number' &
 const FRAME_W = 480; // a sketch is laid out this wide, then scaled to its face
 const VENDOR = new URL('../vendor/three/', location.href).href;
 
-export function createFaces(layer, { onParam, onCode }) {
+export function createFaces(layer, { onParam, onCode, onPublish }) {
   const els = new Map();
 
   function create(o) {
@@ -107,10 +107,10 @@ export function createFaces(layer, { onParam, onCode }) {
         const label = el.outs.children[i].firstChild, text = `${name} ${fmt(run.output(id, name))}`;
         if (label.textContent !== text) label.textContent = text;
       });
-      // an instrument's face publishes its out's channel and gain: edits go to the out inside
-      // (not zoomed in, where the out itself is in view)
-      if (v.inst && v.face === 'mid') syncParams(el.params, v.inst.o, { ...v.inst.blanket, params: v.inst.blanket.params.filter((q) => q.name === 'channel' || q.name === 'gain') }, onParam);
-      else syncParams(el.params, o, b, onParam);
+      // Its parameters; for a group, those published to it from inside, while it is shut (publish.js).
+      // v.up: it is in a group, so each row can be published to that group's face.
+      const rows = o.kind === 'group' ? (v.face === 'mid' ? v.pub ?? [] : []) : b.params.map((q) => ({ key: q.name, name: q.name, value: o.params?.[q.name] ?? q.value, id: o.id, param: q.name }));
+      syncRows(el.params, o.id, rows.map((r) => ({ ...r, on: !!o.publish?.includes(r.key) })), onParam, v.up ? { owner: o.id, onPublish } : null);
       if (el.code) syncCode(el.code, o);
       sketch(el, v, kind, run);
     }

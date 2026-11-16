@@ -89,6 +89,8 @@ export function brief(o, rectOf, blanketOf) {
   if (bl?.outs?.length) b.outs = bl.outs.map((p) => p.name ?? p);
   if (o.params && Object.keys(o.params).length) b.params = o.params;
   if (o.preset) b.preset = o.preset;
+  if (o.publish?.length) b.publish = o.publish;
+  if (o.levels) b.levels = o.levels;
   if (o.on) b.on = o.on;
   if (o.at) b.at = o.at.map((q) => q.id);
   if (o.bind) b.wire = `${o.bind.from.id}.${o.bind.from.port} -> ${o.bind.to.id}.${o.bind.to.port}`;

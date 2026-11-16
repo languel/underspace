@@ -1857,8 +1857,46 @@ Also asked for:
     cached until a change) and hands it to `faces.js` as `v.inst`. Checked
     in the page: the Nested example's top group reads "15 · instrument",
     gain set on the face reached the out, undo put it back. Only the out's
-    two parameters are published; publishing any inner parameter by choice
-    (for any nested patch) is not built.
+    two parameters were published then; the next item made it general.
+  - **Interface as surface, at every scale** (the owner, 15 Nov 2026:
+    "interface as surface at different levels of scale is important since
+    we need to return to the idea of active inference and markov blankets
+    (i/o)"; "edit at what scale the different levels of abstractions occur
+    ... adjust those per object ... like adjusting the size and strength of
+    a brush but in the context of inside/outside/interface"). Two files.
+    - `src/publish.js`: **published parameters**, the half of a blanket
+      that is not ports. `object.publish {id, name, on}` puts a parameter
+      on the face of the group the object is in; a group publishes what is
+      published to it by the same command, so a parameter climbs level by
+      level (the Nested example: the filter's `hz` on the voice, and from
+      there on the instrument). `o.publish` holds keys: a parameter's name,
+      or for a group `<child id>.<its key>`, so a key keeps meaning the
+      same parameter. There is one value: an edit on any face is
+      `object.set` on the owner. An out part publishes `channel` and `gain`
+      when `synth.make` makes it (data, no longer a case in `faces.js`; the
+      speaker glyph and channel in the head are still the instrument's
+      own). On the canvas each parameter row of an object in a group has a
+      small up mark that publishes it (also in the Properties panel);
+      Interface › Parameters one level up does all of them.
+    - `src/levels.js`: **levels per object.** `o.levels {far, near}` in
+      pixels of the longer side: under `far` it is its glyph, from `near`
+      up its inside, between them its interface (name, ports, published
+      parameters). `object.levels {ids, far, near}`; null is the default
+      (far 48, near about 0.42 of the view); far 0 never a glyph; near
+      100000 never opens. `faceOf` decides every face. Actions (Interface ›):
+      a glyph from here down, its inside from here up (both take the size
+      it has on screen now), its inside sooner / later (⌥] / ⌥[, by 1.25
+      as a brush's size), sizes as everywhere.
+    - Checked in the page: `hz` published twice shows on the instrument's
+      face beside channel and gain; the voice's rows show which are
+      published; the instrument opened at 228 px with "its inside from here
+      up", was a glyph with far 300, and reset. 147 tests.
+    - Not yet: a face is as tall as its object, so more than two or three
+      published rows are cut off; no "strength" (how much of the inside
+      shows, as a fade between levels: the switch is hard); ports cannot be
+      hidden or chosen, they are whatever wires were cut; published
+      parameters cannot be renamed; nothing predicts or corrects (active
+      inference as structure only).
   - Not yet: a drawn filter response (a curve as the filter's shape: this
     needs an FIR or many biquads), wavetables (several curves morphing),
     LFOs as such (an osc's audio into a cutoff works, at audio rate), live

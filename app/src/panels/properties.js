@@ -25,6 +25,10 @@ const shared = (list, get) => { const v = get(list[0]); return list.every((o) =>
 const TOOL_TITLE = { point: 'Point', polyline: 'Polyline', polygon: 'Polygon', sculpt: 'Sculpt', select: 'Select', pan: 'Pan', draw: 'Draw', line: 'Straight line', rect: 'Rectangle', ellipse: 'Ellipse', note: 'Note', code: 'Code container', target: 'Render target', score: 'Score' };
 
 // What the active tool will make, and how.
+// The mark that puts a parameter on the face one level up, for an object in a group (publish.js).
+let pubApp = null;
+const pubOf = (o) => (pubApp?.get(o.space)?.kind === 'group' ? { owner: o.id, onPublish: (id, name, on) => pubApp.call('object.publish', { id, name, on }) } : null);
+
 export function toolProps(app, tool) {
   const out = [], check = (key) => { const c = h('input'); c.type = 'checkbox'; c.checked = settings[key]; c.addEventListener('change', () => setSetting(key, c.checked)); return c; };
   const look = [];
@@ -73,6 +77,7 @@ export function toolProps(app, tool) {
 // The selected objects. `live` is a container the caller keeps in step with
 // the parameters; without one they are filled in once.
 export function selectionProps(app, sel, live = null) {
+  pubApp = app;
 
     const ids = sel.map((o) => o.id), one = sel.length === 1 ? sel[0] : null;
     const style = (patch) => app.call('object.style', { ids, style: patch });
@@ -114,7 +119,7 @@ export function selectionProps(app, sel, live = null) {
       for (const [k, label] of [['cx', 'x'], ['cy', 'y'], ['w', 'w'], ['h', 'h']]) grid.append(row(label, numberField(+r[k].toFixed(3), set(k), { step: 0.1 })));
       out.push(section('Place', grid));
     }
-    if (one && blanketOf(one)?.params.length) { const box = live ?? h('div', 'params'); if (!live) syncParams(box, one, blanketOf(one), app.onParam); out.push(section('Parameters', box)); }
+    if (one && blanketOf(one)?.params.length) { const box = live ?? h('div', 'params'); if (!live) syncParams(box, one, blanketOf(one), app.onParam, pubOf(one)); out.push(section('Parameters', box)); }
     if (one?.role === 'note') {
       const text = h('textarea', 'note-text');
       text.value = one.text ?? ''; text.spellcheck = false;
@@ -142,6 +147,7 @@ export function selectionProps(app, sel, live = null) {
 }
 
 export function propertiesPanel(el, app) {
+  pubApp = app;
   const body = h('div', 'panel-body'), live = h('div', 'params');
   el.append(body);
   let sig = null;
@@ -150,7 +156,7 @@ export function propertiesPanel(el, app) {
   return {
     update() {
       const sel = [...app.state.selection].map(app.get).filter(Boolean), one = sel.length === 1 ? sel[0] : null;
-      if (one && blanketOf(one)?.params.length) syncParams(live, one, blanketOf(one), app.onParam);
+      if (one && blanketOf(one)?.params.length) syncParams(live, one, blanketOf(one), app.onParam, pubOf(one));
       const next = `${app.state.version}|${sel.map((o) => o.id).join()}|${app.tool()}|${app.settingsVersion()}`;
       const typing = body.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
       if (next === sig || typing) return;
