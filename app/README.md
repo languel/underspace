@@ -283,6 +283,18 @@ its scale and root. A score plays on the transport, one pass after another
 from the start of the timeline, so pause, seek and the loop cut it and pick
 it up partway. Lines drawn while it plays join in on the next pass.
 
+## Synths you draw
+
+After Xenakis's UPIC: a drawn curve is a part of a synth, and its shape is what it does. Draw a
+stroke and hold (the ring), or right-click › Synth ›: **osc** (the curve, left to right, is one
+cycle of the wave), **partials** (its height across is the strength of each harmonic), **env**
+(a level over time), **shaper** (input to output). Shapes are **filter**, **amp**, **mix**,
+**noise** and **out**. Draw connectors from port to port. The **out** part is the instrument:
+its `channel` parameter is the MIDI channel it plays, so an event's `note(m, v, d, channel)`, a
+recorded clip or the timeline plays it. Right-click an out › Synth › Play a note. Redraw a
+curve and the next note sounds as drawn. Examples › Sound › Synths you draw: subtractive, FM,
+additive, waveshaping, each with a traveler loop that plays it on Space.
+
 ## For agents
 
 `underspace.tools()` lists every command with a JSON schema;

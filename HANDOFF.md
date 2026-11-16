@@ -1795,6 +1795,45 @@ Also asked for:
   take `lfm3` when the model server has it (`ollama pull lfm3`, which needs
   Ollama 0.40.12 or later), else the first model listed. Its numbers so far
   are under "lfm3 on Ollama" above (quick 20 of 24, whole loop 22 of 24).
+- **Synths you draw (16 Nov 2026, `src/synth.js`)**, after UPIC (the owner:
+  build synths at the micro level, zoom out to an instrument with a MIDI
+  interface and sound out). A part is a line or shape with role `synth`
+  whose code is only a header (`SYNTH_PARTS`): its name is its kind, its
+  in/out/param lines its ports and parameters, so faces, the Code panel,
+  connectors and `object.set` work on it unchanged. Lines take their data
+  from the curve, **read across** (at evenly spaced x, the height where the
+  curve first passes: read along its length, a drawn sine gained a third
+  harmonic): `osc` (one cycle, as 48 harmonics into a PeriodicWave),
+  `partials` (heights as harmonic strengths), `env` (a level 0..1 over `dur`
+  seconds, held, then `release`), `shaper` (a WaveShaper curve). Shapes:
+  `filter`, `amp`, `mix`, `noise`, `out`. `planInstrument` follows the
+  connectors back from an `out` into plain data (pure, tested);
+  `buildVoice` makes one note of it in any AudioContext. An `out` is an
+  instrument: its `channel` parameter claims a MIDI channel (`claimOf`), or
+  `music.set channels` names it by id or name; `instruments.voice` asks
+  `setCustomVoices` first, so live notes, held gates, clips and the offline
+  WAV export all play drawn instruments. The plan is cached until the next
+  change. Commands `synth.make {id, kind}` and `synth.play {id, midi}`;
+  right-click › Synth › (nine kinds, Play a note); the hold ring offers osc
+  and env for a fresh stroke; each kind has a glyph (`syn.*`), shown in the
+  part's face at every size. `code.help` has the synth kind and a recipe.
+  - Examples › Sound › Synths you draw: subtractive (a saw, a filter swept
+    by one drawn envelope, an amp shaped by another), FM (one drawn sine
+    bending another at ratio 2), additive (a 1/k curve as 16 harmonics),
+    waveshaping (a sine through a drawn tanh); each claims channel 11 to 14
+    and has a traveler loop over four note events.
+  - Checked in the page: all four wire up fully; one note of each rendered
+    offline is at 220 Hz for A3, shaped as drawn (the additive swells, the
+    FM decays) and silent after its release; redrawing the subtractive
+    saw as a sine made it four times less bright, and undo brought the saw
+    back; played on the transport, channels 11 to 14 sounded with no code
+    errors. Not heard by ear. 142 tests.
+  - Not yet: a drawn filter response (a curve as the filter's shape: this
+    needs an FIR or many biquads), wavetables (several curves morphing),
+    LFOs as such (an osc's audio into a cutoff works, at audio rate), live
+    MIDI keyboard input, polyphony limits, collapsing an instrument into a
+    group with a MIDI-in port shown on its face, and an `out` that plays
+    the whole drawing as a UPIC page (curves as notes over time).
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

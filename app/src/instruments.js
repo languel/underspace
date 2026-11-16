@@ -33,7 +33,13 @@ function envelope(g, at, peak, attack, seconds, sustain = 0.6, release = 0.12) {
   return (when) => { g.gain.cancelScheduledValues(when); g.gain.setValueAtTime(Math.max(0.0005, g.gain.value), when); g.gain.exponentialRampToValueAtTime(0.0005, when + release); };
 }
 
+// Instruments that are not built in (synth.js: drawn on the canvas): custom(name) -> a voice maker or null.
+let custom = null;
+export const setCustomVoices = (fn) => { custom = fn; };
+
 export function voice(ac, out, name, midi, velocity = 100, at = ac.currentTime + 0.005, seconds = 0.3) {
+  const made = custom?.(name);
+  if (made) return made(ac, out, midi, velocity, at, seconds);
   const v = Math.max(0, Math.min(127, velocity)) / 127, nodes = [], g = ac.createGain();
   g.connect(out);
   const end = seconds != null ? at + Math.max(0.05, seconds) + 0.2 : null;

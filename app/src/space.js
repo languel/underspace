@@ -18,6 +18,7 @@ import { settle, JUNCTION, isCurve, curveOf, measure, atU } from './joints.js';
 import { DEFAULT_MUSIC, scaleName, scaleNames } from './music.js';
 import { DEFAULT_GRID, GRID, GRID_KEYS } from './grid.js';
 import { INSTRUMENTS } from './instruments.js';
+import { SYNTH_PARTS, LINE_PARTS, SHAPE_PARTS, instrumentId } from './synth.js';
 
 export const state = {
   objects: new Map(),   // id -> object, see object.js
@@ -363,11 +364,27 @@ define({
 });
 
 define({
+  name: 'synth.make',
+  doc: 'Make an object a part of a synth you draw, keeping its shape. A line: "osc" (its curve is one cycle of the wave), "partials" (its height across is the strength of each harmonic), "env" (its curve is a level over time), "shaper" (its curve maps what comes in to what goes out). A shape: "filter", "amp", "mix", "noise", "out" (the instrument: its channel parameter is the MIDI channel it plays). Wire parts with connectors from an out port to an in port (line.add with tol, ends on the two ports). code.help { role: "synth" } says more.',
+  args: { id: T.id, kind: { enum: Object.keys(SYNTH_PARTS) } }, required: ['id', 'kind'],
+  run(a) {
+    const o = state.objects.get(a.id);
+    if (!o || o.bind) return false;
+    const ok = o.kind === 'line' ? LINE_PARTS.includes(a.kind) : o.kind === 'shape' ? SHAPE_PARTS.includes(a.kind) : false;
+    if (!ok) throw new Error(`a ${o.kind} cannot be a ${a.kind}: a line is one of ${LINE_PARTS.join(', ')}; a shape one of ${SHAPE_PARTS.join(', ')}`);
+    if (o.code != null && o.role !== 'synth') (o.stash ??= {})[o.role] = o.code;
+    o.role = 'synth'; o.code = SYNTH_PARTS[a.kind]; o.params ??= {};
+    prune(o);
+    return true;
+  },
+});
+
+define({
   name: 'object.code', doc: 'Set the code of an object that has code: a code container, a path, a score (its brush), an event, a joint (a junction), a grid frame or a render target. The header comments declare its ports and parameters. code.help says what each kind of code is given and returns. False when the object has no code (give it a role first: object.role).',
   args: { id: T.id, code: T.str }, required: ['id', 'code'],
   run(a) {
     const o = state.objects.get(a.id);
-    if (!o || !['code', 'path', 'score', 'event', 'junction', 'grid', 'target'].includes(o.role)) return false;
+    if (!o || !['code', 'path', 'score', 'event', 'junction', 'grid', 'target', 'synth'].includes(o.role)) return false;
     if (typeof a.code !== 'string') throw new Error('code must be a string of JavaScript');
     o.code = a.code; o.params ??= {};
     parseBlanket(o.code);
@@ -668,7 +685,7 @@ define({
     if (typeof a.scale === 'string' && !scaleName(a.scale)) throw new Error(`no scale named "${a.scale}" (one of ${scaleNames().join(', ')}; or give its steps as a list)`);
     for (const [c, inst] of Object.entries(a.channels && typeof a.channels === 'object' ? a.channels : {})) {
       if (!(+c >= 1 && +c <= 16)) throw new Error(`channels: ${c} is not a channel (1 to 16)`);
-      if (!INSTRUMENTS.includes(inst)) throw new Error(`no instrument "${inst}" (one of ${INSTRUMENTS.join(', ')})`);
+      if (!INSTRUMENTS.includes(inst) && !instrumentId(state.objects, inst)) throw new Error(`no instrument "${inst}" (one of ${INSTRUMENTS.join(', ')}, or the id or name of a drawn synth's out part)`);
     }
     const m = state.music;
     if (a.bpm > 0) m.bpm = Math.min(400, Math.max(10, a.bpm));
@@ -676,7 +693,7 @@ define({
     if (Array.isArray(a.scale) && a.scale.length) m.scale = a.scale.map(Number).filter(Number.isFinite);
     else if (typeof a.scale === 'string' && scaleName(a.scale)) m.scale = scaleName(a.scale);
     for (const k of ['root', 'low', 'high']) if (Number.isFinite(a[k])) m[k] = Math.max(0, Math.min(127, a[k]));
-    if (a.channels && typeof a.channels === 'object') { m.channels = { ...m.channels }; for (const [c, inst] of Object.entries(a.channels)) if (+c >= 1 && +c <= 16 && INSTRUMENTS.includes(inst)) m.channels[+c] = inst; }
+    if (a.channels && typeof a.channels === 'object') { m.channels = { ...m.channels }; for (const [c, inst] of Object.entries(a.channels)) if (+c >= 1 && +c <= 16 && (INSTRUMENTS.includes(inst) || instrumentId(state.objects, inst))) m.channels[+c] = inst; }
   },
 });
 define({

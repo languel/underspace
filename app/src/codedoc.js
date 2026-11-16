@@ -8,6 +8,7 @@ import { EVENTS } from './play.js';
 import { JUNCTIONS } from './joints.js';
 import { GRID_PRESETS } from './grid.js';
 import { TARGET_PRESETS } from './object.js';
+import { SYNTH_PARTS } from './synth.js';
 
 const HEADER = 'The first comment lines are its header: "// name", then "// in: a b", "// out: y", "// param: gain 0.5" declare its ports and parameters.';
 const MUSIC = [
@@ -83,6 +84,12 @@ export const CODE_DOC = {
     returns: '{ spin (half turns), tilt (radians), zoom (nearer above 1), center: [x, y, z] (added to where the camera looks) }',
     presets: TARGET_PRESETS,
   },
+  synth: {
+    what: 'A part of a synth you draw (synth.make { id, kind }): its code is only a header naming the kind and its ports; the drawing is what it does. Lines: osc (the curve, left to right, is one cycle of the wave; ratio times the note\'s pitch; fm in: Hz per unit), partials (the curve\'s height across is the strength of harmonics 1..count: additive), env (the curve is a level 0..1 over dur seconds, held at its end while the note is, then to 0 over release), shaper (across is what comes in, up is what goes out). Shapes: filter (type 0 low, 1 high, 2 band pass; hz, q; cutoff in moves hz by depth per unit), amp (with level wired its loudness is that level, else gain), mix (a b c in), noise, out (the instrument: param channel 1..16 is the MIDI channel it plays).',
+    gets: [['audio', 'the sound, part to part'], ['level', 'what an env sends: 0..1 over time, for an amp\'s level or a filter\'s cutoff'], ['fm', 'an osc\'s input: another osc\'s audio bends its pitch']],
+    returns: 'nothing: it is not run; change the drawing or the parameters (object.set)',
+    presets: SYNTH_PARTS,
+  },
   grid: {
     what: 'A grid frame (shape.add role "grid"): its code is only a header of parameters, which quantize space, time and pitch for what lies inside: cell (units), sub (snap points a cell), beats (beats a cell of path), metric (0 along, 1 right angles, 2 across), bars (round path times to this many beats), rows (scale degrees a cell up), snap (1: drawing snaps).',
     gets: [],
@@ -100,6 +107,7 @@ export const RECIPES = {
   'triggers on a line': 'line.add the path, traveler.add { on: line, dur: beats, loop: 1 } to move along it, and for each trigger point.add { at: a point on the line, role: "event" } (or shape.add role "event" over it). An event\'s code runs when the traveler reaches it: by default note(pitch(ev.y), 100, p.dur); set your own with object.code, e.g. note(step(57, 2), 100, 0.3).',
   'a graph that plays (a Markov chain, a sequencer, a drum loop)': 'line.add each edge as a straight line between two node positions (same positions for edges that share a node). Then for each node one joint.add { at: [{ id: line, u: 0 for the line\'s start or 1 for its end }, ...every line end at that node], glyph: "note", code }. The code plays and chooses: "// kick\\nnote(36, 110, 0.1, 10);\\nreturn Math.floor(rng() * ways.length);" (channel 10 is drums: 36 kick, 38 snare, 42 hat; another channel is a pitched instrument). Then traveler.add { on: one line } and object.set { id: traveler, name: "speed", value: 4 } (grid cells a beat). Every node having a way on makes it perpetual.',
   'notes in a shape (scattered, on a grid, in a pattern)': 'A note that sounds is an event a traveler reaches, not a shape with role "note" (that is text). For each note: point.add { at: [x, y] inside the shape\'s box (space_read gives box [x0, y0, x1, y1]), role: "event", glyph: "note" }, and object.code to say which note: note(step(root, k), 100, 0.3) for the kth degree of the scale up from root, or note(pitch(v), 100, 0.3) for a height v from 0 to 1. Then lines through them with travelers (traveler.add { on, dur: beats, loop: 1 }: two bars in 4/4 is dur 8) so something reaches them. Work out random places yourself and send them in one batch_run.',
+  'a synth you draw (an instrument)': 'Draw each curve with line.add and make it a part: synth.make { id, kind: "osc" } (one cycle of a wave, e.g. 17 points of a sine across 2 units), "env" (attack then decay: [[0,0],[0.2,1],[0.6,0.3],[2,0.2]] with style path straight), "partials", "shaper". Shapes (shape.add role "visual", then synth.make): "filter", "amp", "out". Wire them with connectors: line.add { points: [the out port\'s place, the in port\'s place], tol: 0.3 } from osc.audio to amp.audio, env.level to amp.level, amp.audio to out.audio (a filter between: osc.audio -> filter.audio -> amp.audio, another env.level -> filter.cutoff; FM: one osc.audio -> another osc.fm). object.set { id: out, name: "channel", value: 11 } makes it play MIDI channel 11: note(m, 100, 0.4, 11) in an event plays it; synth.play { id: out } plays a note now. example.list has four under Sound/Synths you draw to copy from.',
   'check what you built': 'play.toggle, wait a few seconds, then play.state: scores lists each voice\'s pitches, notes the last notes played (beat, midi, channel). Empty notes means nothing fires. view.look is a picture. play.toggle again stops.',
 };
 

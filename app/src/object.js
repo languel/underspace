@@ -36,7 +36,7 @@
 export const ROLES = { mesh: ['visual'], point: ['ink', 'event'], joint: ['junction'], line: ['ink', 'connector', 'path', 'event', 'traveler'], shape: ['visual', 'target', 'code', 'score', 'grid', 'note', 'event', 'traveler'] };
 export const isLine = (o) => o.kind === 'line';
 export const isTarget = (o) => o.kind === 'shape' && o.role === 'target';
-export const hasCode = (o) => o.role === 'code' || o.role === 'path' || o.role === 'score' || o.role === 'event' || o.role === 'junction' || o.role === 'grid' || o.role === 'target';
+export const hasCode = (o) => o.role === 'synth' || o.role === 'code' || o.role === 'path' || o.role === 'score' || o.role === 'event' || o.role === 'junction' || o.role === 'grid' || o.role === 'target';
 // A traveler has no code of its own; this declares its ports and parameters.
 // loop: 0 once, 1 loop, 2 there and back. start: where on the line it begins (0..1).
 // dur: beats for the whole line (at the music context's tempo); at: the beat it sets off on;

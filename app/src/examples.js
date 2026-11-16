@@ -47,6 +47,35 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
 });`;
 
+// ---- synths you draw (synth.js) ----------------------------------------------------
+// A curve from unit points (x 0..1, y -1..1) drawn w by h with its middle at [x, y].
+const curve = (pts, [x, y], w, h) => pts.map(([u, v]) => [+(x - w / 2 + u * w).toFixed(3), +(y + (v * h) / 2).toFixed(3)]);
+const SINE = Array.from({ length: 17 }, (_, i) => [i / 16, Math.sin((i / 16) * Math.PI * 2)]);
+const SAW = [[0, -1], [0.92, 1], [1, -1]];
+const ADSR = [[0, -1], [0.06, 1], [0.3, 0.2], [1, 0.1]];
+const PLUCK = [[0, -1], [0.02, 1], [0.25, -0.4], [1, -1]];
+const SWELL = [[0, -1], [0.5, 1], [1, 0.6]];
+const TANH = Array.from({ length: 13 }, (_, i) => { const u = i / 12; return [u, Math.tanh((u * 2 - 1) * 3)]; });
+const FALLING = Array.from({ length: 16 }, (_, i) => [i / 15, 2 / (i + 1) - 1]); // 1/k: a saw's harmonics
+// parts: [{ key, line: unit points | shape: true, kind, at: [dx, dy], w, h, params }]; wires: ['a.out -> b.in']
+// A traveler on a loop below rings four notes on the instrument's channel, so Space plays it.
+function synthExample(c, at, ch, parts, wires, notes = [0, 2, 4, 7]) {
+  const id = {};
+  for (const q of parts) {
+    const pos = [at[0] + q.at[0], at[1] + q.at[1]];
+    id[q.key] = q.line ? c('line.add', { points: curve(q.line, pos, q.w ?? 2.4, q.h ?? 1.4), ...(q.straight ? { style: { path: 'straight' } } : {}) })
+      : c('shape.add', { role: 'visual', rect: { cx: pos[0], cy: pos[1], w: q.w ?? 1.8, h: q.h ?? 1.2 } });
+    c('synth.make', { id: id[q.key], kind: q.kind });
+    for (const [k, v] of Object.entries(q.params ?? {})) c('object.set', { id: id[q.key], name: k, value: v });
+  }
+  c('object.set', { id: id.out, name: 'channel', value: ch });
+  const loop = Array.from({ length: 33 }, (_, i) => { const a = (i / 32) * Math.PI * 2; return [+(at[0] + Math.cos(a) * 3.2).toFixed(3), +(at[1] - 4.2 + Math.sin(a) * 1).toFixed(3)]; });
+  const ring = c('line.add', { points: loop });
+  c('traveler.add', { on: ring, dur: 4, loop: 1 });
+  notes.forEach((k, i) => { const p = loop[Math.round((i / notes.length) * 32) % 32]; const e = c('point.add', { at: p, role: 'event', glyph: 'note', size: 0.5 }); c('object.code', { id: e, code: `// event\n// out: gate count\nnote(step(57, ${k}), 100, 0.45, ${ch});` }); });
+  return { connect: wires.map((w) => { const [a, b] = w.split('->').map((x) => x.trim().split('.')); return [id[a[0]], a[1], id[b[0]], b[1]]; }) };
+}
+
 export const EXAMPLES = [
   { path: 'Patching', title: 'An oscillator turns a view', icon: 'target', build: (c, at) => c('patch.add', { at, nodes: [{ key: 'osc', preset: 'osc' }, { key: 'scale', preset: 'scale' }, { key: 'view', role: 'target' }], links: ['osc.y -> scale.x', 'scale.y -> view.spin'] }) },
   { path: 'Music/Scores', title: 'A score: lines as sound', icon: 'score', build: (c, at) => {
@@ -299,4 +328,33 @@ export const EXAMPLES = [
     c('line.add', { space: t, points: pts, pen: pts.map((_, i) => [i * 20, 0.1 + 0.85 * Math.sin((i / (n - 1)) * Math.PI)]), style: { width: 5, stroke: '#e8e2d4' } });
     c('line.add', { space: t, points: Array.from({ length: 7 }, (_, i) => { const a = (i / 7) * Math.PI * 2; return [1.5 + Math.cos(a), -1.2, Math.sin(a)]; }), closed: true, style: { fill: '#c2410c', stroke: '#f97316' } });
   } },
+  // ---- synths you draw: a curve is a wave, an envelope, a shaper or a spectrum (synth.js) ----
+  { path: 'Sound/Synths you draw', title: 'Subtractive: a saw through a filter', icon: 'syn.filter', build: (c, at) => synthExample(c, at, 11, [
+    { key: 'osc', line: SAW, kind: 'osc', at: [-6, 1.5], straight: true },
+    { key: 'filter', kind: 'filter', at: [-2, 1.5], params: { hz: 400, q: 6, depth: 2600 } },
+    { key: 'amp', kind: 'amp', at: [1.5, 1.5] },
+    { key: 'out', kind: 'out', at: [5, 1.5] },
+    { key: 'fenv', line: PLUCK, kind: 'env', at: [-6, -1.2], straight: true, params: { dur: 0.5 } },
+    { key: 'aenv', line: ADSR, kind: 'env', at: [-2, -1.2], straight: true, params: { dur: 0.8 } },
+  ], ['osc.audio -> filter.audio', 'fenv.level -> filter.cutoff', 'filter.audio -> amp.audio', 'aenv.level -> amp.level', 'amp.audio -> out.audio']) },
+  { path: 'Sound/Synths you draw', title: 'FM: one wave bends another', icon: 'syn.osc', build: (c, at) => synthExample(c, at, 12, [
+    { key: 'mod', line: SINE, kind: 'osc', at: [-6, 1.5], params: { ratio: 2, level: 1.5 } },
+    { key: 'car', line: SINE, kind: 'osc', at: [-2, 1.5], params: { fm: 400 } },
+    { key: 'amp', kind: 'amp', at: [1.5, 1.5] },
+    { key: 'out', kind: 'out', at: [5, 1.5] },
+    { key: 'env', line: PLUCK, kind: 'env', at: [-2, -1.2], straight: true, params: { dur: 0.9 } },
+  ], ['mod.audio -> car.fm', 'car.audio -> amp.audio', 'env.level -> amp.level', 'amp.audio -> out.audio'], [0, 3, 5, 9]) },
+  { path: 'Sound/Synths you draw', title: 'Additive: the curve is the spectrum', icon: 'syn.partials', build: (c, at) => synthExample(c, at, 13, [
+    { key: 'parts', line: FALLING, kind: 'partials', at: [-5, 1.5], w: 3, params: { count: 16 } },
+    { key: 'amp', kind: 'amp', at: [0, 1.5] },
+    { key: 'out', kind: 'out', at: [4, 1.5] },
+    { key: 'env', line: SWELL, kind: 'env', at: [-5, -1.2], straight: true, params: { dur: 0.6, release: 0.6 } },
+  ], ['parts.audio -> amp.audio', 'env.level -> amp.level', 'amp.audio -> out.audio'], [0, 4, 7, 11]) },
+  { path: 'Sound/Synths you draw', title: 'Waveshaping: a curve bends the sound', icon: 'syn.shaper', build: (c, at) => synthExample(c, at, 14, [
+    { key: 'osc', line: SINE, kind: 'osc', at: [-7, 1.5] },
+    { key: 'shape', line: TANH, kind: 'shaper', at: [-3.5, 1.5], params: { drive: 3 } },
+    { key: 'amp', kind: 'amp', at: [0.5, 1.5] },
+    { key: 'out', kind: 'out', at: [4, 1.5] },
+    { key: 'env', line: ADSR, kind: 'env', at: [-3.5, -1.2], straight: true, params: { dur: 0.7 } },
+  ], ['osc.audio -> shape.audio', 'shape.audio -> amp.audio', 'env.level -> amp.level', 'amp.audio -> out.audio'], [0, 2, 3, 5]) },
 ];

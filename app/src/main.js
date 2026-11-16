@@ -58,7 +58,8 @@ import { pitch as pitchOf, step as stepOf, snap as snapOf, secPerBeat, degrees }
 import { midiFile, readNotes, createMidiOut } from './midi.js';
 import { iannixPlan, applyPlan } from './iannix.js';
 import { nousPlan, applyNous, nodeCodeFor } from './nous.js';
-import { INSTRUMENTS, DEFAULT_CHANNELS } from './instruments.js';
+import { INSTRUMENTS, DEFAULT_CHANNELS, setCustomVoices } from './instruments.js';
+import { planInstrument, instrumentId, claimOf, buildVoice, LINE_PARTS, SHAPE_PARTS, kindOf, isOut } from './synth.js';
 import { solve, crossings, crossings3d, measure, atU, atS, tangentS, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
@@ -437,7 +438,19 @@ function musicHooks() {
 }
 const heard = []; // the last notes played, for play.state: an agent cannot listen, but it can read
 // The instrument a channel plays (the timeline's choice, else the default).
-const instrumentOf = (ch = 1) => state.music.channels?.[ch] ?? DEFAULT_CHANNELS[ch] ?? 'triangle';
+// A channel's instrument: a drawn synth that claims it (its out part's channel), else the timeline's choice.
+const instrumentOf = (ch = 1) => claimOf(state.objects, ch) ?? state.music.channels?.[ch] ?? DEFAULT_CHANNELS[ch] ?? 'triangle';
+// Drawn synths (synth.js) play through the same voice() as the built-in instruments. The plan is read
+// from the drawing once and kept until something changes, so a note costs only its Web Audio nodes.
+const synthPlans = new Map();
+onChange(() => synthPlans.clear());
+setCustomVoices((name) => {
+  const id = instrumentId(state.objects, name);
+  if (!id) return null;
+  let plan = synthPlans.get(id);
+  if (!plan) { plan = planInstrument(state.objects, id); synthPlans.set(id, plan); }
+  return plan ? (ac, out, midi, vel, at, seconds) => buildVoice(ac, out, plan, midi, vel, at, seconds) : null;
+});
 function playNote(midi, vel = 100, seconds = 0.3, ch = 1) {
   if (!Number.isFinite(midi)) return;
   sound.note(midi, vel, seconds, instrumentOf(ch)); midiOut.note(midi, vel, seconds, ch);
@@ -1159,9 +1172,9 @@ function buildKey(k) {
 // ---- the hold menu: hold still while drawing to turn the stroke into something --
 
 // What the ring offers, clockwise from the top; each is an action, so it also has a key, a menu entry and a palette entry.
-const PIE = ['role.path', 'attach.traveler', 'line.travelNearest', 'role.event', 'line.toShape', 'line.toTarget', 'join.crossings', 'line.straighten', 'simplify.strongly'];
+const PIE = ['synth.osc', 'synth.env', 'role.path', 'attach.traveler', 'line.travelNearest', 'role.event', 'line.toShape', 'line.toTarget', 'join.crossings', 'line.straighten', 'simplify.strongly'];
 // Picks that leave the stroke a line on the drawing: its ends still join what they touch.
-const KEEPS_LINE = new Set(['role.path', 'attach.traveler', 'join.crossings', 'line.straighten', 'simplify.strongly']);
+const KEEPS_LINE = new Set(['synth.osc', 'synth.env', 'synth.partials', 'synth.shaper', 'role.path', 'attach.traveler', 'join.crossings', 'line.straighten', 'simplify.strongly']);
 const HOLD_MS = 450;
 let holdTimer = 0;
 function armHold(g) {
@@ -2101,6 +2114,10 @@ const ACTIONS = [
   ...[['points', 'Points to grid', 'points'], ['tidy', 'Points to grid, tidy', 'tidy'], ['topleft', 'Position: top left', 'topleft'], ['center', 'Position: centre', 'center'], ['q2', 'Quantize 2× grid', 'tidy', 2], ['q4', 'Quantize 4× grid', 'tidy', 4]].map((d) => ({ id: 'snap.' + d[0], title: `Snap: ${d[1]}`, short: d[1], icon: 'grid', group: 'edit', menu: 'Snap', when: (c) => (d[2] === 'topleft' || d[2] === 'center' ? c.sel.some((o) => !o.bind && vis.get(o.id)?.xf) : c.lines.some(flatLine)), run: (c) => snapSelection(c, d[2], d[3]) })),
   ...[['grid', 'Points to the grid', {}], ['object', 'Whole, by its start', { what: 'object' }], ['time', 'To the beat division', 'time'], ['pitch', 'To the scale', { pitch: 'scale' }], ['both', 'To the beat and the scale', 'both']].map(([id, title, how]) => ({ id: 'quantize.' + id, title: `Quantize: ${title.toLowerCase()}`, short: title, icon: 'grid', group: 'edit', menu: 'Quantize', when: (c) => c.sel.some((o) => !o.bind && o.kind !== 'joint' && o.role !== 'traveler'),
     run: (c) => { const q = settings.quant; try { call('quantize', { ids: ids(c.sel), ...(how === 'time' ? { time: q } : how === 'both' ? { time: q, pitch: 'scale' } : how) }); } catch (e) { agent.say(e.message); } } })),
+  ...[...LINE_PARTS, ...SHAPE_PARTS].map((k) => ({ id: 'synth.' + k, title: `Synth: ${k}`, short: k, icon: 'syn.' + k, group: 'edit', menu: 'Synth',
+    when: (c) => (LINE_PARTS.includes(k) ? c.lines.some((o) => !o.bind && kindOf(o) !== k) : c.shapes.some((o) => kindOf(o) !== k && o.role !== 'traveler')),
+    run: (c) => batch(() => { for (const o of LINE_PARTS.includes(k) ? c.lines.filter((x) => !x.bind) : c.shapes.filter((x) => x.role !== 'traveler')) call('synth.make', { id: o.id, kind: k }); }) })),
+  { id: 'synth.audition', title: 'Play a note on this instrument', short: 'Play a note', icon: 'play', group: 'edit', menu: 'Synth', when: (c) => isOut(c.one), run: (c) => call('synth.play', { id: c.one.id }) },
   { id: 'front', title: 'Bring to front', icon: 'front', keys: 'mod+shift+]', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'front' }) },
   { id: 'forward', title: 'Bring forward', icon: 'front', keys: 'mod+]', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'forward' }) },
   { id: 'backward', title: 'Send backward', icon: 'back', keys: 'mod+[', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'backward' }) },
@@ -2797,6 +2814,8 @@ define({ name: 'play.state', doc: 'What is sounding, read instead of heard. play
     const voices = (o) => (scoreOf(o.id)?.voices ?? []).map((v) => { const e = v.events, step = Math.max(1, Math.ceil(e.length / n)); return { line: v.id, from: round(e[0]?.time ?? 0), to: round(e.at(-1)?.time ?? 0), pitch: e.filter((_, i) => i % step === 0 || i === e.length - 1).map((x) => [round(x.time), Math.round(x.midi * 100) / 100]) }; });
     return { playing: transport.playing, beat: round(transport.beat), bpm: state.music.bpm, scores: scores().map((o) => ({ id: o.id, playing: transport.playing && scorePlaying(o), seconds: round(scoreOf(o.id)?.duration ?? 0), voices: voices(o) })), notes: heard.slice(-16), errors: Object.fromEntries(run?.errors ?? []) };
   } });
+define({ name: 'synth.play', record: false, doc: 'Play a note on a drawn instrument now, to hear it: id is its out part (or its name); midi (default 60), seconds (0.6), velocity (100).', args: { id: T.str, midi: T.num, seconds: T.num, velocity: T.num }, required: ['id'],
+  run(a) { const id = instrumentId(state.objects, a.id); if (!id) throw new Error(`no drawn instrument "${a.id}": give the id or the name of a synth's out part`); sound.note(a.midi ?? 60, a.velocity ?? 100, a.seconds ?? 0.6, id); return true; } });
 define({ name: 'play.toggle', doc: 'Start or stop playing: scores loop and travelers set off along their lines. Returns whether it plays now.', record: false, run: () => { togglePlay(); return transport.playing; } });
 define({ name: 'score.stop', doc: 'Stop one score (the others play on), or pause everything when no id is given.', args: { id: T.id }, record: false, run: (a) => { if (!a.id) { if (transport.playing) togglePlay(); return; } scoreSet = new Set(scores().filter((o) => o.id !== a.id && scorePlaying(o)).map((o) => o.id)); sound.silence(a.id); scorePlan.delete(a.id); } });
 define({ name: 'assistant.ask', doc: 'Ask the built-in assistant to build something from a sentence.', args: { text: T.str }, required: ['text'], record: false, run: (a) => ask(a.text) });

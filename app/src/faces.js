@@ -8,6 +8,7 @@
 import { h, syncParams, codeArea, syncCode } from './controls.js';
 import { hasCode } from './object.js';
 import { sketchKind, sketchDoc } from './sketch.js';
+import { icon } from './icons.js';
 
 const fmt = (v) => (Array.isArray(v) ? `[${v.length}]` : typeof v === 'number' && Number.isFinite(v) ? (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2)) : '');
 const FRAME_W = 480; // a sketch is laid out this wide, then scaled to its face
@@ -76,7 +77,12 @@ export function createFaces(layer, { onParam, onCode }) {
       el.style.cssText = `left:${p.l.toFixed(1)}px;top:${p.t.toFixed(1)}px;width:${p.w.toFixed(1)}px;height:${p.h.toFixed(1)}px${plain ? '' : look}`;
       const error = run.errors.get(id), kind = plain || v.face === 'far' ? null : hasCode(o) && o.role !== 'score' ? sketchKind(o.code) : null;
       el.className = `face kind-${o.kind} role-${o.role ?? 'group'} ${v.face}${sel ? ' sel' : ''}${error ? ' err' : ''}${kind ? ' is-sketch' : ''}${plain ? ' plain' : ''}${o.rect && sel && selection.size === 1 ? ' sizable' : ''}${o.shape === 'ellipse' ? ' shape-ellipse' : ''}`;
-      if (plain || v.face === 'far') { if (el.frame) sketch(el, v, null); continue; }
+      if (plain || v.face === 'far') {
+        if (el.frame) sketch(el, v, null);
+        // a synth part far off is its kind's glyph (synth.js), so a drawn instrument still reads as one
+        if (o.role === 'synth' && v.blanket?.name) { const g = 'syn.' + v.blanket.name; if (el.dataset.glyph !== g) { el.dataset.glyph = g; el.head.innerHTML = icon(g); } }
+        continue;
+      }
       if (isNote) {
         if (el.note.textContent !== (o.text ?? '')) el.note.textContent = o.text ?? '';
         el.note.style.color = o.style?.stroke ?? '';
@@ -85,7 +91,10 @@ export function createFaces(layer, { onParam, onCode }) {
         continue;
       }
       const b = v.blanket;
-      el.head.textContent = error ? `${b.name} · ${error}` : b.name;
+      if (o.role === 'synth') { // its kind's glyph, and its name where there is room
+        const g = 'syn.' + b.name, t = error ? `${b.name} · ${error}` : b.name;
+        if (el.dataset.glyph !== g + t) { el.dataset.glyph = g + t; el.head.innerHTML = icon(g); el.head.append(h('span', '', t)); }
+      } else { if (el.dataset.glyph) delete el.dataset.glyph; el.head.textContent = error ? `${b.name} · ${error}` : b.name; }
       ports(el.ins, b.ins, b.ins.join(' '));
       ports(el.outs, b.outs, b.outs.join(' '));
       b.outs.forEach((name, i) => {
