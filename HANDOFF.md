@@ -1082,6 +1082,38 @@ Known gaps and shortcuts:
 
 ## 6. Next steps
 
+**Agents: where it stands (16 Nov 2026, the owner: "in a good place for
+now").** The full record is in section 8 under "Controls" (passes one to
+five, Pi, the audit). In short:
+
+- Every agent reaches the same commands: the page's own loop (Assistant
+  panel, and quick turns from the palette), outside agents over the relay
+  (Claude Code by `.mcp.json`, opencode, Pi by its extension), WebMCP where
+  a browser has it. `code.help` gives recipes for what plays (scores,
+  triggers, graphs of joints) and what each kind of code is given; wrong
+  names, unknown ids and code that cannot compile are refused with the
+  reason; `play.state` reads what sounds and reports code errors.
+- What works, measured: simple requests (`app/eval.mjs`, `eval.run`)
+  are best on quick turns. LFM3 in the browser 11 of 12 at 1.5 s; `gemma4`
+  (Ollama) 23 of 24 at 2.6 s; `lfm3` (Ollama) 20 of 24 at 6.7 s.
+- A scene from a sentence ("a perpetual markov chain drum and bass graph
+  loop") works with a model of about 27b through Pi (the qwen 27b: 21 calls,
+  4 minutes, plays on) and with a hosted model as large as Claude (3
+  calls). It does not yet with the small ones.
+- Security: `docs/SECURITY.md`. Six holes closed; opening a take runs its
+  code, left as it is by the owner's decision.
+- **The aim for later (the owner):** a very small, fast model trained for
+  underspace, such as an LFM3 fine-tune, so that scenes from a sentence
+  work in the browser. What exists for it: the eval cases
+  (`app/src/evalcases.js`) as a test set; the recipes and `code.help` as
+  the knowledge; and takes, which record every call an agent makes with its
+  arguments under its name, as training data. Turns by the 27b model and by
+  Claude that pass are the examples to collect first. Not started.
+- Left undone: a shorter tool list for Pi (it sends all 75 tools a step,
+  most of its four minutes); the s-curve request; an eval case for a whole
+  scene (does it sound, on the scale asked); a quick turn's handover tried
+  from the palette by hand; WebMCP and Chrome proper.
+
 **The 3D phase, in passes** (begun 14 Nov 2026, after the score and
 timeline): (1) done: targets take marks in, travelers and nodes in 3D;
 (2) done: placement and the magnet from threegrease `src/tools/snapping.ts` and
@@ -1144,8 +1176,10 @@ In this order, unless the owner says otherwise.
    editing a score's edits mid-pass rather than at the next pass.
 5. Timeline and clip editing over takes (bring AMS's take model and playback
    first; editing features as needed).
-6. Agent: engine layer from seloai, loop from threecoder Studio, scoped to
-   one object, driving an in-browser model.
+6. ~~Agent~~: built as the controls (above and section 8): one command
+   registry for every brain, a loop in the page with an in-browser model,
+   outside agents through the relay. Later: a small model fine-tuned on
+   underspace takes (see "Agents: where it stands").
 7. Scene editing (threeditor's tools over the same space), then circuit and
    choreography.
 
