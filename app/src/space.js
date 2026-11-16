@@ -661,7 +661,7 @@ define({ name: 'space.clear', doc: 'Remove everything.', run: () => reset() });
 // ---- music: the context, and recorded clips (music.js) -------------------------
 
 define({
-  name: 'music.set', doc: 'Set the musical context everything plays in: bpm, meter [beats in a bar, note value], scale (one of the names below, or a list of steps in semitones from the root, fractions allowed), root (a MIDI note), low and high (the range that heights and places 0..1 map to), channels ({ 1..16: instrument }; instruments: ' + INSTRUMENTS.join(', ') + '). Scales: ' + scaleNames().join(', ') + '.',
+  name: 'music.set', doc: 'Set the musical context everything plays in: bpm, meter [beats in a bar, note value], scale (one of the names below, or a list of steps in semitones from the root, fractions allowed), root (a MIDI note), low and high (the range that heights and places 0..1 map to), channels ({ 1..16: instrument }; instruments: ' + INSTRUMENTS.join(', ') + '; channel 10 is drums by default: note 36 kick, 38 snare, 42 and 46 hats). Scales: ' + scaleNames().join(', ') + '.',
   args: { bpm: T.num, meter: { type: 'array', items: { type: 'number' } }, scale: { type: ['string', 'array'] }, root: T.num, low: T.num, high: T.num, channels: { type: 'object' } },
   run(a) {
     // what cannot be meant is refused, not passed over: a wrong name would read as done

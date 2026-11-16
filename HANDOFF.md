@@ -1623,6 +1623,22 @@ Also asked for:
   exchange files; the options are holding a file's code until the person
   lets it run, sketch frames without same-origin, or all object code in a
   worker. The running hub must be restarted to have the fixes.
+- **Priority (the owner, 15 Nov 2026): models that use the tools to help or
+  to build elements and scenes themselves**, for requests such as "create a
+  geometric structure from lines approximating hyperbolic s-curves and
+  attach glissandi and triggers on an aeolian scale" or "make a perpetual
+  markov chain drum and bass graph loop". Not by adding generator commands:
+  that is what a capable agent outside the page is for (Pi, Claude Code,
+  opencode), composing the primitives. Tried as such an agent over the
+  relay: the drum and bass graph took three calls (seven `line.add`, six
+  `joint.add` with code that plays a drum and a bass note by chance and
+  returns a random way, one `traveler.add` with speed 4) and `play.state`
+  showed it running on. What it needed and the tools did not say (which
+  notes are which drums, how to build a graph of joints) is now in
+  `code.help` and `music.set`. Next: the s-curve request the same way; Pi
+  with a provider that works (Ollama is now 0.40.16: retry it with `gemma4`
+  or `lfm3`); the same two requests given to `gemma4` through the whole
+  loop in the Assistant panel, to see how far a local model gets.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

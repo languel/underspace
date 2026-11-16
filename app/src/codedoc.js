@@ -11,7 +11,7 @@ import { TARGET_PRESETS } from './object.js';
 
 const HEADER = 'The first comment lines are its header: "// name", then "// in: a b", "// out: y", "// param: gain 0.5" declare its ports and parameters.';
 const MUSIC = [
-  ['note(midi, velocity, seconds, channel)', 'plays a note; seconds \'gate\' holds it while the traveler is inside; channel 1..16 picks the instrument (music.set channels)'],
+  ['note(midi, velocity, seconds, channel)', 'plays a note; seconds \'gate\' holds it while the traveler is inside; channel 1..16 picks the instrument (music.set channels); channel 10 is drums, the note picks the drum: 36 kick, 38 snare, 42 closed hat, 46 open hat, others a tom'],
   ['pitch(v)', 'a place 0..1 as a note: across the range low..high, on the scale (music.set); in a grid with rows, the row\'s note'],
   ['step(n, k)', 'k degrees of the scale up from note n'],
   ['snap(n)', 'the nearest note of the scale'],
@@ -59,7 +59,7 @@ export const CODE_DOC = {
     presets: EVENTS,
   },
   junction: {
-    what: 'A joint (joint.add: lines held together, or one place on a line with node: true): its code runs when a traveler arrives and chooses the way on. A Midinous glyph (object.glyph) gives it that node\'s code.',
+    what: 'A joint (joint.add: lines held together, or one place on a line with node: true): its code runs when a traveler arrives and chooses the way on. A Midinous glyph (object.glyph) gives it that node\'s code. To build a graph that plays (a Markov chain, a sequencer): line.add each edge as a straight line, then one joint.add a node with at: the line ends that meet there ({ id, u: 0 } a line\'s start, { id, u: 1 } its end) and code that plays a note and returns a way; then traveler.add on one line and object.set its speed (grid cells a beat, so an edge\'s length is its time). A graph where every node has a way on never ends.',
     gets: [
       ['ways', 'where the traveler can go on, straightest first: [{ line, dir (1 forward, -1 back), turn (radians, left is +) }]'],
       ['ev', '{ traveler, rider, from, count, last (the last note this rider played), spb (seconds a beat) }'],
