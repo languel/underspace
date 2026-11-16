@@ -1891,8 +1891,10 @@ Also asked for:
       face beside channel and gain; the voice's rows show which are
       published; the instrument opened at 228 px with "its inside from here
       up", was a glyph with far 300, and reset. 147 tests.
-    - Not yet: a face is as tall as its object, so more than two or three
-      published rows are cut off; no "strength" (how much of the inside
+    - A shut group's face grows downward to hold the rows published to it
+      (`faces.js`: the DOM face only; the object's rect, ports and picking
+      are as before). Checked: three rows on the instrument, none cut.
+    - Not yet: no "strength" (how much of the inside
       shows, as a fade between levels: the switch is hard); ports cannot be
       hidden or chosen, they are whatever wires were cut; published
       parameters cannot be renamed; nothing predicts or corrects (active

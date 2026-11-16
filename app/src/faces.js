@@ -111,6 +111,8 @@ export function createFaces(layer, { onParam, onCode, onPublish }) {
       // v.up: it is in a group, so each row can be published to that group's face.
       const rows = o.kind === 'group' ? (v.face === 'mid' ? v.pub ?? [] : []) : b.params.map((q) => ({ key: q.name, name: q.name, value: o.params?.[q.name] ?? q.value, id: o.id, param: q.name }));
       syncRows(el.params, o.id, rows.map((r) => ({ ...r, on: !!o.publish?.includes(r.key) })), onParam, v.up ? { owner: o.id, onPublish } : null);
+      // a shut group is as tall as what is published to it needs: its interface is not cut off
+      if (o.kind === 'group' && rows.length) { const need = el.params.scrollHeight; if (need > 0 && need + 32 > p.h) el.style.height = need + 32 + 'px'; }
       if (el.code) syncCode(el.code, o);
       sketch(el, v, kind, run);
     }
