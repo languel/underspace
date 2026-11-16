@@ -1777,6 +1777,17 @@ Also asked for:
     `shape.add` was made to say a note shape is text, and `code.help` was
     given a recipe for notes in a shape: it searched the tools and still
     made a text note). Each attempt was undone.
+  - **The same request through Pi with the qwen 27b** (the shape named as
+    o60, since Pi has no pointer): **done right** in 11 calls and 237 s. It
+    read the shape, then the recipes; drew 8 lines across the shape; put 20
+    note events inside it, on those lines so the travelers reach them, each
+    with code `note(step(45, k), 100, 0.3)` (degrees of the Aeolian scale on
+    A); put a traveler on each line with dur 8 (two bars of 4/4) and loop 1;
+    played it and read `play.state`. Checked after: the notes sound, all on
+    the scale, no code errors. One call failed (it sent `batch_run` its
+    calls as a string) and it put that right itself. Left in the drawing at
+    (66, -8). So the recipe for notes in a shape is enough for a model of
+    that size; `gemma4` does not follow it.
     A model the size of the qwen 27b, through Pi, is the one to expect it
     from. 140 tests.
 - **Baseline model: `lfm3`** (the owner, 16 Nov 2026), in place of
