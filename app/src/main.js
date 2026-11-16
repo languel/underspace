@@ -1835,7 +1835,7 @@ async function engine() {
   const make = ENGINES.find((x) => x.id === settings.assistEngine)?.make;
   if (make) return make();
   if (!settings.assistBase) throw new Error('no model endpoint set');
-  if (!settings.assistModel) setSetting('assistModel', (await listModels(settings.assistBase))[0]);
+  if (!settings.assistModel) setSetting('assistModel', await listModels(settings.assistBase).then((l) => l.find((m) => /^lfm3/i.test(m)) ?? l[0])); // lfm3 is the baseline when there
   return endpointEngine({ base: settings.assistBase, model: settings.assistModel, sees: await seesPictures(settings.assistBase, settings.assistModel) });
 }
 // What a brain is told of the moment: what is selected and where the view is.

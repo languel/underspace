@@ -1779,6 +1779,11 @@ Also asked for:
     made a text note). Each attempt was undone.
     A model the size of the qwen 27b, through Pi, is the one to expect it
     from. 140 tests.
+- **Baseline model: `lfm3`** (the owner, 16 Nov 2026), in place of
+  `lfm2.5-thinking`. With no model chosen, the Assistant and `app/eval.mjs`
+  take `lfm3` when the model server has it (`ollama pull lfm3`, which needs
+  Ollama 0.40.12 or later), else the first model listed. Its numbers so far
+  are under "lfm3 on Ollama" above (quick 20 of 24, whole loop 22 of 24).
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

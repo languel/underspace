@@ -3,7 +3,7 @@
 // run through the same loop the Assistant uses (agent.js) against a model server. No browser:
 // the drawing's commands run in Node, so it tests what a model does with the tools, not the page.
 //
-//   node app/eval.mjs --model lfm2.5-thinking:latest [--base http://127.0.0.1:11434] [--only square] [--runs 1] [--quick] [--verbose]
+//   node app/eval.mjs [--model lfm3:latest] [--base http://127.0.0.1:11434] [--only square] [--runs 1] [--quick] [--verbose]
 //
 // Prints a line a case (pass or fail, rounds, seconds, the commands it called) and a total.
 // Add a case when a model gets something wrong that it should get right.
@@ -16,7 +16,8 @@ import { cases } from './src/evalcases.js';
 
 const argv = process.argv.slice(2), opt = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 const base = opt('--base', 'http://127.0.0.1:11434'), only = opt('--only'), verbose = argv.includes('--verbose'), runs = Number(opt('--runs', 1)), quick = argv.includes('--quick'); // --quick: the short prompt and few tools of a quick turn
-const model = opt('--model') ?? (await listModels(base))[0];
+// the baseline is lfm3 when the server has it (the owner, 16 Nov 2026), else the first model listed
+const model = opt('--model') ?? (await listModels(base).then((l) => l.find((m) => /^lfm3/i.test(m)) ?? l[0]));
 
 // the commands the page adds that a model leans on, here without a page
 define({ name: 'tools.search', record: false, doc: 'Find commands by what they do: words from a command\'s name or description.', args: { query: T.str }, run: (a) => searchTools(tools(), a.query, 8).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
