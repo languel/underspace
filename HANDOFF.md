@@ -201,9 +201,9 @@ One canvas. Everything on it is an object in the sense of section 3:
   mid (ports and parameters), near (the code, editable in place). The same
   code is in the sidebar when the object is selected.
 - **A drawn line whose ends land on an output and an input becomes a wire.**
-  The drawn points are kept; what is shown is the drawing carried by the
-  similarity that puts its ends on the two ports, so it follows its objects
-  and keeps its hand-drawn shape. A new wire into an input replaces the old
+  The drawn points are kept, but since 16 Nov 2026 what is shown is a cable
+  (a spline along the ports' normals, `bind.js` `cable`), not the drawn
+  shape; the drawing comes back when the wire is unbound. A new wire into an input replaces the old
   one, which stays as a plain mark.
 - **Collapse (G)** folds a selection into a group; each cut wire becomes a
   port on the group. Zoom into the group and its contents are there, in
