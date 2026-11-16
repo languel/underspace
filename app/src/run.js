@@ -51,7 +51,7 @@ export function createRunner() {
     for (const o of objects.values()) {
       // Travelers, events and junctions are moved and fired by the play engine, which reports here.
       if (o.role === 'traveler' || o.role === 'event' || o.role === 'junction' || o.role === 'grid') { next.set(o.id, external.get(o.id) ?? {}); if (externalErrors.get(o.id)) errors.set(o.id, externalErrors.get(o.id)); continue; }
-      if (!hasCode(o) || o.code == null) continue;
+      if (!hasCode(o) || o.code == null || o.role === 'synth') continue; // a synth part's code is a header and maybe a formula: synth.js reads it
       if (o.role === 'score' || sketchKind(o.code)) {
         next.set(o.id, external.get(o.id) ?? {});
         if (externalErrors.has(o.id)) errors.set(o.id, externalErrors.get(o.id));

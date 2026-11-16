@@ -10,6 +10,8 @@ import { EVENTS } from './play.js';
 import { iannixPlan, applyPlan } from './iannix.js';
 import { nousPlan, applyNous, nodeCodeFor } from './nous.js';
 import { POINT_KINDS } from './glyphs.js';
+import { state } from './space.js';
+import { portPos } from './object.js';
 
 const wave = (x, y, n, step, f) => Array.from({ length: n }, (_, i) => [+(x + i * step).toFixed(3), +(y + f(i)).toFixed(3)]);
 
@@ -57,15 +59,16 @@ const PLUCK = [[0, -1], [0.02, 1], [0.25, -0.4], [1, -1]];
 const SWELL = [[0, -1], [0.5, 1], [1, 0.6]];
 const TANH = Array.from({ length: 13 }, (_, i) => { const u = i / 12; return [u, Math.tanh((u * 2 - 1) * 3)]; });
 const FALLING = Array.from({ length: 16 }, (_, i) => [i / 15, 2 / (i + 1) - 1]); // 1/k: a saw's harmonics
-// parts: [{ key, line: unit points | shape: true, kind, at: [dx, dy], w, h, params }]; wires: ['a.out -> b.in']
+// parts: [{ key, line: unit points | shape: true, kind, preset?, at: [dx, dy], w, h, params }]; wires: ['a.out -> b.in']
 // A traveler on a loop below rings four notes on the instrument's channel, so Space plays it.
-function synthExample(c, at, ch, parts, wires, notes = [0, 2, 4, 7]) {
+// nest: [[name, [keys]], ...] folds parts into groups in that order (a key may name a group made before).
+function synthExample(c, at, ch, parts, wires, notes = [0, 2, 4, 7], nest = []) {
   const id = {};
   for (const q of parts) {
     const pos = [at[0] + q.at[0], at[1] + q.at[1]];
     id[q.key] = q.line ? c('line.add', { points: curve(q.line, pos, q.w ?? 2.4, q.h ?? 1.4), ...(q.straight ? { style: { path: 'straight' } } : {}) })
       : c('shape.add', { role: 'visual', rect: { cx: pos[0], cy: pos[1], w: q.w ?? 1.8, h: q.h ?? 1.2 } });
-    c('synth.make', { id: id[q.key], kind: q.kind });
+    c('synth.make', { id: id[q.key], kind: q.kind, ...(q.preset ? { preset: q.preset } : {}) });
     for (const [k, v] of Object.entries(q.params ?? {})) c('object.set', { id: id[q.key], name: k, value: v });
   }
   c('object.set', { id: id.out, name: 'channel', value: ch });
@@ -73,7 +76,12 @@ function synthExample(c, at, ch, parts, wires, notes = [0, 2, 4, 7]) {
   const ring = c('line.add', { points: loop });
   c('traveler.add', { on: ring, dur: 4, loop: 1 });
   notes.forEach((k, i) => { const p = loop[Math.round((i / notes.length) * 32) % 32]; const e = c('point.add', { at: p, role: 'event', glyph: 'note', size: 0.5 }); c('object.code', { id: e, code: `// event\n// out: gate count\nnote(step(57, ${k}), 100, 0.45, ${ch});` }); });
-  return { connect: wires.map((w) => { const [a, b] = w.split('->').map((x) => x.trim().split('.')); return [id[a[0]], a[1], id[b[0]], b[1]]; }) };
+  // the wires, drawn from port to port with a little sag, before any folding: cut wires become ports
+  for (const w of wires) {
+    const [a, b] = w.split('->').map((x) => x.trim().split('.')), p = portPos(state.objects.get(id[a[0]]), 'outs', a[1]), q = portPos(state.objects.get(id[b[0]]), 'ins', b[1]);
+    c('line.add', { points: Array.from({ length: 12 }, (_, i) => { const u = i / 11; return [+(p[0] + (q[0] - p[0]) * u).toFixed(4), +(p[1] + (q[1] - p[1]) * u + Math.sin(u * Math.PI) * 0.4).toFixed(4)]; }), tol: 0.05 });
+  }
+  for (const [name, keys] of nest) id[name] = c('group.collapse', { ids: keys.map((k) => id[k]), name });
 }
 
 export const EXAMPLES = [
@@ -350,6 +358,17 @@ export const EXAMPLES = [
     { key: 'out', kind: 'out', at: [4, 1.5] },
     { key: 'env', line: SWELL, kind: 'env', at: [-5, -1.2], straight: true, params: { dur: 0.6, release: 0.6 } },
   ], ['parts.audio -> amp.audio', 'env.level -> amp.level', 'amp.audio -> out.audio'], [0, 4, 7, 11]) },
+  { path: 'Sound/Synths you draw', title: 'Nested: an instrument, a voice inside, its parts inside that', icon: 'collapse', build: (c, at) => synthExample(c, at, 15, [
+    { key: 'osc', line: SAW, kind: 'osc', preset: 'saw', at: [-6, 1.5] },
+    { key: 'sub', line: SINE, kind: 'osc', preset: 'square', at: [-6, 3.6], params: { ratio: 0.5, level: 0.5 } },
+    { key: 'mix', kind: 'mix', at: [-2.5, 2.5] },
+    { key: 'filter', kind: 'filter', at: [0.5, 2.5], params: { hz: 300, q: 8, depth: 3000 } },
+    { key: 'fenv', line: PLUCK, kind: 'env', preset: 'pluck', at: [-2.5, -0.6], params: { dur: 0.5, sync: 1 } },
+    { key: 'amp', kind: 'amp', at: [3.5, 2.5] },
+    { key: 'aenv', line: ADSR, kind: 'env', preset: 'adsr', at: [0.5, -0.6], params: { dur: 1, sync: 1, release: 0.5 } },
+    { key: 'out', kind: 'out', at: [6.5, 2.5], params: { bpm: 0 } },
+  ], ['osc.audio -> mix.a', 'sub.audio -> mix.b', 'mix.audio -> filter.audio', 'fenv.level -> filter.cutoff', 'filter.audio -> amp.audio', 'aenv.level -> amp.level', 'amp.audio -> out.audio'], [0, 3, 7, 10],
+  [['oscillators', ['osc', 'sub', 'mix']], ['voice', ['oscillators', 'filter', 'fenv', 'amp', 'aenv']], ['instrument', ['voice', 'out']]]) },
   { path: 'Sound/Synths you draw', title: 'Waveshaping: a curve bends the sound', icon: 'syn.shaper', build: (c, at) => synthExample(c, at, 14, [
     { key: 'osc', line: SINE, kind: 'osc', at: [-7, 1.5] },
     { key: 'shape', line: TANH, kind: 'shaper', at: [-3.5, 1.5], params: { drive: 3 } },

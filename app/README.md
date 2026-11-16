@@ -292,8 +292,13 @@ cycle of the wave), **partials** (its height across is the strength of each harm
 **noise** and **out**. Draw connectors from port to port. The **out** part is the instrument:
 its `channel` parameter is the MIDI channel it plays, so an event's `note(m, v, d, channel)`, a
 recorded clip or the timeline plays it. Right-click an out › Synth › Play a note. Redraw a
-curve and the next note sounds as drawn. Examples › Sound › Synths you draw: subtractive, FM,
-additive, waveshaping, each with a traveler loop that plays it on Space.
+curve and the next note sounds as drawn. A curve part can also be a readymade (the Code panel's
+presets: sine, saw, square, pluck, adsr, tanh ...) or a formula of `x` in plain JavaScript under its
+header (`return sin(2 * PI * x);`), and the line is redrawn to show it. An envelope with `sync 1`
+counts in beats of a clock: the instrument's own (`bpm` on its out) or the timeline's. Fold parts
+into groups (⌘G), and groups into groups: the group holding the out is the instrument, and its
+name is what a channel can name. Examples › Sound › Synths you draw: subtractive, FM,
+additive, waveshaping, and a nested instrument (oscillators inside a voice inside the instrument), each with a traveler loop that plays it on Space.
 
 ## For agents
 

@@ -18,7 +18,7 @@ import { settle, JUNCTION, isCurve, curveOf, measure, atU } from './joints.js';
 import { DEFAULT_MUSIC, scaleName, scaleNames } from './music.js';
 import { DEFAULT_GRID, GRID, GRID_KEYS } from './grid.js';
 import { INSTRUMENTS } from './instruments.js';
-import { SYNTH_PARTS, LINE_PARTS, SHAPE_PARTS, instrumentId } from './synth.js';
+import { SYNTH_PARTS, LINE_PARTS, SHAPE_PARTS, READYMADES, instrumentId, formulaOf, formulaPoints, formula } from './synth.js';
 
 export const state = {
   objects: new Map(),   // id -> object, see object.js
@@ -366,14 +366,17 @@ define({
 define({
   name: 'synth.make',
   doc: 'Make an object a part of a synth you draw, keeping its shape. A line: "osc" (its curve is one cycle of the wave), "partials" (its height across is the strength of each harmonic), "env" (its curve is a level over time), "shaper" (its curve maps what comes in to what goes out). A shape: "filter", "amp", "mix", "noise", "out" (the instrument: its channel parameter is the MIDI channel it plays). Wire parts with connectors from an out port to an in port (line.add with tol, ends on the two ports). code.help { role: "synth" } says more.',
-  args: { id: T.id, kind: { enum: Object.keys(SYNTH_PARTS) } }, required: ['id', 'kind'],
+  args: { id: T.id, kind: { enum: Object.keys(SYNTH_PARTS) }, preset: { type: 'string', description: 'a readymade shape for a line part, instead of the drawing: osc ' + Object.keys(READYMADES.osc).join(', ') + '; partials ' + Object.keys(READYMADES.partials).join(', ') + '; env ' + Object.keys(READYMADES.env).join(', ') + '; shaper ' + Object.keys(READYMADES.shaper).join(', ') + '. The line is redrawn to show it.' } }, required: ['id', 'kind'],
   run(a) {
     const o = state.objects.get(a.id);
     if (!o || o.bind) return false;
     const ok = o.kind === 'line' ? LINE_PARTS.includes(a.kind) : o.kind === 'shape' ? SHAPE_PARTS.includes(a.kind) : false;
     if (!ok) throw new Error(`a ${o.kind} cannot be a ${a.kind}: a line is one of ${LINE_PARTS.join(', ')}; a shape one of ${SHAPE_PARTS.join(', ')}`);
     if (o.code != null && o.role !== 'synth') (o.stash ??= {})[o.role] = o.code;
-    o.role = 'synth'; o.code = SYNTH_PARTS[a.kind]; o.params ??= {};
+    const body = a.preset != null ? READYMADES[a.kind]?.[a.preset] : null;
+    if (a.preset != null && body == null) throw new Error(`no ${a.kind} readymade "${a.preset}" (one of ${Object.keys(READYMADES[a.kind] ?? {}).join(', ') || 'none: only lines have them'})`);
+    o.role = 'synth'; o.code = SYNTH_PARTS[a.kind] + (body ? '\n' + body : ''); o.params ??= {};
+    if (body && o.kind === 'line') { o.points = formulaPoints(o, body); o.off = [0, 0]; delete o.pen; }
     prune(o);
     return true;
   },
@@ -386,6 +389,11 @@ define({
     const o = state.objects.get(a.id);
     if (!o || !['code', 'path', 'score', 'event', 'junction', 'grid', 'target', 'synth'].includes(o.role)) return false;
     if (typeof a.code !== 'string') throw new Error('code must be a string of JavaScript');
+    if (o.role === 'synth' && o.kind === 'line' && formulaOf({ code: a.code })) { // a formula: checked, and drawn
+      const body = formulaOf({ code: a.code });
+      try { formula(body)(0.5); } catch (e) { throw new Error(`this formula does not work: ${e.message}. It is the body of a function of x (0 to 1) that returns a height, e.g. return sin(2 * PI * x);`); }
+      o.code = a.code; o.points = formulaPoints(o, body); o.off = [0, 0]; delete o.pen;
+    }
     o.code = a.code; o.params ??= {};
     parseBlanket(o.code);
     prune(o);

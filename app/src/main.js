@@ -59,7 +59,7 @@ import { midiFile, readNotes, createMidiOut } from './midi.js';
 import { iannixPlan, applyPlan } from './iannix.js';
 import { nousPlan, applyNous, nodeCodeFor } from './nous.js';
 import { INSTRUMENTS, DEFAULT_CHANNELS, setCustomVoices } from './instruments.js';
-import { planInstrument, instrumentId, claimOf, buildVoice, LINE_PARTS, SHAPE_PARTS, kindOf, isOut } from './synth.js';
+import { planInstrument, instrumentId, claimOf, buildVoice, LINE_PARTS, SHAPE_PARTS, kindOf, isOut, READYMADES, SYNTH_PARTS } from './synth.js';
 import { solve, crossings, crossings3d, measure, atU, atS, tangentS, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
@@ -448,7 +448,7 @@ setCustomVoices((name) => {
   const id = instrumentId(state.objects, name);
   if (!id) return null;
   let plan = synthPlans.get(id);
-  if (!plan) { plan = planInstrument(state.objects, id); synthPlans.set(id, plan); }
+  if (!plan) { plan = planInstrument(state.objects, id, { bpm: state.music.bpm }); synthPlans.set(id, plan); }
   return plan ? (ac, out, midi, vel, at, seconds) => buildVoice(ac, out, plan, midi, vel, at, seconds) : null;
 });
 function playNote(midi, vel = 100, seconds = 0.3, ch = 1) {
@@ -2359,7 +2359,7 @@ const app = {
   ask: (text, o) => ask(text, o), agent: () => agent, engines: () => ENGINES, listModels: () => listModels(settings.assistBase),
   state, call, batch, get, tools, PRESETS, BRUSHES, INK, SCULPTS, sculptErrors: () => sculptErrors, brushesFor, actions: ACTIONS, onParam, onCode, frameIds, runAction,
   run: () => run, setRole, keysShown: (a) => showKey(a), tool: () => tool, settingsVersion: () => settingsVersion,
-  presetsFor: (o) => (o.role === 'target' ? TARGET_PRESETS : o.role === 'score' ? BRUSHES : o.role === 'junction' ? JUNCTIONS : o.role === 'event' ? EVENTS : o.role === 'grid' ? GRID_PRESETS : PRESETS),
+  presetsFor: (o) => (o.role === 'synth' ? { drawn: SYNTH_PARTS[kindOf(o)], ...Object.fromEntries(Object.entries(READYMADES[kindOf(o)] ?? {}).map(([n, b]) => [n, SYNTH_PARTS[kindOf(o)] + '\n' + b])) } : o.role === 'target' ? TARGET_PRESETS : o.role === 'score' ? BRUSHES : o.role === 'junction' ? JUNCTIONS : o.role === 'event' ? EVENTS : o.role === 'grid' ? GRID_PRESETS : PRESETS),
   // Add an example: built, then moved as a whole to `drop` (a canvas point: dragged from the panel),
   // or just below what is on the canvas, clear of it; it comes in selected, so it can be moved at once.
   addExample(ex, drop = null) {

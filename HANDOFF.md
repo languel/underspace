@@ -1828,6 +1828,31 @@ Also asked for:
     saw as a sine made it four times less bright, and undo brought the saw
     back; played on the transport, channels 11 to 14 sounded with no code
     errors. Not heard by ear. 142 tests.
+  - **Nesting, readymades, formulas, clocks** (the owner, the same day:
+    "multilevel nesting and nested patches so the top level patch is the
+    interface to a nested modular synth"; "things we draw use readymades or
+    formulas/expressions synced to some global or local clock"). Wires are
+    followed through group ports at any depth (`leaf`, as `run.js` does), so
+    parts folded into groups folded into groups are one instrument, and the
+    group that holds the out is the instrument by its id or name
+    (`instrumentId`, `outInside`). A line part's code may have a body under
+    its header: a formula, the body of a plain JavaScript function of `x`
+    (0..1 across) with Math's functions by name; it replaces the drawing and
+    the line is redrawn to show it (`formulaPoints`); one that does not work
+    is refused with the reason. `READYMADES` are such formulas (osc: sine,
+    saw, square, triangle, pulse, organ; partials: saw, square, bright, bell;
+    env: adsr, pluck, swell, gate, pulse4; shaper: tanh, fold, clip, cubic),
+    offered by `synth.make {preset}` and as the Code panel's presets. Clock:
+    an env with `sync 1` counts `dur` and `release` in beats; the beat is the
+    instrument's own (`bpm` on its out: a local clock) or the timeline's
+    (global). The runner no longer runs synth parts' code. Example: Nested
+    (oscillators inside a voice inside the instrument, readymade waves,
+    synced envelopes), checked in the page: three groups, 8 parts and 7
+    wires found through them, a note renders. 144 tests.
+  - Not yet, for nesting: the top group's face shows only its name: its
+    MIDI channel and level are inside, on the out. Next: a group that holds
+    an out shows the out's glyph, channel and gain on its face (parameters
+    published from inside, which would also serve any nested patch).
   - Not yet: a drawn filter response (a curve as the filter's shape: this
     needs an FIR or many biquads), wavetables (several curves morphing),
     LFOs as such (an osc's audio into a cutoff works, at audio rate), live

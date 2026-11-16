@@ -19,15 +19,44 @@ const head = (name, lines) => [`// ${name}`, ...lines].join('\n');
 export const SYNTH_PARTS = {
   osc: head('osc', ['// in: fm', '// out: audio', '// param: ratio 1', '// param: fm 300', '// param: level 1', '// one cycle of the wave is this curve, left to right; ratio times the note\'s pitch; fm: Hz per unit of what comes in']),
   partials: head('partials', ['// in: fm', '// out: audio', '// param: ratio 1', '// param: count 16', '// param: fm 300', '// param: level 1', '// additive: the height of this curve across is the strength of harmonics 1 to count']),
-  env: head('env', ['// out: level', '// param: dur 0.6', '// param: release 0.3', '// a level over time: this curve, left to right, over dur seconds; held at its end while the note is; then to nothing over release']),
+  env: head('env', ['// out: level', '// param: dur 0.6', '// param: release 0.3', '// param: sync 0', '// a level over time: this curve, left to right, over dur seconds (sync 1: dur and release in beats of the instrument\'s clock); held at its end while the note is; then to nothing over release']),
   shaper: head('shaper', ['// in: audio', '// out: audio', '// param: drive 1', '// a waveshaper: across is what comes in (-1 to 1), up is what goes out']),
   filter: head('filter', ['// in: audio cutoff', '// out: audio', '// param: type 0', '// param: hz 1200', '// param: q 1', '// param: depth 3000', '// type: 0 low pass, 1 high pass, 2 band pass; cutoff moves hz by depth per unit']),
   amp: head('amp', ['// in: audio level', '// out: audio', '// param: gain 1', '// with level wired, its loudness is the level (an envelope); else gain']),
   mix: head('mix', ['// in: a b c', '// out: audio', '// param: gain 0.6']),
   noise: head('noise', ['// out: audio', '// param: level 0.5']),
-  out: head('out', ['// in: audio', '// param: channel 0', '// param: gain 0.5', '// the instrument: it plays the notes of MIDI channel `channel` (1 to 16; 0: only where music.set channels names it)']),
+  out: head('out', ['// in: audio', '// param: channel 0', '// param: gain 0.5', '// param: bpm 0', '// bpm: its own clock for parts that sync (0: the timeline\'s tempo)', '// the instrument: it plays the notes of MIDI channel `channel` (1 to 16; 0: only where music.set channels names it)']),
 };
 export const LINE_PARTS = ['osc', 'partials', 'env', 'shaper'];
+
+// Readymades: a curve part's shape as a formula. A formula is the body of a plain JavaScript
+// function of x (0 to 1, across the curve) that returns its height; Math's functions are given by
+// name (sin, cos, tanh, exp, abs, pow, sign, floor, min, max, sqrt, PI) and p is the parameters.
+// Written under the header, it replaces the drawing, and the line is redrawn to show it.
+export const READYMADES = {
+  osc: { sine: 'return sin(2 * PI * x);', saw: 'return 1 - 2 * x;', square: 'return x < 0.5 ? 1 : -1;', triangle: 'return 1 - 4 * abs(x - 0.5);', pulse: 'return x < 0.2 ? 1 : -0.25;', organ: 'return sin(2 * PI * x) + 0.5 * sin(4 * PI * x) + 0.25 * sin(8 * PI * x);' },
+  partials: { saw: 'return 1 / (1 + x * 15);', square: 'return floor(x * 15 + 0.5) % 2 ? 0 : 1 / (1 + x * 15);', bright: 'return 1 - 0.5 * x;', bell: 'return exp(-3 * x) * abs(sin(9 * x));' },
+  env: { adsr: 'return x < 0.05 ? x / 0.05 : x < 0.3 ? 1 - (x - 0.05) * 1.6 : 0.6;', pluck: 'return exp(-6 * x);', swell: 'return sin(PI * x / 2);', gate: 'return x < 0.02 ? x / 0.02 : 1;', pulse4: 'return x * 4 % 1 < 0.5 ? 1 : 0.2;' },
+  shaper: { tanh: 'return tanh(3 * (2 * x - 1));', fold: 'return sin(3 * PI * (2 * x - 1));', clip: 'return max(-0.6, min(0.6, 2 * x - 1));', cubic: 'return pow(2 * x - 1, 3);' },
+};
+const MATH = ['sin', 'cos', 'tan', 'tanh', 'exp', 'log', 'abs', 'pow', 'sign', 'floor', 'min', 'max', 'sqrt'];
+// The body of a part's code under its header (its formula), or ''.
+export const formulaOf = (o) => (o?.code ?? '').split('\n').filter((l) => !/^\s*\/\//.test(l) && l.trim()).join('\n');
+const formulas = new Map();
+// The formula as a function x -> height; throws with the reason when it cannot be one.
+export function formula(body, p = {}) {
+  let f = formulas.get(body);
+  if (!f) { f = new Function('x', 'p', 'PI', ...MATH, `"use strict";\n${body}`); if (formulas.size > 200) formulas.clear(); formulas.set(body, f); } // eslint-disable-line no-new-func
+  const args = MATH.map((n) => Math[n]);
+  return (x) => { const y = Number(f(x, p, Math.PI, ...args)); return Number.isFinite(y) ? y : 0; };
+}
+// Points that draw a formula in the box the line has now (y up), 49 across.
+export function formulaPoints(o, body) {
+  const pts = ptsOf(o), xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
+  const x0 = Math.min(...xs), w = Math.max(...xs) - x0 || 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2, h = Math.max(...ys) - Math.min(...ys) || 1.2;
+  const f = formula(body, {}), v = Array.from({ length: 49 }, (_, i) => f(i / 48)), lo = Math.min(...v), hi = Math.max(...v), d = hi - lo || 1;
+  return v.map((y, i) => [Math.round((x0 + (w * i) / 48) * 1e4) / 1e4, Math.round((cy - h / 2 + ((y - lo) / d) * h) * 1e4) / 1e4]);
+}
 export const SHAPE_PARTS = ['filter', 'amp', 'mix', 'noise', 'out'];
 export const kindOf = (o) => (o?.role === 'synth' && o.code ? parseBlanket(o.code).name : null);
 export const isOut = (o) => kindOf(o) === 'out';
@@ -37,6 +66,8 @@ const shown = (o) => { const p = ptsOf(o); return o.style?.path === 'straight' |
 // height where the curve first passes that x (a curve is a function of time here, as on UPIC's page).
 // A curve with no width (drawn straight up) is read along its length instead. -> [[x, y], ...]
 function samples(o, n) {
+  const body = formulaOf(o);
+  if (body) { const f = formula(body, paramsOf(o)); return Array.from({ length: n }, (_, i) => [i / (n - 1), f(i / (n - 1))]); }
   const p = shown(o);
   if (p.length < 2) return [];
   const dense = Array.from({ length: 1024 }, (_, i) => along(p, i / 1023)), xs = dense.map((q) => q[0]);
@@ -88,14 +119,30 @@ export function shaperOf(o, n = 257) {
   return Float32Array.from(s, (q) => ((q[1] - lo) / d) * 2 - 1);
 }
 
-const paramsOf = (o) => { const p = {}; for (const q of parseBlanket(o.code).params) p[q.name] = o.params?.[q.name] ?? q.value; return p; };
+function paramsOf(o) { const p = {}; if (o?.code) for (const q of parseBlanket(o.code).params) p[q.name] = o.params?.[q.name] ?? q.value; return p; }
 
 // Everything the instrument `outId` is made of, as data: the parts that feed it (following the
 // wires back from it) and the wires between them. -> { out, parts: [{ id, kind, p, data? }], wires: [{ from, fromPort, to, toPort }] } | null
-export function planInstrument(objects, outId) {
+// A port of a group stands for a port of something inside it, at any depth: -> { id, port } | null
+export function leaf(objects, ref, side) {
+  let o = objects.get(ref.id), port = ref.port;
+  for (let guard = 0; o?.kind === 'group' && guard < 32; guard++) {
+    const q = o.ports?.[side]?.find((x) => x.name === port);
+    if (!q) return null;
+    port = q.inner.port; o = objects.get(q.inner.id);
+  }
+  return o ? { id: o.id, port } : null;
+}
+// bpm: the timeline's tempo, for parts that sync to the clock when the instrument has none of its own.
+export function planInstrument(objects, outId, { bpm = 120 } = {}) {
   const out = objects.get(outId);
   if (!isOut(out)) return null;
-  const wires = [...objects.values()].filter((w) => w.bind && kindOf(objects.get(w.bind.from.id)) && kindOf(objects.get(w.bind.to.id))).map((w) => ({ from: w.bind.from.id, fromPort: w.bind.from.port, to: w.bind.to.id, toPort: w.bind.to.port }));
+  const wires = [];
+  for (const w of objects.values()) {
+    if (!w.bind) continue;
+    const a = leaf(objects, w.bind.from, 'outs'), b = leaf(objects, w.bind.to, 'ins');
+    if (a && b && kindOf(objects.get(a.id)) && kindOf(objects.get(b.id))) wires.push({ from: a.id, fromPort: a.port, to: b.id, toPort: b.port });
+  }
   const need = new Set([outId]), queue = [outId];
   while (queue.length) { const id = queue.shift(); for (const w of wires) if (w.to === id && !need.has(w.from)) { need.add(w.from); queue.push(w.from); } }
   const parts = [...need].map((id) => {
@@ -103,14 +150,21 @@ export function planInstrument(objects, outId) {
     const data = kind === 'osc' ? waveOf(o) : kind === 'partials' ? partialsOf(o, p.count) : kind === 'env' ? envOf(o) : kind === 'shaper' ? shaperOf(o) : undefined;
     return { id, kind, p, ...(data ? { data } : {}) };
   });
-  return { out: outId, parts, wires: wires.filter((w) => need.has(w.from) && need.has(w.to)) };
+  const own = paramsOf(out).bpm;
+  return { out: outId, bpm: own > 0 ? own : bpm, parts, wires: wires.filter((w) => need.has(w.from) && need.has(w.to)) };
 }
 
 // The instrument a name stands for: an out part by id or by its name. -> id | null
+// A group (at any depth) that holds an out part is that instrument: the patch at the top is its face.
 export function instrumentId(objects, name) {
-  const o = objects.get(name);
+  const o = objects.get(name) ?? [...objects.values()].find((x) => x.name === name && (isOut(x) || x.kind === 'group'));
   if (isOut(o)) return o.id;
-  for (const x of objects.values()) if (isOut(x) && x.name === name) return x.id;
+  if (o?.kind === 'group') return outInside(objects, o.id);
+  return null;
+}
+export function outInside(objects, gid) {
+  const queue = [gid];
+  while (queue.length) { const s = queue.shift(); for (const x of objects.values()) if (x.space === s) { if (isOut(x)) return x.id; if (x.kind === 'group') queue.push(x.id); } }
   return null;
 }
 // The instrument that claims MIDI channel ch with its channel parameter. -> id | null
@@ -145,10 +199,10 @@ export function buildVoice(ac, dest, plan, midi, velocity = 100, at = ac.current
       const n = ac.createBufferSource(), lvl = gain(p.level ?? 0.5); n.buffer = noiseBuf; n.loop = true; n.connect(lvl); sources.push(n);
       nodes.set(id, { ins: {}, outs: { audio: lvl } });
     } else if (part.kind === 'env') {
-      const c = ac.createConstantSource(), dur = Math.max(0.01, p.dur ?? 0.6);
+      const beat = p.sync ? 60 / (plan.bpm || 120) : 1, dur = Math.max(0.01, (p.dur ?? 0.6) * beat), rel = Math.max(0.01, (p.release ?? 0.3) * beat), c = ac.createConstantSource();
       c.offset.value = part.data[0]; c.offset.setValueCurveAtTime(part.data, at, dur);
-      sources.push(c); envs.push({ param: c.offset, release: Math.max(0.01, p.release ?? 0.3), until: at + dur });
-      maxRelease = Math.max(maxRelease, p.release ?? 0.3);
+      sources.push(c); envs.push({ param: c.offset, release: rel, until: at + dur });
+      maxRelease = Math.max(maxRelease, rel);
       nodes.set(id, { ins: {}, outs: { level: c } });
     } else if (part.kind === 'shaper') {
       const pre = gain(p.drive ?? 1), ws = ac.createWaveShaper(); ws.curve = part.data; ws.oversample = '2x'; pre.connect(ws);
