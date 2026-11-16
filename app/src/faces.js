@@ -80,7 +80,9 @@ export function createFaces(layer, { onParam, onCode }) {
       if (plain || v.face === 'far') {
         if (el.frame) sketch(el, v, null);
         // a synth part far off is its kind's glyph (synth.js), so a drawn instrument still reads as one
-        if (o.role === 'synth' && v.blanket?.name) { const g = 'syn.' + v.blanket.name; if (el.dataset.glyph !== g) { el.dataset.glyph = g; el.head.innerHTML = icon(g); } }
+        const fg = o.role === 'synth' && v.blanket?.name ? 'syn.' + v.blanket.name : v.inst ? 'syn.out' : '';
+        if (fg && el.dataset.glyph !== fg) { el.dataset.glyph = fg; el.head.innerHTML = icon(fg); }
+        el.classList.toggle('instrument', !!v.inst);
         continue;
       }
       if (isNote) {
@@ -94,14 +96,21 @@ export function createFaces(layer, { onParam, onCode }) {
       if (o.role === 'synth') { // its kind's glyph, and its name where there is room
         const g = 'syn.' + b.name, t = error ? `${b.name} · ${error}` : b.name;
         if (el.dataset.glyph !== g + t) { el.dataset.glyph = g + t; el.head.innerHTML = icon(g); el.head.append(h('span', '', t)); }
+      } else if (v.inst) { // an instrument: the out's glyph, the group's name, the channel it plays
+        const ch = Math.round(v.inst.o.params?.channel ?? v.inst.blanket.params.find((q) => q.name === 'channel')?.value ?? 1), t = `${ch} · ${b.name}`; // the channel first: it stays when the name is cut
+        if (el.dataset.glyph !== 'inst' + t) { el.dataset.glyph = 'inst' + t; el.head.innerHTML = icon('syn.out'); el.head.append(h('span', '', t)); }
       } else { if (el.dataset.glyph) delete el.dataset.glyph; el.head.textContent = error ? `${b.name} · ${error}` : b.name; }
+      el.classList.toggle('instrument', !!v.inst);
       ports(el.ins, b.ins, b.ins.join(' '));
       ports(el.outs, b.outs, b.outs.join(' '));
       b.outs.forEach((name, i) => {
         const label = el.outs.children[i].firstChild, text = `${name} ${fmt(run.output(id, name))}`;
         if (label.textContent !== text) label.textContent = text;
       });
-      syncParams(el.params, o, b, onParam);
+      // an instrument's face publishes its out's channel and gain: edits go to the out inside
+      // (not zoomed in, where the out itself is in view)
+      if (v.inst && v.face === 'mid') syncParams(el.params, v.inst.o, { ...v.inst.blanket, params: v.inst.blanket.params.filter((q) => q.name === 'channel' || q.name === 'gain') }, onParam);
+      else syncParams(el.params, o, b, onParam);
       if (el.code) syncCode(el.code, o);
       sketch(el, v, kind, run);
     }

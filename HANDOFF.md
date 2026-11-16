@@ -1849,10 +1849,16 @@ Also asked for:
     (oscillators inside a voice inside the instrument, readymade waves,
     synced envelopes), checked in the page: three groups, 8 parts and 7
     wires found through them, a note renders. 144 tests.
-  - Not yet, for nesting: the top group's face shows only its name: its
-    MIDI channel and level are inside, on the out. Next: a group that holds
-    an out shows the out's glyph, channel and gain on its face (parameters
-    published from inside, which would also serve any nested patch).
+  - **The instrument's face.** A group that holds an out (at any depth)
+    shows the out's glyph and `channel · name` in its head, far off the
+    glyph alone, and on its folded face (190 px wide and up) the out's
+    `channel` and `gain` as fields: an edit there is `object.set` on the out
+    inside, so it is in the take. `main.js` finds the out (`outOfGroup`,
+    cached until a change) and hands it to `faces.js` as `v.inst`. Checked
+    in the page: the Nested example's top group reads "15 · instrument",
+    gain set on the face reached the out, undo put it back. Only the out's
+    two parameters are published; publishing any inner parameter by choice
+    (for any nested patch) is not built.
   - Not yet: a drawn filter response (a curve as the filter's shape: this
     needs an FIR or many biquads), wavetables (several curves morphing),
     LFOs as such (an osc's audio into a cutoff works, at audio rate), live

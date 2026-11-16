@@ -59,7 +59,7 @@ import { midiFile, readNotes, createMidiOut } from './midi.js';
 import { iannixPlan, applyPlan } from './iannix.js';
 import { nousPlan, applyNous, nodeCodeFor } from './nous.js';
 import { INSTRUMENTS, DEFAULT_CHANNELS, setCustomVoices } from './instruments.js';
-import { planInstrument, instrumentId, claimOf, buildVoice, LINE_PARTS, SHAPE_PARTS, kindOf, isOut, READYMADES, SYNTH_PARTS } from './synth.js';
+import { planInstrument, instrumentId, outInside, claimOf, buildVoice, LINE_PARTS, SHAPE_PARTS, kindOf, isOut, READYMADES, SYNTH_PARTS } from './synth.js';
 import { solve, crossings, crossings3d, measure, atU, atS, tangentS, curveOf, isCurve, JUNCTIONS } from './joints.js';
 import { createInk, element, UNIT } from './ink/layer.js';
 import { BRUSHES as INK, brushesFor } from './ink/brushes.js';
@@ -172,7 +172,9 @@ function walk(space, xf) {
       lines.push({ id: o.id, pts: edge.map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'ink', width: o.brush ? (sel ? 1 : 0) : st.width ?? 2.2, opacity: o.brush ? 1 : st.opacity, fill: o.brush ? null : st.fill });
     }
     const face = Math.max(px.w, px.h) < FAR ? 'far' : (px.w > view.size.w * 0.42 || px.h > view.size.h * 0.5) ? 'near' : 'mid';
-    vis.set(o.id, { o, face, px, xf, blanket });
+    // a group that holds an out part is an instrument: its face shows the out's glyph and publishes its channel and gain
+    const inner = o.kind === 'group' ? outOfGroup(o.id) : null;
+    vis.set(o.id, { o, face, px, xf, blanket, ...(inner ? { inst: { o: inner, blanket: blanketOf(inner) } } : {}) });
     if (o.role === 'grid') {
       // a grid frame: its outline, and its cells (sub-points as dots would be too many)
       const g = paramsOf(o), cell = Math.max(0.01, g.cell ?? 1), x0 = r.cx - r.w / 2, y0 = r.cy - r.h / 2, nx = Math.floor(r.w / cell + 1e-6), ny = Math.floor(r.h / cell + 1e-6);
@@ -442,8 +444,9 @@ const heard = []; // the last notes played, for play.state: an agent cannot list
 const instrumentOf = (ch = 1) => claimOf(state.objects, ch) ?? state.music.channels?.[ch] ?? DEFAULT_CHANNELS[ch] ?? 'triangle';
 // Drawn synths (synth.js) play through the same voice() as the built-in instruments. The plan is read
 // from the drawing once and kept until something changes, so a note costs only its Web Audio nodes.
-const synthPlans = new Map();
-onChange(() => synthPlans.clear());
+const synthPlans = new Map(), groupOuts = new Map();
+onChange(() => { synthPlans.clear(); groupOuts.clear(); });
+function outOfGroup(gid) { if (!groupOuts.has(gid)) groupOuts.set(gid, outInside(state.objects, gid)); const id = groupOuts.get(gid); return id ? get(id) : null; }
 setCustomVoices((name) => {
   const id = instrumentId(state.objects, name);
   if (!id) return null;
