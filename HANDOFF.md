@@ -1733,6 +1733,52 @@ Also asked for:
   - Next: that shorter tool list for Pi; the s-curve request; an eval case
     for a scene (does anything sound, on the scale asked for), so this can
     be measured rather than read.
+- **Ask here, live context, quantize, WebMCP (16 Nov 2026).**
+  - **Ask here (`/`, `src/askhere.js`)**: a field at the pointer. What it
+    starts from is the selection, or else the object under the pointer, or
+    else up to three within 80 px of it (the count shows in the field's
+    corner; hover for the ids). The sentence goes to the assistant's brain
+    as a quick turn with `focus` (what "this" and "it" mean; `wordIds` reads
+    "this" as those). The palette is ⌘K only now. Also in the context menu.
+  - **Live context (`moment(here)` in `main.js`)**, read afresh each turn:
+    the view, the music and the grid in a line each, where the person asked
+    and what it starts from (`hereText`), and the objects nearest that point
+    first (it used to be the first 30 made).
+  - **A request that names what quick tools cannot make** (travelers,
+    triggers, events, joints, scores, code, quantize, grid ...: `needsMore`
+    in `agent.js`) goes to the whole loop at once: asked for travelers with
+    eight tools, `gemma4` drew shapes instead.
+  - **`quantize` (`src/quantize.js`)**: one command for objects on their
+    grid. Control points or whole objects (by their start: a note that
+    starts on the beat, keeping its shape); to the lattice of the grid frame
+    they lie in, or the global grid, or a `step` of your own; to a beat
+    division (`time`: "1/16", "8n", "1 bar", beats), across a score frame
+    or along a grid that times paths; to the scale (`pitch`: "scale",
+    "chromatic", a scale name), up a score frame or by a grid's rows;
+    `tidy`. It runs `line.set` and `object.move` inside itself, so the take
+    holds one quantize and replays it. Context menu: Quantize › points to
+    the grid, whole by its start, to the beat division (the quantize setting,
+    Q), to the scale, to both. Tested: lattice, by start, step, a score's
+    time and pitch, a grid's time, errors that say what is missing.
+  - **WebMCP (`src/webmcp.js`)**: every command as a tool of the page,
+    through `provideContext` where the browser has it, else `registerTool`
+    one by one, with `readOnlyHint` on commands that only read; calls go
+    through the agent guard (held agents, unknown ids, code that cannot
+    compile). It looks again after load and at 2 s and 6 s, for a polyfill
+    that arrives late. `underspace.webmcp(mc)` offers them to a model
+    context by hand. Checked with a stand-in model context in the page (75
+    tools, a call ran) and in a test; **not checked in a browser that has
+    WebMCP** (the app's browser pane has none).
+  - Tried by hand in the page with `gemma4`: over a curve, "attach a
+    traveller to this curve" put a traveler on it. Over a rectangle, the
+    owner's example (20 notes of the scale scattered in the shape, 8 lines
+    with two-bar travelers): `gemma4` made text notes (shape role "note")
+    and lines, no events and no travelers, three times (the third after
+    `shape.add` was made to say a note shape is text, and `code.help` was
+    given a recipe for notes in a shape: it searched the tools and still
+    made a text note). Each attempt was undone.
+    A model the size of the qwen 27b, through Pi, is the one to expect it
+    from. 140 tests.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

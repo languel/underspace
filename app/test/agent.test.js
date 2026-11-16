@@ -120,7 +120,8 @@ test('a quick turn hands a request it cannot do over to the whole loop', async (
     { content: 'A traveler is on the line.', tool_calls: [] },
   ];
   const engine = { name: 'fake', complete: async ({ tools: defs }) => { got.push(defs.map((d) => d.function.name)); return rounds.shift(); } };
-  const r = await runTurn({ text: 'put a traveler on the line', quick: true, engine, on: (e) => events.push(e.type), port: { call, tools, held: () => false, has: (id) => state.objects.has(id) } });
+  // "walker": a word needsMore does not know, so it is the model that hands over
+  const r = await runTurn({ text: 'put a walker on the line', quick: true, engine, on: (e) => events.push(e.type), port: { call, tools, held: () => false, has: (id) => state.objects.has(id) } });
   assert.ok(got[0].includes('more_tools') && !got[0].includes('call'));
   assert.ok(got[1].includes('call') && got[1].includes('object_code') && !got[1].includes('more_tools'));
   assert.ok(events.includes('handover'));
@@ -137,4 +138,11 @@ test('code from an agent that cannot compile is refused, with the reason', async
   assert.equal(badCode('object.code', { id: 'o1', code: 'note(pitch(ev.y), 100, p.dur);' }, get), '');
   assert.equal(badCode('object.code', { id: 'o2', code: 'function setup() { createCanvas(100, 100); }\nfunction draw() {}' }, get), ''); // a sketch
   assert.equal(badCode('line.add', { points: [[0, 0]] }, get), '');
+});
+
+test('a request that names what quick tools cannot make goes to the whole loop at once', async () => {
+  const { needsMore } = await import('../src/agent.js');
+  assert.ok(needsMore('fill it with 20 notes and add 8 lines with two bar travelers'));
+  assert.ok(needsMore('quantize these to the beat') && needsMore('attach a traveller to this curve'));
+  assert.ok(!needsMore('draw a triangle') && !needsMore('move the note 5 to the right') && !needsMore('set the scale to dorian'));
 });

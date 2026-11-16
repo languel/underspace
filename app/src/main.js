@@ -4,6 +4,9 @@
 import { state, call, batch, define, undo, redo, take, onChange, onCall, loadTake, tools, history, travel, stats, argTypes as T, beginStep, endStep } from './space.js';
 
 import './patch.js';
+import './quantize.js';
+import { createAskHere, hereText } from './askhere.js';
+import { startWebMCP } from './webmcp.js';
 import { stepsOnScreen, TARGET_PRESETS, pressureRuns } from './object.js';
 import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplifyIndex, along, setDrag, setLive, setMoved, penOf, isLine, isTarget, hasCode, isWire } from './object.js';
 import { selectionProps, toolProps } from './panels/properties.js';
@@ -29,7 +32,7 @@ import { scripted } from './assistant.js';
 import { install as installAgent } from './agent.js';
 import { endpointEngine, browserEngine, listModels, seesPictures } from './engines.js';
 import { assistantPanel } from './panels/assistant.js';
-import { describe } from './catalog.js';
+import { describe, brief } from './catalog.js';
 import { cases as evalCases } from './evalcases.js';
 import { sketchKind } from './sketch.js';
 import { PRESETS } from './presets.js';
@@ -1836,18 +1839,28 @@ async function engine() {
   return endpointEngine({ base: settings.assistBase, model: settings.assistModel, sees: await seesPictures(settings.assistBase, settings.assistModel) });
 }
 // What a brain is told of the moment: what is selected and where the view is.
-const moment = () => `View: middle (${round(view.cam.cx)}, ${round(view.cam.cy)}), ${round(view.size.w * view.unitsPerPx())} by ${round(view.size.h * view.unitsPerPx())} canvas units.\n` + describe([...state.objects.values()], state.selection, rectOf, blanketOf);
+// Live: read afresh at each turn. here (ask here): where the person asked and what it starts from;
+// the objects listed are the nearest to that point (or to the middle of the view) first.
+const moment = (here = null) => {
+  const m = state.music, g = state.grid, at = here ? view.toWorld(...here.at) : [view.cam.cx, view.cam.cy];
+  const dist = (o) => { const r = rectOf(o); return r ? Math.hypot(Math.max(0, Math.abs(at[0] - r.cx) - r.w / 2), Math.max(0, Math.abs(at[1] - r.cy) - r.h / 2)) : Infinity; };
+  const near = [...state.objects.values()].sort((a, b) => dist(a) - dist(b));
+  return `View: middle (${round(view.cam.cx)}, ${round(view.cam.cy)}), ${round(view.size.w * view.unitsPerPx())} by ${round(view.size.h * view.unitsPerPx())} canvas units.\n`
+    + `Music: ${m.bpm} bpm, ${m.meter.join('/')}, ${Array.isArray(m.scale) ? 'steps ' + m.scale.join(' ') : m.scale} on ${m.root} (MIDI), range ${m.low}..${m.high}. Grid: cell ${g.cell}, sub ${g.sub}${g.beats ? `, ${g.beats} beats a cell` : ''}${g.rows ? `, ${g.rows} degrees a row` : ''}${g.snap ? ', drawing snaps' : ''}.\n`
+    + (here ? hereText(here, view.toWorld, (id) => { const o = get(id); return o ? '  ' + JSON.stringify(brief(o, rectOf, blanketOf)) : ''; }) + '\n' : '')
+    + describe(near, state.selection, rectOf, blanketOf);
+};
 
 // Text to work: the scripted engine when the words are a patch ("2 osc into mix"), else a brain
 // that works through the commands (agent.js), a turn at a time.
-async function ask(text, { panel = false } = {}) {
+async function ask(text, { panel = false, here = null } = {}) {
   const plan = scripted(text), by = 'assistant';
   if (!plan) {
     // From the palette, while drawing: a quick turn, done quietly (what it says shows under the field).
     // From the Assistant panel, or with the setting off: the whole loop, shown there.
-    if (!panel && settings.assistQuick) return agent.run(text, await engine(), { context: moment(), quick: true });
+    if (!panel && settings.assistQuick) return agent.run(text, await engine(), { context: moment(here), quick: true, focus: here?.ids });
     if (!panel) panels.show('assistant'); // what it does and says shows there
-    return agent.run(text, await engine(), { context: moment() });
+    return agent.run(text, await engine(), { context: moment(here), focus: here?.ids });
   }
   // New work goes in the space in the middle of the view, below what is there.
   const s = spaceAt(...centre(), true);
@@ -2086,6 +2099,8 @@ const ACTIONS = [
   { id: 'copy.p5', title: 'Copy as p5 code', short: 'p5 code', icon: 'code', group: 'edit', menu: 'Copy as', when: (c) => marksOf(c).length, run: (c) => clip(toP5(marksOf(c))) },
   ...[['lightly', 'Lightly', 1.5], ['moderately', 'Moderately', 4], ['strongly', 'Strongly', 10]].map(([id, title, px]) => ({ id: 'simplify.' + id, title: `Simplify ${id}`, short: title, icon: 'simplify', group: 'edit', menu: 'Simplify', when: (c) => c.lines.some(flatLine), run: (c) => simplifyLines(c, px) })),
   ...[['points', 'Points to grid', 'points'], ['tidy', 'Points to grid, tidy', 'tidy'], ['topleft', 'Position: top left', 'topleft'], ['center', 'Position: centre', 'center'], ['q2', 'Quantize 2× grid', 'tidy', 2], ['q4', 'Quantize 4× grid', 'tidy', 4]].map((d) => ({ id: 'snap.' + d[0], title: `Snap: ${d[1]}`, short: d[1], icon: 'grid', group: 'edit', menu: 'Snap', when: (c) => (d[2] === 'topleft' || d[2] === 'center' ? c.sel.some((o) => !o.bind && vis.get(o.id)?.xf) : c.lines.some(flatLine)), run: (c) => snapSelection(c, d[2], d[3]) })),
+  ...[['grid', 'Points to the grid', {}], ['object', 'Whole, by its start', { what: 'object' }], ['time', 'To the beat division', 'time'], ['pitch', 'To the scale', { pitch: 'scale' }], ['both', 'To the beat and the scale', 'both']].map(([id, title, how]) => ({ id: 'quantize.' + id, title: `Quantize: ${title.toLowerCase()}`, short: title, icon: 'grid', group: 'edit', menu: 'Quantize', when: (c) => c.sel.some((o) => !o.bind && o.kind !== 'joint' && o.role !== 'traveler'),
+    run: (c) => { const q = settings.quant; try { call('quantize', { ids: ids(c.sel), ...(how === 'time' ? { time: q } : how === 'both' ? { time: q, pitch: 'scale' } : how) }); } catch (e) { agent.say(e.message); } } })),
   { id: 'front', title: 'Bring to front', icon: 'front', keys: 'mod+shift+]', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'front' }) },
   { id: 'forward', title: 'Bring forward', icon: 'front', keys: 'mod+]', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'forward' }) },
   { id: 'backward', title: 'Send backward', icon: 'back', keys: 'mod+[', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'backward' }) },
@@ -2154,7 +2169,8 @@ const ACTIONS = [
   { id: 'clear', title: 'Clear everything', icon: 'clear', group: 'file', run: () => call('space.clear') },
   { id: 'demo', title: 'Build the demo', icon: 'demo', group: 'file', run: demo },
   // panels and the assistant
-  { id: 'palette', title: 'Command palette', icon: 'palette', keys: ['mod+k', '/'], group: 'panel', bar: 'edit', menu: true, when: (c) => !c.hit, run: () => palette.toggle() },
+  { id: 'ask.here', title: 'Ask here', icon: 'ask', keys: '/', group: 'panel', menu: true, run: (c) => askHere.open(...c.p) },
+  { id: 'palette', title: 'Command palette', icon: 'palette', keys: ['mod+k'], group: 'panel', bar: 'edit', menu: true, when: (c) => !c.hit, run: () => palette.toggle() },
   { id: 'side', title: 'Side panel', icon: 'side', keys: '\\', group: 'panel', run: () => panels.toggle() },
   ...PANELS.map((d) => ({ id: 'panel.' + d.id, title: d.title, icon: d.icon, keys: d.keys, group: 'panel', run: () => panels.show(d.id) })),
   { id: 'paste.here', title: 'Paste here', icon: 'copy', group: 'add', menu: true, when: (c) => !c.hit && !!navigator.clipboard?.readText, run: async (c) => pasteText(await navigator.clipboard.readText(), c) },
@@ -2362,6 +2378,18 @@ const app = {
 const agent = installAgent({ define, T, call, batch, beginStep, endStep, tools, state, get, view, stage, frameIds, onCall, onChange, icon, toCanvas: (px, py) => { const r = stage.getBoundingClientRect(); return view.toWorld(px - r.left, py - r.top).map(round); } });
 // a quick turn that hands its request over to the whole loop shows the rest in the Assistant panel
 agent.on((e) => { if (e.type === 'handover') panels.show('assistant'); });
+// Ask here (/): what is under the pointer, else what is nearest it (within 80 px), is what "this" means.
+const askHere = createAskHere({
+  stage, selection: () => [...state.selection],
+  ask: (text, here) => ask(text, { here }),
+  nearby(x, y) {
+    const hit = pick(x, y);
+    if (hit) return [hit];
+    const at = view.toWorld(x, y), reach = 80 * view.unitsPerPx(), s = spaceAt(x, y);
+    const d = (o) => { const r = rectOf(o); return r ? Math.hypot(Math.max(0, Math.abs(at[0] - r.cx) - r.w / 2), Math.max(0, Math.abs(at[1] - r.cy) - r.h / 2)) : Infinity; };
+    return [...state.objects.values()].filter((o) => !o.bind && o.kind !== 'joint' && (o.space ?? null) === (s.id ?? null) && d(o) <= reach).sort((a, b) => d(a) - d(b)).slice(0, 3).map((o) => o.id);
+  },
+});
 const panels = createPanels($('tabs'), $('side'), app, PANELS);
 // Replay the making: every step again, at the pace it was made (pauses over 1.5 s shortened).
 // A press or a key stops it where it is.
@@ -2774,13 +2802,9 @@ define({ name: 'score.stop', doc: 'Stop one score (the others play on), or pause
 define({ name: 'assistant.ask', doc: 'Ask the built-in assistant to build something from a sentence.', args: { text: T.str }, required: ['text'], record: false, run: (a) => ask(a.text) });
 
 window.underspace = { agent, relay, call, batch, tools, commands: tools, state, take, undo, redo, view, ask, actions: ACTIONS, backend: view.backend };
-// WebMCP, where the browser has it: every command is offered as a tool. The object was
-// navigator.modelContext and is now document.modelContext: whichever is there.
-try {
-  const mc = document.modelContext ?? navigator.modelContext;
-  const result = (r) => (typeof r?.image === 'string' && r.image.startsWith('data:image/') ? [{ type: 'image', data: r.image.slice(r.image.indexOf(',') + 1), mimeType: 'image/png' }, { type: 'text', text: JSON.stringify({ ...r, image: undefined }) }] : [{ type: 'text', text: JSON.stringify(r ?? null) }]);
-  if (mc?.registerTool) for (const t of tools()) mc.registerTool({ name: t.name.replaceAll('.', '_'), description: t.description, inputSchema: t.inputSchema, execute: async (args) => { agent.guard(args, t.name); return { content: result(await call(t.name, args, 'webmcp')) }; } });
-} catch (e) { console.warn('webmcp:', e.message); }
+// WebMCP, where the browser has it (webmcp.js): every command offered as a tool of the page.
+const webmcp = startWebMCP({ tools, call, guard: (args, name) => agent.guard(args, name), onOffered: (how) => { document.documentElement.dataset.webmcp = how; } });
+window.underspace.webmcp = webmcp.offer; // to offer them to a model context by hand (a polyfill, a test)
 
 // ---- keep the take between visits; ?demo builds a small example ------------
 

@@ -72,7 +72,8 @@ or with a shape selected, makes it a render target.
 | [ ] | select previous, next |
 | P | next drawing plane of the target under the pointer |
 | Alt-drag in a target | turn it |
-| ⌘K or / | palette: find a command, or say what to build |
+| ⌘K | palette: find a command, or say what to build |
+| / | ask here: a sentence to the assistant about what is selected, or under and near the pointer ("attach a traveler to this curve") |
 | ⌘Z, ⇧⌘Z | undo, redo |
 | \, Tab | side panel, hide the whole interface |
 | ⌘; ⌥; ? ⌘, | Code, Properties, Shortcuts, Settings panels |
@@ -305,10 +306,15 @@ outside the page reaches the same commands through the relay:
    For a local model, list Ollama's in `models.json` in Pi's agent directory.) Anything else: `node app/relay.mjs --hub` and
    `POST http://127.0.0.1:5311/call {"name": "space.read", "args": {}}`.
 
+In a browser with WebMCP (`navigator.modelContext`; Chrome behind a flag, or the MCP-B polyfill)
+the page offers every command to the browser's own agent, with no relay.
+
 Good first calls: `space.read` (what is drawn), `view.look` (a picture), `tools.search`
 (find a command), `action.list` and `action.run` (everything a key or menu does).
 Before writing an object's code, `code.help` says what that kind of code is given and returns
-(`ev`, `ways`, `voices`, `note()`, `pitch()`), and hands out the presets to copy. To hear without
+(`ev`, `ways`, `voices`, `note()`, `pitch()`), and hands out the presets to copy. `quantize` puts objects
+on their grid: control points or whole objects, to the lattice, to a beat division ("1/16", "1 bar")
+or to the scale, read from the score or grid frame they lie in. To hear without
 ears, `play.state` reads what sounds: each score's voices as pitch over time, and the last notes.
 A wrong name (a scale, an instrument, an id) is an error that lists the right ones.
 

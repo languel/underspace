@@ -234,6 +234,10 @@ div.menu-item { cursor: default; }
 #palette { left: 50%; top: 14%; width: min(520px, calc(100vw - 32px)); transform: translateX(-50%); }
 #palette input { width: 100%; padding: 7px 9px; background: var(--field); border-color: var(--line); outline: none; }
 #palette.busy input { opacity: 0.5; }
+#askhere { position: absolute; z-index: 10; width: 280px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25); }
+#askhere input { width: 100%; padding: 6px 8px; background: var(--field); border: 1px solid var(--line); border-radius: 5px; color: var(--ink); outline: none; }
+#askhere.busy input { opacity: 0.5; }
+#askhere[data-n]:not([data-n="0"])::after { content: attr(data-n); position: absolute; top: -7px; right: -7px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--accent); color: var(--bg); font-size: 10px; line-height: 14px; text-align: center; }
 .palette-list { margin-top: 4px; }
 .palette-note { margin: 0; padding: 0 9px; color: var(--muted); white-space: pre-wrap; }
 .palette-note:not(:empty) { padding: 5px 9px 3px; }

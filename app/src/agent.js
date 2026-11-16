@@ -125,12 +125,16 @@ const parse = (v) => { if (v && typeof v === 'object') return v; try { return JS
 // gives such a request no tools at all: a small model handed tools uses one (LFM3, asked how many lines
 // there were, removed them). "can you make it red?" is a request and is not caught here.
 export const asks = (text) => /^\s*(how many|how much|how big|how long|what|which|where|who|why|is|are)\b/i.test(String(text));
+// Does the request name something a quick turn's tools cannot make? Then it goes to the whole loop
+// from the start: a model handed a few tools makes do with them (asked for travelers, it drew shapes).
+export const needsMore = (text) => /travel|trigger|event|joint|junction|node|markov|chain|loop|glissand|score|code|brush|sculpt|quantiz|snap|grid|camera|3d|example|setting/i.test(String(text));
 // quick: the short prompt and the few tools of QUICK, no history, at most six rounds.
 // A quick turn that needs more hands itself over: the model calls more_tools, and the same request
 // is run as a whole turn (on({ type: 'handover' }) says so; the panel shows the rest).
 const MORE = { type: 'function', function: { name: 'more_tools', description: 'Call this, alone, when the request needs a tool that is not listed here. The request is then done with every tool.', parameters: { type: 'object', properties: {} } } };
 export async function runTurn({ text, history = [], engine, port, by = 'assistant', context = '', signal, on = () => {}, rounds = 16, quick = false }) {
   const whole = { text, history, engine, port, by, context, signal, on, rounds };
+  if (quick && needsMore(text)) { on({ type: 'handover' }); return runTurn(whole); }
   if (quick) { history = []; rounds = Math.min(rounds, 6); }
   const { defs, resolve } = quick ? toolset(port.tools(), QUICK, false, false) : toolset(port.tools(), engine.sees ? [...CORE, 'view.look'] : CORE, !!engine.defers);
   if (quick) defs.push(MORE);
@@ -269,14 +273,15 @@ export function install(h) {
   // ---- a turn of a brain in the page -------------------------------------------
   let running = null, history = [];
   const emit = (e) => listeners.forEach((fn) => fn(e));
-  async function run(text, engine, { context = '', quick = false } = {}) {
+  // focus: the ids "this" and "it" mean (ask here: what is under the pointer); else the selection
+  async function run(text, engine, { context = '', quick = false, focus = null } = {}) {
     if (running) throw new Error('the assistant is busy');
     const ac = new AbortController();
     running = ac; held = false; show(); emit({ type: 'begin', text });
     h.beginStep();
     try {
       let over = false; // a quick turn that handed itself over became a whole one
-      const r = await runTurn({ text, history, engine, quick, by: engine.name ?? 'assistant', context, signal: ac.signal, on: (e) => { if (e.type === 'handover') over = true; emit(e); }, port: { call: h.call, tools: h.tools, held: () => held, has: (id) => !!h.get(id), get: h.get, objects: () => [...h.state.objects.values()], selection: () => [...h.state.selection] } });
+      const r = await runTurn({ text, history, engine, quick, by: engine.name ?? 'assistant', context, signal: ac.signal, on: (e) => { if (e.type === 'handover') over = true; emit(e); }, port: { call: h.call, tools: h.tools, held: () => held, has: (id) => !!h.get(id), get: h.get, objects: () => [...h.state.objects.values()], selection: () => (focus?.length ? focus : [...h.state.selection]) } });
       if (!quick || over) history = r.messages.slice(-24); // what was said and done, for the next turn (a quick turn leaves none)
       return r.say;
     } catch (e) { emit({ type: 'error', text: e?.message ?? String(e) }); throw e; }

@@ -110,7 +110,7 @@ define({
 
 define({
   name: 'shape.add',
-  doc: 'Add a shape. role: "visual" (something to look at), "code" (a code container; give code, or a preset name), "target" (a render target with a 3D interior), "score" (a frame that plays the lines drawn in it; its code is a brush), "grid" (a frame whose parameters quantize space, time and pitch inside it), "event", "note" (text). A traveler is not made here: traveler.add puts one on a line.',
+  doc: 'Add a shape. role: "visual" (something to look at), "code" (a code container; give code, or a preset name), "target" (a render target with a 3D interior), "score" (a frame that plays the lines drawn in it; its code is a brush), "grid" (a frame whose parameters quantize space, time and pitch inside it), "event", "note" (text on the canvas, not a musical note: a note that sounds is an event, see code.help). A traveler is not made here: traveler.add puts one on a line.',
   args: { space: T.space, rect: T.rect, shape: { enum: ['rect', 'ellipse'] }, role: { enum: ROLES.shape.filter((r) => r !== 'traveler') }, code: T.str, text: T.str, style: T.style, brush: T.brush, preset: { enum: [...Object.keys(PRESETS), ...Object.keys(BRUSHES)] } },
   required: ['rect'],
   run(a) {
