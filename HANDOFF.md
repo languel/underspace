@@ -1677,9 +1677,28 @@ Also asked for:
     1.5 s); `gemma4` on Ollama 23 of 24 at 2.6 s; `lfm3` on Ollama 20 of 24
     at 6.7 s. A scene from a sentence is beyond all the small ones as yet;
     an agent of Claude's size does it in three calls.
-  - Next: the same request to a larger model through Pi; the s-curve
-    request; an eval case for a scene (does anything sound, on the scale
-    asked for), so this can be measured rather than read.
+  - **Larger local models through Pi, the same request, one run each.**
+    `mgraffam/qwen3.8-turbo-fusion-heretic:27b` (19 GB) **did it**: 21
+    calls in 252 s. It read the recipes, set 174 bpm and the drums, drew
+    eight edges on a square with diagonals, made four joints whose places
+    are the right line ends with code that plays (kick, snare, hat, open hat
+    with a sub bass) and returns `Math.floor(rng() * ways.length)`, put a
+    traveler on at speed 8, played it, read `play.state`, framed it and
+    looked. Checked after: it was still sounding at beat 151, no code
+    errors. It is left in the drawing around (30, 0). `bonsai-2:27b`
+    (8.3 GB) read the help and then the graph already in the drawing (o21,
+    o22), sensibly, but at about 90 s a step it had made six calls and
+    drawn nothing after nine minutes, when it was stopped. The drawing held
+    a finished example both times (the graph made by hand at (0, -25)); the
+    qwen model did not read it.
+  - So a scene from a sentence works locally, given the recipes, with a
+    model of that size and four minutes. What costs the time is Pi handing
+    the model all 75 tools each step (about 9600 tokens): an extension that
+    offers the core tools and `tools.search`, as the page's own loop does,
+    is the next thing to try for speed.
+  - Next: that shorter tool list for Pi; the s-curve request; an eval case
+    for a scene (does anything sound, on the scale asked for), so this can
+    be measured rather than read.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is
