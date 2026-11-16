@@ -1085,6 +1085,63 @@ Known gaps and shortcuts:
 
 ## 6. Next steps
 
+**The simulation (16 Nov 2026; tag `presim` is the app before it).** The owner
+asked for a simulation engine in the manner of Algodoo, built from the ground up
+(not Rapier, which `~/dev/artistmodelstudio` uses), deterministic, on the same
+footing in time as in space, quantized as the music is. It is `app/src/sim.js`,
+one file: a pure engine (`createWorld(scene).to(tick)`), the drawing read as a
+scene (`sceneOf`), the open drawing stepped once a frame (`createSim`), and the
+commands `object.phys`, `sim.set`, `sim.keep`, `sim.read`. `app/README.md`,
+"Physical things", is the user's view of it. What a later session needs to know:
+
+- *Data.* `o.phys = { is, ...parameters }` on any object, beside its role:
+  body, fixed, rope (lines), hinge and weld (points: they hold what is under
+  them, found by position, as Algodoo's do), spring (a line). `state.sim` holds
+  the world where it is not the default (gravity `[0, -16]`, drag, skin). The
+  joints of `joints.js` between physical lines are hinges too.
+- *Time.* In beats: 48 ticks a beat (`TPB`), 4 steps a tick. A checkpoint every
+  12 ticks; `to(tick)` goes back or far ahead from one. Nothing in a step but
+  add, multiply, divide and square root (no `Math.hypot`, no trigonometry), so
+  the same drawing gives the same world on any engine. Keep it so.
+- *The solver.* Rigid bodies as position and quaternion (so 2D and 3D are one
+  code path; inertia is a scalar, exact flat, approximate in 3D), corrected by
+  position as in XPBD; what collides is the outline sampled as points against
+  the other's stretches, each with a skin; a circle is a centre and a radius
+  that touches at its rim (so it rolls). The contacts of one pair are answered
+  together, each for its share by least squares (`share`): answered one after
+  another, a box landing flat is turned by whichever corner comes first. Things
+  that have not moved for half a beat sleep, with all they rest against, until
+  something moving touches them: without it a stack creeps and falls in about
+  30 beats. A deep overlap in the drawing is pushed apart without being thrown.
+- *From outside.* A traveler that is physical (carried), `fx fy spin` returned
+  by a physical object's code, and the signal in a wire that is a rope are
+  taken tick by tick while it plays and kept (`log` in `createSim`), so the
+  past replays as it was; rewinding to 0 while stopped forgets them.
+- *Shown, not stored.* `setPosed` (object.js) is set for the frame that is
+  drawn and cleared after it: `ptsOf` and `rectOf` give posed geometry to the
+  view and to code, while commands, joints and the take read the drawing.
+- *Sound.* `playEngine.fire` (play.js) runs an event's code for a body as for a
+  traveler. `run.js` gives a physical object's code `geom.body`.
+
+Checked: 11 tests in `app/test/sim.test.js` (falling, bounce, stack, friction
+on slopes against theory, hinge, motor, a car, rope, spring, the same whichever
+way time is travelled, 3D, the commands, events and Q, what comes from outside
+and its replay). In the page: bodies, stacks, the car, the pendulums, the rope
+bridge, spring and weld, scrubbing by `play.seek`, the Properties section, a
+ball striking an event bar heard as notes (and held to the quarter beat with Q
+on). **Not checked in the page at full frame rate:** the traveler's bat, the
+hovering box and the hanging cables (the window was in the background and
+frames came about one a second; they pass in the tests, frame by frame).
+
+Not built: soft bodies and water; ropes that collide with themselves; 3D
+inertia as a tensor, motors and solid faces in 3D (a mesh collides by its
+edges); grabbing a body with the pointer while it runs; a shape kept turned by
+`sim.keep` (a shape has no angle: it is turned by quarter turns only); audio
+inside a drawn synth shaking its wires (only signals between code objects do);
+the handles of a selected object follow the drawing, not where the simulation
+has it. Known limits: a pendulum loses about 4% a swing; three or more balls in
+a funnel can arch and jam; a ball on a very gentle slope may fall asleep rather than roll (not measured where).
+
 **Agents: where it stands (16 Nov 2026, the owner: "in a good place for
 now").** The full record is in section 8 under "Controls" (passes one to
 five, Pi, the audit). In short:

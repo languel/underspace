@@ -38,7 +38,7 @@ export const CODE_DOC = {
   },
   path: {
     what: 'A line with the role "path": code that reads its own line, or makes it. ' + HEADER,
-    gets: [['geom', '{ points, at(u) }: its own line'], ['inp, p, t, mem, along', 'as in a code container']],
+    gets: [['geom', '{ points, at(u) }: its own line'], ['geom.body', 'when the object is physical (object.phys): { x, y, vx, vy, speed, spin (turns a beat), hit (how hard it was struck this tick) }: how it moves now. What the code returns as fx, fy (canvas units a beat squared) and spin pushes it. A code container that is physical gets geom.body too'], ['inp, p, t, mem, along', 'as in a code container']],
     returns: 'outputs; `points` (an array of [x, y]) redraws the line as those; its `path` output carries the line to an input that takes one',
     presets: { path: PRESETS.path, wave: PRESETS.wave },
   },
@@ -54,6 +54,7 @@ export const CODE_DOC = {
       ['ev', '{ x, y (where it was reached within the bounds of the traveler\'s path, 0..1, y up), u (how far along), speed, traveler, rider, count, type (\'enter\' | \'cross\' | \'exit\'), dir, col, row (its grid cell) }'],
       ['ev.reflect(), ev.stop(), ev.go(), ev.split(), ev.speed(k)', 'act on the traveler: send it back, stop it, set it going, send a copy back, change its speed'],
       ['ev.launch(line, dir)', 'set a new rider off on a line (its id or name)'],
+      ['ev.hit, ev.vel, ev.body', 'when a physical thing reached it (object.phys), not a traveler: how fast it struck (canvas units a beat), that as a velocity 1..127, and what struck; ev.type is \'hit\' (the event is solid: physical itself) or \'enter\' (it is not); ev.x, ev.y: where, within all that is physical there'],
       ...MUSIC,
     ],
     returns: 'nothing; its outputs gate (1 while a traveler is inside) and count are kept for it',

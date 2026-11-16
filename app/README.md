@@ -313,6 +313,36 @@ Every object is seen three ways by its size on screen: far off its glyph, nearer
   the size it has now), its inside sooner or later (⌥] and ⌥[), sizes as everywhere.
   Command: `object.levels`.
 
+## Physical things
+
+Anything drawn can be physical, as it can be a score or a sound (`src/sim.js`). Select it and
+choose under **Physical** (the context menu, the palette, or Properties):
+
+| | |
+|---|---|
+| body | it falls, collides and turns (a circle rolls) |
+| fixed | it stays: ground, walls, ramps. A traveler made fixed is carried along its line and pushes what it meets |
+| rope | a line that hangs. A wire made a rope hangs between its ports and is shaken by the signal in it |
+| hinge | a point: one thing under it turns about it; two are held together. `motor`: turns a beat |
+| weld | a point: the two things under it are one |
+| spring | a line: what is under its two ends is pulled together |
+
+The drawing is where everything starts. Press play, or move the playhead: the world is a function
+of the drawing and the beat, so pausing holds it, the timeline scrubs it, and beat 0 is the drawing
+again. **Physical › Keep this moment** makes the moment the drawing.
+
+Time is in beats. The world ticks 48 times a beat, gravity is in canvas units a beat squared
+(`sim.set`), a motor turns so many times a beat: a scene is the same at any tempo.
+
+Sound and the simulation meet in three ways. An event that a body reaches fires, as for a traveler
+(`ev.hit` how hard, `ev.vel` as a velocity; the presets *strike* and *struck bar*), and with **Q**
+on each hit waits for the next beat division. The code of a physical object reads how it moves in
+`geom.body` and what it returns as `fx`, `fy`, `spin` pushes it. A traveler that is physical is
+moved by the score. Examples: **Physical** in the Examples panel.
+
+For agents: `object.phys`, `sim.set`, `sim.read { beat }` (where everything will be and what will
+have struck what), `sim.keep { beat }`, `play.seek { beat }`.
+
 ## For agents
 
 `underspace.tools()` lists every command with a JSON schema;
