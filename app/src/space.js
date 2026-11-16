@@ -7,7 +7,7 @@
 
 import { ROLES, parseBlanket, blanketOf, ptsOf, isTarget, along, smooth, TARGET_CODE } from './object.js';
 import { EVENT } from './play.js';
-import { bindFor, wirePoints } from './bind.js';
+import { bindFor, drawnWire } from './bind.js';
 import { collapse, expand } from './collapse.js';
 import { PRESETS } from './presets.js';
 import { camera, flatCamera } from './framing.js';
@@ -58,7 +58,7 @@ export { T as argTypes };
 
 // A connector that loses a port becomes ink, where it was.
 function unbind(w) {
-  w.points = wirePoints(state.objects, w).map((p) => [round(p[0]), round(p[1])]);
+  w.points = drawnWire(state.objects, w).map((p) => [round(p[0]), round(p[1])]);
   w.off = [0, 0]; w.role = 'ink';
   delete w.bind;
 }

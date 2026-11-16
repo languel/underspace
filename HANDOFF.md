@@ -1894,6 +1894,15 @@ Also asked for:
     - A shut group's face grows downward to hold the rows published to it
       (`faces.js`: the DOM face only; the object's rect, ports and picking
       are as before). Checked: three rows on the instrument, none cut.
+    - **Wires are cables** (the owner, 16 Nov 2026: "a more natural spline
+      based algorithm that makes the interface points as normals to the
+      input output ports"). `bind.js` `cable(a, b)`: a cubic spline that
+      leaves an out port to the right and enters an in port from the left,
+      handles as long as the ports are apart and longer when the target is
+      behind the source. `wirePoints` returns it for every bound wire; the
+      drawn points are still stored and come back on unbind (`drawnWire`).
+      Ports are only on left and right edges, so the normals are level;
+      a port on another edge would need its own normal.
     - Not yet: no "strength" (how much of the inside
       shows, as a fade between levels: the switch is hard); ports cannot be
       hidden or chosen, they are whatever wires were cut; published

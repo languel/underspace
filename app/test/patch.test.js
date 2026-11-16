@@ -190,3 +190,15 @@ test('a traveler follows its line, and an event fires once when it enters', asyn
   call('object.remove', { ids: [line] });
   assert.equal(state.objects.has(tr), false, 'a traveler goes with its line');
 });
+
+test('a wire is a cable: it leaves and arrives along the normals of its ports', async () => {
+  const { cable } = await import('../src/bind.js');
+  for (const [a, b] of [[[0, 0], [6, 3]], [[0, 0], [5, -4]], [[0, 0], [-4, 2]], [[2, 1], [2.5, 6]], [[0, 0], [8, 0]]]) {
+    const p = cable(a, b), n = p.length - 1;
+    assert.deepEqual(p[0], a); assert.ok(Math.hypot(p[n][0] - b[0], p[n][1] - b[1]) < 1e-9);
+    // the first and last pieces run to the right (out of an out port, into an in port), level
+    for (const [q, r] of [[p[0], p[1]], [p[n - 1], p[n]]]) { assert.ok(r[0] > q[0], 'runs to the right'); assert.ok(Math.abs(r[1] - q[1]) <= 0.2 * (r[0] - q[0]) + 1e-9, 'level at the port'); }
+    assert.ok(p.every((q) => q.every(Number.isFinite)));
+  }
+  assert.equal(cable([1, 1], [1, 1]).length, 2); // no length: no curve
+});
