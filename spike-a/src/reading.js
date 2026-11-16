@@ -1,5 +1,5 @@
 // A reading turns the shape of marks into time and pitch.
-// Pure functions: no DOM, no audio. Tested in Node (test/reading.test.js).
+// Pure functions: no DOM, no audio. Tested in Node (spike-a/test/reading.test.js).
 //
 // A point is [x, y, z, t, p]: position, the second it was drawn, pressure.
 

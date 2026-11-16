@@ -2,94 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>underspace · spike A</title>
+<title>underspace</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="src/style.css">
-<script type="importmap">
-{
-  "imports": {
-    "three": "./vendor/three/build/three.webgpu.js",
-    "three/webgpu": "./vendor/three/build/three.webgpu.js",
-    "three/tsl": "./vendor/three/build/three.tsl.js",
-    "three/addons/": "./vendor/three/addons/"
-  }
-}
-</script>
+<!-- The site's front door is the app (app/). The address keeps its query and hash, so ?relay and ?demo work from here. -->
+<script>location.replace('app/' + location.search + location.hash);</script>
+<noscript><meta http-equiv="refresh" content="0; url=app/"></noscript>
 </head>
-<body>
-<header id="bar">
-  <span class="name">underspace <i>spike A · the space</i></span>
-
-  <span class="group" role="group" aria-label="Tool">
-    <button data-tool="draw" title="Draw (D)" aria-pressed="true">draw</button>
-    <button data-tool="select" title="Select (V)" aria-pressed="false">select</button>
-  </span>
-
-  <label title="The plane you draw on. The canvas view looks straight at it.">plane
-    <select id="plane">
-      <option value="front">front (x y)</option>
-      <option value="top">top (x z)</option>
-      <option value="side">side (z y)</option>
-    </select>
-  </label>
-  <label title="Offset of the drawing plane along its normal">depth
-    <input id="depth" type="number" step="0.25" value="0">
-  </label>
-  <label title="How the scene view places marks. 'making' puts the time each point was drawn on the depth axis.">scene shows
-    <select id="proj">
-      <option value="space">space (x y z)</option>
-      <option value="making">making (x y time)</option>
-    </select>
-  </label>
-
-  <span class="spacer"></span>
-
-  <button id="play" title="Play / stop (Space)">▶ play</button>
-  <label class="check"><input id="loop" type="checkbox" checked> loop</label>
-  <label>bpm <input id="bpm" type="number" min="20" max="300" value="90"></label>
-
-  <span class="group">
-    <button id="replay" title="Replay the whole session from the recorded take">replay take</button>
-    <button id="export" title="Download the take as JSON">save</button>
-    <button id="import" title="Load a take JSON">load</button>
-    <button id="clear" title="Remove every mark">clear</button>
-  </span>
-  <input id="file" type="file" accept="application/json,.json" hidden>
-</header>
-
-<main>
-  <section id="stage">
-    <canvas id="gl"></canvas>
-    <div id="paneCanvas" class="pane"><span class="tag">canvas</span></div>
-    <div id="paneScene" class="pane"><span class="tag">scene</span></div>
-    <div id="marquee" hidden></div>
-    <p id="hint">Draw lines in either view. Select some, then press play: the reading turns their shape into time and pitch, and the brush turns that into sound.</p>
-  </section>
-
-  <aside id="side">
-    <h2>Reading <small id="readingInfo"></small></h2>
-    <div class="grid">
-      <label title="Which channel of the drawing is read as time">time <select id="rTime"><option value="x">x</option><option value="z">z</option><option value="t">draw time</option></select></label>
-      <label title="Which channel of the drawing is read as pitch">pitch <select id="rPitch"><option value="y">y</option><option value="z">z</option><option value="p">pressure</option></select></label>
-      <label class="wide">length <span><input id="rBeats" type="number" min="1" max="256" value="16"> beats</span></label>
-      <label class="wide" title="Lowest and highest note, as MIDI numbers">range <span><input id="rLow" type="number" min="0" max="127" value="40">–<input id="rHigh" type="number" min="0" max="127" value="88"></span></label>
-      <label title="Snap time to the beat grid. The drawing itself is never changed.">snap <select id="rQuant"><option value="off">off</option><option value="starts">starts only</option><option value="all">every point</option></select></label>
-      <label>grid <select id="rGrid"><option value="1">1 beat</option><option value="0.5">1/2</option><option value="0.25" selected>1/4</option><option value="0.125">1/8</option></select></label>
-      <label>scale <select id="rScale"></select></label>
-      <label>root <select id="rRoot"></select></label>
-    </div>
-
-    <h2>Brush <small>shared code, runs on the selection</small></h2>
-    <label class="row">preset <select id="preset"></select></label>
-    <textarea id="code" spellcheck="false" aria-label="Brush code"></textarea>
-    <p id="brushStatus" class="status"></p>
-
-    <h2>Take <small id="takeInfo"></small></h2>
-    <ol id="takeList"></ol>
-  </aside>
-</main>
-
-<script type="module" src="src/main.js"></script>
-</body>
+<body><a href="app/">underspace</a></body>
 </html>

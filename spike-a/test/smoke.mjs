@@ -1,6 +1,6 @@
 import puppeteer from 'puppeteer-core';
 // Smoke test for spike A. Needs: npm i --no-save puppeteer-core, a Chrome binary (CHROME=...), and the
-// page served (npm run serve). Usage: node test/smoke.mjs [gl|gpu]. Screenshots go to OUT (default ./shots).
+// page served (npm run serve). Usage: node spike-a/test/smoke.mjs [gl|gpu]. Screenshots go to OUT (default ./shots).
 import { mkdirSync } from 'node:fs';
 const OUT = process.env.OUT || 'shots'; mkdirSync(OUT, { recursive: true });
 const extra = process.argv[2] === 'gpu' ? ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=swiftshader', '--use-webgpu-adapter=swiftshader'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
@@ -11,7 +11,7 @@ const logs = [];
 page.on('console', (m) => logs.push(`[${m.type()}] ${m.text()}`));
 page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 page.on('requestfailed', (r) => logs.push(`[requestfailed] ${r.url()}`));
-await page.goto(process.env.URL || 'http://127.0.0.1:5310/', { waitUntil: 'load' });
+await page.goto(process.env.URL || 'http://127.0.0.1:5310/spike-a/', { waitUntil: 'load' });
 await page.waitForFunction('window.underspace', { timeout: 20000 }).catch(() => logs.push('underspace never appeared'));
 const tag = process.argv[2] || 'gl';
 const drag = async (pts) => { await page.mouse.move(pts[0][0], pts[0][1]); await page.mouse.down(); for (const p of pts.slice(1)) await page.mouse.move(p[0], p[1], { steps: 6 }); await page.mouse.up(); };

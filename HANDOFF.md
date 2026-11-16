@@ -128,11 +128,14 @@ dependencies; not every file).
 | Circuit simulation | `p5comp` | |
 | Seekable performance documents | `motionbrickhouse` `motion/` | Also shows a module attaching to threeditor through four hooks |
 
-## 5. What is in this folder (spike A, "the space")
+## 5. Spike A, "the space" (`spike-a/`)
 
 Static, no build. `python3 -m http.server 5310`, open
-`http://127.0.0.1:5310/`. Add `?gl` to force WebGL. `npm test` runs the
-reading tests (Node 22+, no dependencies). See `README.md` for a walkthrough.
+`http://127.0.0.1:5310/spike-a/`. Add `?gl` to force WebGL. `npm test` runs the
+reading tests (Node 22+, no dependencies). See `spike-a/README.md` for a
+walkthrough. The paths below are inside `spike-a/` (`vendor/` is at the root).
+Since 16 Nov 2026 the root page only sends the browser to `app/`, keeping the
+query and hash, so the site opens on the app and each spike is a path beside it.
 
 | File | Role |
 | --- | --- |
@@ -1162,9 +1165,9 @@ In this order, unless the owner says otherwise.
 1. ~~Create the GitHub repo, push, and add a GitHub Pages workflow.~~ Done
    13 Nov 2026: public repo `github.com/languel/underspace`, live at
    <https://languel.github.io/underspace/>. `.github/workflows/pages.yml`
-   runs `npm test`, then publishes only `index.html`, `src/` and `vendor/`
-   on every push to `main`. A new top-level folder or page must be added to
-   the `cp` line there or it will not be deployed (`spike-b/` and `app/` are).
+   runs `npm test`, then publishes only the root `index.html` (which goes to
+   `app/`), `vendor/`, `app/`, `spike-a/` and `spike-b/` on every push to `main`. A new top-level folder or page must be added to
+   the `cp` line there or it will not be deployed.
 2. **Get the owner's answers on spike A** (below). They decide what the
    kernel looks like.
 3. ~~Spike B, "the object".~~ Built 13 Nov 2026 in `spike-b/` (throwaway,
@@ -1914,7 +1917,7 @@ Also asked for:
     MIDI keyboard input, polyphony limits, collapsing an instrument into a
     group with a MIDI-in port shown on its face, and an `out` that plays
     the whole drawing as a UPIC page (curves as notes over time).
-- `README.md`: how to run and try spike A.
+- `README.md`: the paths of the site. `spike-a/README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is
   in this file or in `docs/CONTEXT.md`; where they differ, these files win.
