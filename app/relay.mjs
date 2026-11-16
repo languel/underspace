@@ -54,6 +54,20 @@ const body = (req) => new Promise((resolve, reject) => { let s = ''; req.on('dat
 // origins in UNDERSPACE_ORIGINS (comma-separated; by default the deployed copy). Without this any
 // site open in the browser could drive the drawing, and so run code in it.
 const ORIGINS = new Set((process.env.UNDERSPACE_ORIGINS ?? 'https://languel.github.io').split(',').map((x) => x.trim()).filter(Boolean));
+// Two more ways a web page reaches a server on this machine without an allowed Origin, both closed:
+//   - a request the browser sends with no Origin at all (an <img> or a plain GET from any site):
+//     browsers mark those "sec-fetch-site: cross-site", and such a request is refused. Without this
+//     any site could join /events as a tab and swallow the calls meant for the real one.
+//   - DNS rebinding (a site's name made to point at 127.0.0.1, so its requests look same-origin and
+//     carry no Origin): the Host header then names that site, not this machine, and is refused.
+const HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`, `[::1]:${PORT}`]);
+const refused = (req) => {
+  const origin = req.headers.origin, host = String(req.headers.host ?? '').toLowerCase();
+  if (!HOSTS.has(host)) return `host ${host || '(none)'} is not this machine's relay`;
+  if (!allowed(origin)) return `origin ${origin} is not allowed (UNDERSPACE_ORIGINS)`;
+  if (!origin && req.headers['sec-fetch-site'] === 'cross-site') return 'a request from another site with no origin is not allowed';
+  return '';
+};
 const allowed = (origin) => { if (!origin) return true; try { const u = new URL(origin); return ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname) || u.hostname.endsWith('.localhost') || ORIGINS.has(u.origin); } catch { return false; } };
 let CORS = {};
 const cors = (origin) => ({ 'access-control-allow-origin': origin || '*', vary: 'origin', 'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-private-network': 'true' });
@@ -64,7 +78,8 @@ function startHub() {
     const url = new URL(req.url, BASE), origin = req.headers.origin;
     res.cors = CORS = cors(origin);
     try {
-      if (!allowed(origin)) { res.writeHead(403, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: `origin ${origin} is not allowed (UNDERSPACE_ORIGINS)` })); }
+      const no = refused(req);
+      if (no) { res.writeHead(403, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: no })); }
       if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
       if (url.pathname === '/events') {
         const id = url.searchParams.get('tab') || 't' + (++seq);

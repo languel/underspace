@@ -85,7 +85,10 @@ let recNotes = [], lastBeat = 0, lastWrap = 0, clipDrag = null, timeline = null;
 // Performance and errors (debug.js): created before the first frame, so it can catch that frame's errors.
 const dbg = createDebug($('debug'), () => ({ objects: state.objects.size, riders: playEngine.riders(), steps: take.clips.length, settle: stats.settleMs.toFixed(1) + 'ms' }));
 const view = await createView({ canvas: $('gl'), stage, onFrame: frame });
-addEventListener('message', (e) => { if (e.data?.underspace) step.report(e.data.underspace, e.data); });
+// only from a sketch's own frame: another window (an opener, an embedding page) cannot report for one
+addEventListener('message', (e) => { if (e.data?.underspace && [...document.querySelectorAll('iframe')].some((f) => f.contentWindow === e.source)) step.report(e.data.underspace, e.data); });
+// a colour from a setting, safe to write into markup (settings can be set by agents and by event code)
+const cssColour = (v) => String(v ?? '').replace(/[^#\w(),.% -]/g, '').slice(0, 64);
 
 // ---- layout: which objects are visible, at which face, and where -----------
 
@@ -1305,7 +1308,7 @@ function showToolMark(p, e) {
   toolMark.style.transform = `translate(${(p[0] + off).toFixed(1)}px, ${(p[1] + off).toFixed(1)}px)`;
   if (sig === toolMarkSig) return;
   toolMarkSig = sig;
-  toolMark.innerHTML = (a ? icon(a.icon) : '') + (inks ? `<b style="border-color:${settings.stroke};background:${fills && settings.fill ? settings.fill : 'transparent'}"></b>` : '') + (sc && e.altKey ? '<u>−</u>' : '');
+  toolMark.innerHTML = (a ? icon(a.icon) : '') + (inks ? `<b style="border-color:${cssColour(settings.stroke)};background:${fills && settings.fill ? cssColour(settings.fill) : 'transparent'}"></b>` : '') + (sc && e.altKey ? '<u>−</u>' : '');
 }
 
 function setTool(name) {

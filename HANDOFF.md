@@ -1530,7 +1530,7 @@ Also asked for:
     (long, but the agent needs them). 130 tests.
   Still to try: Pi and opencode sessions of some length; the deployed https
   page reaching the hub, and the weights staying cached, in Chrome proper;
-  WebMCP. Still to build: tools driven by connectors; the security audit.
+  WebMCP. Still to build: tools driven by connectors.
 - **Controls: the fifth pass (15 Nov 2026), quick turns.**
   - **A quick turn** (`quick` in `runTurn`, `agent.js`; after AMS's flow
     prompt): a sentence typed in the palette while drawing is not a
@@ -1607,6 +1607,23 @@ Also asked for:
     place. Ollama.app's own server also runs, on the same port (it binds
     every address, the service 127.0.0.1): one of them should go. LM Studio
     did not answer on port 1234 and was not used.
+- **The security audit (15 Nov 2026): `docs/SECURITY.md`.** Judged against
+  the owner's model: an agent the owner starts is trusted completely; a web
+  page on another site, a file someone else made, and text inside the drawing
+  are not. Six things fixed, none of which limits an agent: the hub refuses
+  a browser request from another site that carries no Origin (any page could
+  join as a tab and swallow the calls) and a Host that is not this machine
+  (DNS rebinding); a take replays only recorded commands (a hand-written one
+  could call `setting.set` and repoint the assistant or the relay for good);
+  a caller cannot be recorded as "human"; colours from settings no longer
+  reach `innerHTML` as markup; sketch reports are taken only from the page's
+  own frames. Open by decision: no token on the hub, agents write code,
+  every localhost page and all of `languel.github.io` is let in. **For the
+  owner to decide** (D1 in the file): opening a take, pasting objects or a
+  sketch runs their code with the page's rights, which matters once students
+  exchange files; the options are holding a file's code until the person
+  lets it run, sketch frames without same-origin, or all object code in a
+  worker. The running hub must be restarted to have the fixes.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

@@ -12,10 +12,13 @@ export function createRelay({ base, call, tools, onState = () => {}, onCall = ()
   const post = (path, json) => fetch(url + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(json) });
   const plain = (v) => { try { return v === undefined ? null : JSON.parse(JSON.stringify(v)); } catch { return String(v); } };
 
+  // Who a call from outside is recorded as: the name it gives, never one of the page's own (a call
+  // that says it is "human" would be in the take as the person's and would not show the agent mark).
+  const who = (by) => { const n = String(by || 'agent').slice(0, 40); return ['human', 'palette', 'example', 'demo', 'assistant'].includes(n) ? 'agent:' + n : n; };
   async function answer(m) {
     onCall(m, 'begin');
     let out;
-    try { out = { id: m.id, ok: true, result: plain(await call(m.name, m.args ?? {}, m.by || 'agent')) }; }
+    try { out = { id: m.id, ok: true, result: plain(await call(m.name, m.args ?? {}, who(m.by))) }; }
     catch (e) { out = { id: m.id, ok: false, error: e?.message ?? String(e) }; }
     onCall(m, 'end');
     post('/result', out).catch(() => {});

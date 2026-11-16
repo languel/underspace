@@ -776,7 +776,10 @@ function changed() { state.version++; for (const fn of listeners) fn(); }
 function rerun() {
   reset();
   for (const clip of take.clips) {
-    try { const cmd = commands.get(clip.name); if (cmd) runCmd(cmd, structuredClone(clip.args), clip.by); } catch (e) { console.warn('take:', clip.name, e.message); }
+    // Only what a take can hold is run from one: the commands that change the drawing. A take that
+    // names another (setting.set, action.run, user.ask: none is ever recorded) was written by hand,
+    // and opening a file must not be able to change this browser's settings or act on the page.
+    try { const cmd = commands.get(clip.name); if (cmd?.record) runCmd(cmd, structuredClone(clip.args), clip.by); else console.warn('take: not a recorded command, left out:', clip.name); } catch (e) { console.warn('take:', clip.name, e.message); }
   }
   changed();
 }

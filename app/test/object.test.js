@@ -122,3 +122,16 @@ test('line.add reads points written as text and refuses what cannot be drawn', a
   assert.throws(() => call('line.add', { points: [[0, 0], ['a', 1]] }), /each point is \[x, y\]/);
   assert.equal(state.objects.size, n);
 });
+
+test('a take runs only the commands a take can hold', async () => {
+  const { call, state, loadTake, define } = await import('../src/space.js');
+  let ran = 0;
+  define({ name: 'test.outside', record: false, doc: 'not part of a drawing', run: () => { ran++; } });
+  loadTake({ type: 'underspace-take', clips: [
+    { t: 0, name: 'line.add', args: { points: [[0, 0], [1, 1]] }, by: 'human' },
+    { t: 1, name: 'test.outside', args: {}, by: 'human' }, // written into the file by hand
+  ] });
+  assert.equal(state.objects.size, 1);
+  assert.equal(ran, 0);
+  call('space.clear');
+});
