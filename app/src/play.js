@@ -117,6 +117,17 @@ const isClosed = (o, path) => o.closed || (path.length > 3 && Math.hypot(path[0]
 // ev.split() (a copy goes back the way it came), ev.speed(k), ev.go().
 export const EVENTS = {
   note: EVENT,
+  strike: `// strike
+// out: gate count
+// param: dur 0.4
+// a physical thing that strikes it sounds by where and how hard (ev.vel); a traveler, as a note does
+note(pitch(ev.y), ev.vel ?? 100, p.dur);`,
+  'struck bar': `// struck bar
+// out: gate count
+// param: midi 60
+// param: dur 0.6
+// one note, as loud as it is struck
+note(snap(p.midi), ev.vel ?? 100, p.dur);`,
   reflect: `// reflect
 // out: gate count
 // it sends the traveler back the way it came
@@ -283,6 +294,20 @@ export function createPlay() {
 
   return {
     hitAt,
+    // A body of the simulation reaching an event (sim.js) fires it as a traveler does: the same code, with
+    // the same counts, lights, flash and lockout. ev: { type: 'hit' | 'enter', x, y, hit (its speed), vel, body }.
+    // What an event does to a traveler (reflect, stop, split...) does nothing here. -> an error, or nothing.
+    fire(e, ev, hooks) {
+      paramsHook = hooks.paramsOf; hooksNow = { ...plain, ...hooks };
+      const ep = hooks.paramsOf(e);
+      if (ep.lockout > 0 && nowT - (lastFire.get(e.id) ?? -1e9) < ep.lockout) return;
+      counts.set(e.id, (counts.get(e.id) ?? 0) + 1); hitAt.set(e.id, performance.now()); lastFire.set(e.id, nowT);
+      const f = handler(e.code ?? EVENT), nothing = () => {};
+      if (f.error) return f.error;
+      const full = { dir: 0, u: 0, traveler: null, rider: 0, count: counts.get(e.id), t: nowT, launch: () => false, reflect: nothing, stop: nothing, go: nothing, split: nothing, speed: nothing, ...ev };
+      const note = (m, v = 100, d = 0.3, ch = 1) => hooksNow.note(m, v, d === 'gate' ? 0.3 : d, ch);
+      try { f.run(full, ep, note, memOf(e.id), hooksNow.pitch, hooksNow.step, hooksNow.snap, rng, hooksNow.cc, lightFor(e.id), lit, hooksNow.tool ?? NO_TOOL); } catch (err) { return err.message; }
+    },
     // how many riders there are now (the debug display)
     riders() { let n = 0; for (const st of net.values()) n += st.riders.length; return n; },
     // let go of every held note (a pause), the travelers staying where they are

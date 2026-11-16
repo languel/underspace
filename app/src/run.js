@@ -65,6 +65,9 @@ export function createRunner() {
       let geom = null;
       // A path remembers where its code last looked, so the view can show it.
       if (o.points) { const points = ptsOf(o); geom = { points, last: null, at(u) { return (this.last = along(points, u)); } }; }
+      // a physical object's code reads how it moves (sim.js): geom.body { x, y, vx, vy, speed, spin, hit }
+      const body = step.body?.(o.id);
+      if (body) { geom ??= { points: [], last: null, at: () => [body.x, body.y] }; geom.body = body; }
       if (!mems.has(o.id)) mems.set(o.id, {});
       try {
         let out = f.run(inp, p, t, geom, mems.get(o.id), along);

@@ -10,7 +10,8 @@ import { faceOf, levelsOf } from './levels.js';
 import { createAskHere, hereText } from './askhere.js';
 import { startWebMCP } from './webmcp.js';
 import { stepsOnScreen, TARGET_PRESETS, pressureRuns } from './object.js';
-import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplifyIndex, along, setDrag, setLive, setMoved, penOf, isLine, isTarget, hasCode, isWire } from './object.js';
+import { blanketOf, rectOf, ptsOf, portPos, innerXf, outline, smooth, simplifyIndex, along, setDrag, setLive, setMoved, setPosed, poseOf, turned, turnOf, penOf, isLine, isTarget, hasCode, isWire } from './object.js';
+import { createSim, PHYS, PHYS_KINDS, worldOf } from './sim.js';
 import { selectionProps, toolProps } from './panels/properties.js';
 import { wirePoints } from './bind.js';
 import { createRunner } from './run.js';
@@ -84,6 +85,8 @@ const faces = createFaces($('faces'), { onParam, onCode, onPublish });
 const step = createRunner();
 const ink = createInk($('ink'));
 const playEngine = createPlay();
+const sim = createSim(); // what is physical moves on the same clock, in beats (sim.js)
+let simNow = null;      // this frame's: { poses, outs, tick }
 // One clock for everything that plays (transport.js); notes played while recording become a clip.
 const transport = createTransport(), midiOut = createMidiOut();
 let movedNow = new Map(); // where travelers are now (play.js), [x, y] or [x, y, z]
@@ -146,7 +149,7 @@ function walk(space, xf) {
     }
     if (isLine(o)) {
       const made = run.shown.get(o.id);
-      const raw = isWire(o) ? wirePoints(state.objects, o) : made ?? ptsOf(o);
+      const raw = isWire(o) ? poseOf(o)?.pts ?? wirePoints(state.objects, o) : made ?? ptsOf(o); // a wire that is a rope hangs where the simulation has it
       // smooth through its points, in as many pieces as it is long on screen (it stays smooth when seen near)
       const pts = (st.path === 'straight' || o.closed ? raw : smooth(raw, stepsOnScreen(xf.k / upp))).map((p) => at(xf, p));
       const brushed = o.brush && !isWire(o);
@@ -165,11 +168,14 @@ function walk(space, xf) {
     }
     const r = rectOf(o), [l, t] = view.toScreen(at(xf, [r.cx - r.w / 2, r.cy + r.h / 2]));
     const px = { l, t, w: r.w * xf.k / upp, h: r.h * xf.k / upp };
+    const edgeOf = (shape) => turned(o, outline(r, shape), [r.cx, r.cy]); // its outline, turned as the simulation has turned it
     if (o.role === 'traveler' && o.kind === 'shape' && !o.keeps) lines.push({ id: o.id, pts: outline(r, 'ellipse').map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'hot', width: 1.6, fill: st.fill ?? st.stroke ?? 'hot', opacity: st.opacity ?? 0.85 });
-    if (o.role === 'event' && o.kind === 'shape' && !o.keeps) { const lit = performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160; lines.push({ id: o.id, pts: outline(r, o.shape).map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'hot', width: lit ? 3 : 1.4, fill: lit ? st.stroke ?? 'hot' : st.fill, opacity: lit ? 0.5 : st.opacity }); }
+    if (o.role === 'event' && o.kind === 'shape' && !o.keeps) { const lit = performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160; lines.push({ id: o.id, pts: edgeOf(o.shape).map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'hot', width: lit ? 3 : 1.4, fill: lit ? st.stroke ?? 'hot' : st.fill, opacity: lit ? 0.5 : st.opacity }); }
     if (o.kind === 'shape' && (o.role === 'visual' || o.keeps)) {
       if (o.keeps && performance.now() - (playEngine.hitAt.get(o.id) ?? -1e9) < 160) lines.push({ pts: outline(r, o.shape).map((p) => at(xf, p)), color: 'hot', width: (st.width ?? 2.2) + 3, opacity: 0.6 });
-      const edge = outline(r, o.shape);
+      const edge = edgeOf(o.shape);
+      // a circle that is physical shows a spoke, so its rolling can be seen
+      if (o.phys?.is === 'body' && o.shape === 'ellipse' && !o.brush) lines.push({ pts: turned(o, [[r.cx, r.cy], [r.cx + r.w / 2, r.cy]], [r.cx, r.cy]).map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'ink', width: 1, opacity: 0.5 });
       if (o.brush) inkItems.push(inkItem(o, element(edge.slice(0, -1), null, { closed: true, role: 'plane', color: st.fill ?? st.stroke ?? inkColor }), xf, { ...st, path: o.shape === 'rect' ? 'straight' : null }));
       lines.push({ id: o.id, pts: edge.map((p) => at(xf, p)), color: sel ? 'accent' : st.stroke ?? 'ink', width: o.brush ? (sel ? 1 : 0) : st.width ?? 2.2, opacity: o.brush ? 1 : st.opacity, fill: o.brush ? null : st.fill });
     }
@@ -177,7 +183,7 @@ function walk(space, xf) {
     // a group that holds an out part is an instrument: its face shows the out's glyph and channel.
     // pub: the parameters published to a group from inside; up: it is itself in a group (publish.js)
     const inner = o.kind === 'group' ? outOfGroup(o.id) : null, pub = o.kind === 'group' ? pubOfGroup(o.id) : null;
-    vis.set(o.id, { o, face, px, xf, blanket, ...(inner ? { inst: { o: inner, blanket: blanketOf(inner) } } : {}), ...(pub?.length ? { pub } : {}), up: get(space)?.kind === 'group' });
+    vis.set(o.id, { o, face, px, xf, blanket, turn: turnOf(o), ...(inner ? { inst: { o: inner, blanket: blanketOf(inner) } } : {}), ...(pub?.length ? { pub } : {}), up: get(space)?.kind === 'group' });
     if (o.role === 'grid') {
       // a grid frame: its outline, and its cells (sub-points as dots would be too many)
       const g = paramsOf(o), cell = Math.max(0.01, g.cell ?? 1), x0 = r.cx - r.w / 2, y0 = r.cy - r.h / 2, nx = Math.floor(r.w / cell + 1e-6), ny = Math.floor(r.h / cell + 1e-6);
@@ -416,7 +422,8 @@ const scorePos = (o) => (transport.playing && scorePlaying(o) && scorePlan.has(o
 // Space: pause what is playing; otherwise play from where the transport is: the selected scores
 // (or all of them), the travelers and the recorded clips.
 const travelers = () => [...state.objects.values()].filter((o) => o.role === 'traveler');
-const canPlay = () => scores().length || travelers().length || state.clips.size;
+const anyPhys = () => [...state.objects.values()].some((o) => o.phys);
+const canPlay = () => scores().length || travelers().length || state.clips.size || anyPhys();
 function togglePlay(c = context()) {
   if (transport.playing) { transport.pause(); resetScores(); playEngine.quiet(); endRecording(); return; }
   const chosen = c.sel.filter((o) => o.role === 'score');
@@ -504,7 +511,7 @@ let laidOut = -1; // the state version the last layout was made from
 // One frame. An error in it is noted (debug.js) and the next frame tries again, rather than
 // the drawing stopping for good.
 function frame() {
-  try { frameInner(); } catch (e) { dbg.error(e, 'frame'); } finally { dbg.frame(); }
+  try { frameInner(); } catch (e) { dbg.error(e, 'frame'); } finally { setPosed(null); dbg.frame(); }
 }
 function frameInner() {
   laidOut = state.version;
@@ -523,6 +530,16 @@ function frameInner() {
   for (const g of played.ghosts) playSig += g.pos[0] * 5 + g.pos[1] * 11;
   for (const id of litNow) playSig += id.length * 31 + 1;
   for (const [id, when] of playEngine.hitAt) if (performance.now() - when < 160) playSig += when + id.length;
+  // What is physical is where the simulation has it at this beat: a function of the drawing and the time, so
+  // pausing holds it, moving the playhead moves it, and at 0 it is the drawing. Hits fire events (as travelers do).
+  const simmed = dbg.time('sim', () => sim.frame(state.objects, state.version, transport.beat, transport.playing, {
+    moved: played.moved, output: (id, port) => run?.output(id, port), quant: settings.quantOn ? settings.quant : 0,
+    fire: (o, ev) => { const error = playEngine.fire(o, ev, musicHooks()); if (error) step.report(o.id, { error }); },
+  }));
+  step.body = simmed ? (id) => simmed.outs.get(id) : null;
+  simNow = simmed;
+  setPosed(simmed?.poses ?? null); // for this frame only: commands read the drawing, not where it has got to
+  if (simmed?.poses) playSig += simmed.tick * 17 + 1;
   run = dbg.time('code', () => step(state.objects, performance.now() / 1000));
   vis = new Map(); spaces = [{ id: null, kind: 'canvas', xf: ROOT }]; lines = []; ink3d = []; sceneList = []; dots = []; inkItems = []; pointSrc = [];
   dbg.time('layout', () => { walk(null, ROOT); ghostsOf(played.ghosts); if (settings.showCrossings) crossingMarks(); quantPreview(); });
@@ -1986,6 +2003,12 @@ function context(hitId) {
   return { sel, one: sel.length === 1 ? sel[0] : null, hit, p, here, target, lines: sel.filter(isLine), shapes: sel.filter((o) => o.kind === 'shape'), groups: sel.filter((o) => o.kind === 'group') };
 }
 const ids = (list) => list.map((o) => o.id);
+// What of the selection can be this kind of physical thing; and a hinge or a weld put where the pointer is.
+const physable = (c, is) => c.sel.filter((o) => PHYS_KINDS[is].includes(o.kind) && !(is === 'rope' && o.closed) && !(is === 'spring' && o.bind));
+function markHere(c, is) {
+  const s = spaceAt(c.p[0], c.p[1], true), p = toSpace(s, c.p[0], c.p[1]);
+  batch(() => { const id = call('point.add', { space: s.id, at: [round(p[0]), round(p[1])], glyph: is === 'hinge' ? 'ring' : 'plus', size: round(Math.max(0.2, 12 * unitsPerPx(s))) }); call('object.phys', { ids: [id], is }); call('select.set', { ids: [id] }); });
+}
 // The selected objects that are on screen with a blanket (so with levels: levels.js), and their near level scaled.
 const seen = (c) => c.sel.map((o) => vis.get(o.id)).filter((v) => v?.px && v.blanket && v.face !== 'joint' && v.face !== 'line');
 const nearBy = (c, k) => batch(() => seen(c).forEach((v) => call('object.levels', { ids: [v.o.id], near: Math.max(v.o.levels?.far ?? 0, levelsOf(v.o, v.px, view.size).near * k) })));
@@ -2141,6 +2164,16 @@ const ACTIONS = [
   { id: 'level.later', title: 'Interface: its inside later', short: 'Its inside later', icon: 'collapse', keys: 'alt+[', group: 'edit', menu: 'Interface', when: (c) => seen(c).length > 0, run: (c) => nearBy(c, 1.25) },
   { id: 'level.reset', title: 'Interface: sizes as everywhere', short: 'Sizes as everywhere', icon: 'level', group: 'edit', menu: 'Interface', when: (c) => c.sel.some((o) => o.levels),
     run: (c) => call('object.levels', { ids: ids(c.sel.filter((o) => o.levels)), far: null, near: null }) },
+  // Physical (sim.js): what the selection is in the simulation; a hinge or a weld where the pointer is; a moment kept.
+  ...[['body', 'It falls and collides'], ['fixed', 'It stays (ground, or carried by its line)'], ['rope', 'It hangs (a rope)'], ['spring', 'A spring between what is under its ends']].map(([is, title]) => ({
+    id: 'phys.' + is, title: 'Physical: ' + title.toLowerCase(), short: title, icon: 'phys.' + is, group: 'role', menu: 'Physical', when: (c) => physable(c, is).length > 0,
+    on: () => { const l = physable(context(), is); return l.length > 0 && l.every((o) => o.phys?.is === is); }, run: (c) => { const l = physable(c, is); call('object.phys', { ids: ids(l), is: l.every((o) => o.phys?.is === is) ? null : is }); } })),
+  { id: 'phys.hinge', title: 'Physical: a hinge here (what is under it turns about it)', short: 'A hinge here', icon: 'phys.hinge', group: 'role', menu: 'Physical', when: (c) => c.here.kind !== 'scene', run: (c) => markHere(c, 'hinge') },
+  { id: 'phys.weld', title: 'Physical: a weld here (the two things under it are one)', short: 'A weld here', icon: 'phys.weld', group: 'role', menu: 'Physical', when: (c) => c.here.kind !== 'scene', run: (c) => markHere(c, 'weld') },
+  { id: 'phys.none', title: 'Physical: no longer', short: 'No longer physical', icon: 'phys.none', group: 'role', menu: 'Physical', when: (c) => c.sel.some((o) => o.phys), run: (c) => call('object.phys', { ids: ids(c.sel.filter((o) => o.phys)), is: null }) },
+  { id: 'sim.gravity', title: 'Physical: gravity', short: 'Gravity', icon: 'phys.body', group: 'role', menu: 'Physical', when: () => anyPhys(), on: () => worldOf().gravity.some((v) => v !== 0), run: () => call('sim.set', { gravity: worldOf().gravity.some((v) => v !== 0) ? [0, 0] : null }) },
+  { id: 'sim.keep', title: 'Physical: this moment becomes the drawing', short: 'Keep this moment', icon: 'phys.keep', group: 'role', menu: 'Physical', when: () => anyPhys() && transport.t > 0,
+    run: () => { const beat = round(transport.beat); rewind(); call('sim.keep', { beat }); } },
   { id: 'front', title: 'Bring to front', icon: 'front', keys: 'mod+shift+]', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'front' }) },
   { id: 'forward', title: 'Bring forward', icon: 'front', keys: 'mod+]', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'forward' }) },
   { id: 'backward', title: 'Send backward', icon: 'back', keys: 'mod+[', group: 'edit', menu: 'Arrange', when: (c) => c.sel.length, run: (c) => call('object.order', { ids: ids(c.sel), to: 'backward' }) },
@@ -2380,7 +2413,7 @@ dragStep.begin = beginStep; dragStep.end = endStep;
 const app = {
   simplifyIds: (ids, px) => simplifyLines({ lines: ids.map(get).filter(Boolean) }, px),
   ask: (text, o) => ask(text, o), agent: () => agent, engines: () => ENGINES, listModels: () => listModels(settings.assistBase),
-  state, call, batch, get, tools, PRESETS, BRUSHES, INK, SCULPTS, sculptErrors: () => sculptErrors, brushesFor, actions: ACTIONS, onParam, onCode, frameIds, runAction,
+  state, call, batch, get, tools, PRESETS, BRUSHES, INK, PHYS, PHYS_KINDS, SCULPTS, sculptErrors: () => sculptErrors, brushesFor, actions: ACTIONS, onParam, onCode, frameIds, runAction,
   run: () => run, setRole, keysShown: (a) => showKey(a), tool: () => tool, settingsVersion: () => settingsVersion,
   presetsFor: (o) => (o.role === 'synth' ? { drawn: SYNTH_PARTS[kindOf(o)], ...Object.fromEntries(Object.entries(READYMADES[kindOf(o)] ?? {}).map(([n, b]) => [n, SYNTH_PARTS[kindOf(o)] + '\n' + b])) } : o.role === 'target' ? TARGET_PRESETS : o.role === 'score' ? BRUSHES : o.role === 'junction' ? JUNCTIONS : o.role === 'event' ? EVENTS : o.role === 'grid' ? GRID_PRESETS : PRESETS),
   // Add an example: built, then moved as a whole to `drop` (a canvas point: dragged from the panel),
@@ -2839,11 +2872,12 @@ define({ name: 'play.state', doc: 'What is sounding, read instead of heard. play
   } });
 define({ name: 'synth.play', record: false, doc: 'Play a note on a drawn instrument now, to hear it: id is its out part (or its name); midi (default 60), seconds (0.6), velocity (100).', args: { id: T.str, midi: T.num, seconds: T.num, velocity: T.num }, required: ['id'],
   run(a) { const id = instrumentId(state.objects, a.id); if (!id) throw new Error(`no drawn instrument "${a.id}": give the id or the name of a synth's out part`); sound.note(a.midi ?? 60, a.velocity ?? 100, a.seconds ?? 0.6, id); return true; } });
+define({ name: 'play.seek', doc: 'Move the playhead to a beat (0: the start), playing or not. Travelers are where they would be by then, and so is everything physical (sim.js): time is travelled as space is. Returns the beat it is at.', args: { beat: T.num }, required: ['beat'], record: false, run: (a) => { seek(Math.max(0, a.beat) * transport.spb); return round(transport.beat); } });
 define({ name: 'play.toggle', doc: 'Start or stop playing: scores loop and travelers set off along their lines. Returns whether it plays now.', record: false, run: () => { togglePlay(); return transport.playing; } });
 define({ name: 'score.stop', doc: 'Stop one score (the others play on), or pause everything when no id is given.', args: { id: T.id }, record: false, run: (a) => { if (!a.id) { if (transport.playing) togglePlay(); return; } scoreSet = new Set(scores().filter((o) => o.id !== a.id && scorePlaying(o)).map((o) => o.id)); sound.silence(a.id); scorePlan.delete(a.id); } });
 define({ name: 'assistant.ask', doc: 'Ask the built-in assistant to build something from a sentence.', args: { text: T.str }, required: ['text'], record: false, run: (a) => ask(a.text) });
 
-window.underspace = { agent, relay, call, batch, tools, commands: tools, state, take, undo, redo, view, ask, actions: ACTIONS, backend: view.backend };
+window.underspace = { get sim() { return simNow; }, agent, relay, call, batch, tools, commands: tools, state, take, undo, redo, view, ask, actions: ACTIONS, backend: view.backend };
 // WebMCP, where the browser has it (webmcp.js): every command offered as a tool of the page.
 const webmcp = startWebMCP({ tools, call, guard: (args, name) => agent.guard(args, name), onOffered: (how) => { document.documentElement.dataset.webmcp = how; } });
 window.underspace.webmcp = webmcp.offer; // to offer them to a model context by hand (a polyfill, a test)

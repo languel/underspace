@@ -150,3 +150,75 @@ test('sim: the open drawing, frame by frame: hits fire events, quantized when as
   assert.deepEqual(r.poses.get(c), r.poses.get(d));
   assert.deepEqual(r.poses.get(w), r.poses.get(c), 'the weld rides on them');
 });
+
+test('sim: what comes from outside while it plays: a traveler carries, code pushes, a signal shakes; and it is kept', () => {
+  call('space.clear');
+  // a bat carried along a rail by the score, and a box on it
+  const rail = call('line.add', { points: [[-3, 0], [3, 0]], style: { path: 'straight' } });
+  const bat = call('shape.add', { rect: { cx: -3, cy: 0, w: 2, h: 0.3 } });
+  call('traveler.attach', { id: bat, on: rail, u: 0 });
+  call('object.phys', { ids: [bat], is: 'fixed', friction: 1 });
+  const ball = call('shape.add', { rect: { cx: -3, cy: 0.5, w: 0.5, h: 0.5 } }); // (a box: a ball would roll back along it)
+  call('object.phys', { ids: [ball], is: 'body', friction: 1, bounce: 0 });
+  // a box whose code pushes it up, harder than gravity pulls
+  const box = call('shape.add', { role: 'code', code: '// up\n// out: fy\nreturn { fy: 24 };', rect: { cx: 10, cy: 0, w: 1, h: 1 } });
+  call('object.phys', { ids: [box], is: 'body' });
+  // a wire between two code boxes, made a rope
+  const a = call('shape.add', { role: 'code', code: '// a\n// out: y\nreturn { y: 1 };', rect: { cx: 20, cy: 0, w: 2, h: 1 } });
+  const b = call('shape.add', { role: 'code', code: '// b\n// in: x\nreturn {};', rect: { cx: 26, cy: 0, w: 2, h: 1 } });
+  const wire = call('line.add', { points: [[21, 0], [25, 0]] });
+  call('object.role', { id: wire, role: 'connector', tol: 0.5 });
+  assert.ok(state.objects.get(wire).bind, 'the wire is bound');
+  call('object.phys', { ids: [wire], is: 'rope' });
+
+  const sim = createSim();
+  const frame = (beat, playing, signal = 0) => sim.frame(state.objects, state.version, beat, playing, {
+    moved: new Map([[bat, [-3 + Math.min(6, beat * 1.5), 0]]]), // the traveler: 1.5 units a beat to the right
+    output: (id, port) => (id === box && port === 'fy' ? 24 : id === a && port === 'y' ? signal : 0),
+  });
+  frame(0, false);
+  frame(6, false); // the playhead moved ahead while nothing played: nothing came from outside
+  const ahead = frame(6, false);
+  assert.ok(ahead.outs.get(box).y < -100, 'unpushed, the box fell');
+  frame(0, false);
+  let f;
+  for (let beat = 0; beat <= 3; beat += 1 / 30) f = frame(beat, true, Math.sin(beat * 20));
+  near(f.outs.get(bat).x, -3 + 4.5, 0.1, 'the bat is where the traveler is');
+  near(f.outs.get(bat).vx, 1.5, 0.1, 'and is felt to move');
+  near(f.outs.get(ball).x, f.outs.get(bat).x, 0.6, 'the box rides on it');
+  near(f.outs.get(ball).y, 0.15 + 0.25 + 0.08, 0.03);
+  near(f.outs.get(box).y, 0.5 * 8 * 9 * 0.98, 1.5, 'pushed up at 24 against 16, it rises 4 t squared');
+  const sag = (fr) => { const p = fr.poses.get(wire).pts; return p[p.length >> 1][1]; };
+  assert.ok(sag(f) < -0.3, 'the cable hangs: ' + sag(f));
+  // played again from the start with nothing new coming in, it is the same: what came in was kept
+  frame(0, true);
+  let again;
+  for (let beat = 0; beat <= 3; beat += 1 / 30) again = sim.frame(state.objects, state.version, beat, true, {});
+  assert.deepEqual(again.outs.get(box), f.outs.get(box));
+  assert.deepEqual(again.poses.get(wire), f.poses.get(wire));
+  // and without the signal the cable hangs otherwise
+  const still = createSim();
+  let q;
+  for (let beat = 0; beat <= 3; beat += 1 / 30) q = still.frame(state.objects, state.version, beat, true, { moved: new Map(), output: () => 0 });
+  assert.notDeepEqual(q.poses.get(wire), f.poses.get(wire));
+});
+
+test('sim: in a render target the drawing is in three dimensions, and so is what happens to it', async () => {
+  const { setPosed, ptsOf } = await import('../src/object.js');
+  call('space.clear');
+  const t = call('shape.add', { role: 'target', rect: { cx: 0, cy: 0, w: 8, h: 6 } });
+  const floor = call('line.add', { space: t, points: [[-3, -1, -1], [3, -1, 1]], style: { path: 'straight' } });
+  const stick = call('line.add', { space: t, points: [[-0.5, 1, -0.2], [0.5, 1.4, 0.2]], style: { path: 'straight' } });
+  call('object.phys', { ids: [floor], is: 'fixed' }); call('object.phys', { ids: [stick], is: 'body' });
+  const sc = sceneOf(state.objects);
+  assert.deepEqual(sc.scene.bodies.map((b) => b.flat), [false, false]);
+  const r = runTo(state.objects, 4);
+  assert.ok(r.events.some((e) => e.type === 'hit'), 'the stick struck the floor line');
+  setPosed(r.poses);
+  const p = ptsOf(state.objects.get(stick));
+  setPosed(null);
+  assert.equal(p[0].length, 3);
+  near(Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]), Math.hypot(1, 0.4, 0.4), 1e-6, 'it kept its length');
+  assert.ok(p[0][1] < 1 && Math.abs(p[0][2] + 0.2) > 1e-3, 'it fell, and turned out of its plane');
+  assert.deepEqual(ptsOf(state.objects.get(stick)), [[-0.5, 1, -0.2], [0.5, 1.4, 0.2]], 'the drawing itself is as it was');
+});

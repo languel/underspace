@@ -162,7 +162,7 @@ export function createWorld(scene) {
       b.W = even(src, n); b.rest = [];
       const m = Math.max(1e-3, ((s.density ?? 1) * total * 0.2) / (n + 1));
       b.wp = b.W.map(() => 1 / m); b.Vp = b.W.map(() => [0, 0, 0]); b.Pp = b.W.map((p) => p.slice());
-      for (let i = 0; i < n; i++) { b.rest.push(len(sub(b.W[i + 1], b.W[i]))); b.segs.push([i, i + 1, skin]); }
+      for (let i = 0; i < n; i++) { b.rest.push(len(sub(b.W[i + 1], b.W[i])) * (s.slack ?? 1)); b.segs.push([i, i + 1, skin]); } // slack: longer than it is drawn, so it hangs
       b.rad = b.W.map(() => skin);
       b.loops.push({ start: 0, n: n + 1, solid: false });
     } else {
@@ -186,7 +186,8 @@ export function createWorld(scene) {
       b.loops.forEach((lp) => { if (lp.n === 1) I += 0.5 * mass[lp.start] * b.rad[lp.start] * b.rad[lp.start]; }); // a disc
       I = Math.max(1e-6, I * (b.loops.some((lp) => lp.solid) ? 0.5 : 1) * (b.flat ? 1 : 2 / 3));
       b.x0 = c; b.x = c.slice(); b.q = [0, 0, 0, 1]; b.v = [0, 0, 0]; b.w = [0, 0, 0]; b.xp = c.slice(); b.qp = [0, 0, 0, 1];
-      b.invM = b.fixed ? 0 : 1 / M; b.invI = b.fixed ? 0 : 1 / I;
+      b.im = b.invM = b.fixed ? 0 : 1 / M; b.ii = b.invI = b.fixed ? 0 : 1 / I; // (im, ii: what they are when it is awake)
+      b.calm = 0; b.asleep = false; b.ax = b.x; b.aq = b.q; // (ax, aq: where it was when it last moved)
       b.W = pts.map((p) => p.slice());
       b.reach = Math.max(0, ...b.L.map(len));
     }
@@ -240,9 +241,16 @@ export function createWorld(scene) {
     const J = { id: j.id, spring: j.is === 'spring', a: A ? placeOn(A, pa) : null, b: B ? placeOn(B, pb) : null, pa, pb, motor: j.motor ?? 0, torque: j.torque ?? 400,
       stiff: j.stiff ?? 60, damp: j.damp ?? 2, rest: len(sub(pb, pa)) * (j.rest ?? 1) };
     if (A && B && !J.spring) held.add(pair(A, B));
+    if (A) A.jointed = true;
+    if (B) B.jointed = true;
     joints.push(J);
   }
   const endOf = (e, fixed) => (e ? posOf(e) : fixed);
+
+  // Rest: a thing that has lain still against something for half a beat sleeps: it is as ground until
+  // something moving touches it. So what has settled stays settled (a stack stands for good), and costs nothing.
+  const rest = (b, on) => { b.asleep = on; b.invM = on ? 0 : b.im; b.invI = on ? 0 : b.ii; if (on) { b.v = [0, 0, 0]; b.w = [0, 0, 0]; } else { b.calm = 0; b.ax = b.x; b.aq = b.q; } };
+  const moving = (b) => (b.rope ? true : b.driven ? len(b.v) > 0.5 : !b.fixed && !b.asleep && len(b.v) + len(b.w) * b.reach > 0.5);
 
   let tick = 0;
   const touch = new Map(); // a pair of bodies -> the tick they last touched
@@ -251,7 +259,7 @@ export function createWorld(scene) {
   function snap() {
     const out = [];
     for (const b of bodies) {
-      if (b.rope) { for (const p of b.W) out.push(p[0], p[1], p[2]); for (const v of b.Vp) out.push(v[0], v[1], v[2]); } else out.push(...b.x, ...b.q, ...b.v, ...b.w);
+      if (b.rope) { for (const p of b.W) out.push(p[0], p[1], p[2]); for (const v of b.Vp) out.push(v[0], v[1], v[2]); } else out.push(...b.x, ...b.q, ...b.v, ...b.w, ...b.ax, ...b.aq, b.calm, b.asleep ? 1 : 0);
       out.push(b.hit);
     }
     return { s: Float64Array.from(out), touch: [...touch] };
@@ -261,7 +269,7 @@ export function createWorld(scene) {
     let i = 0;
     const take = (n) => { const v = Array.from(s.subarray(i, i + n)); i += n; return v; };
     for (const b of bodies) {
-      if (b.rope) { b.W = b.W.map(() => take(3)); b.Vp = b.Vp.map(() => take(3)); } else { b.x = take(3); b.q = take(4); b.v = take(3); b.w = take(3); refresh(b); }
+      if (b.rope) { b.W = b.W.map(() => take(3)); b.Vp = b.Vp.map(() => take(3)); } else { b.x = take(3); b.q = take(4); b.v = take(3); b.w = take(3); b.ax = take(3); b.aq = take(4); b.calm = s[i++]; rest(b, s[i++] === 1); refresh(b); }
       b.hit = s[i++];
     }
     touch.clear(); for (const [key, v] of t) touch.set(key, v);
@@ -273,6 +281,7 @@ export function createWorld(scene) {
     for (const b of bodies) {
       b.hit = 0;
       b.force = inp?.force?.[b.id] ?? null; b.twist = inp?.spin?.[b.id] ?? 0; b.shake = inp?.shake?.[b.id] ?? 0;
+      if (b.asleep && (b.force || b.twist)) rest(b, false);
       // carried from outside (a traveler): it goes there over the tick, at a speed the things it meets feel
       if (b.driven && !b.rope) { const to = inp?.drive?.[b.id]; b.v = to ? mul(sub(add(b.x0, V(to)), b.x), TPB) : [0, 0, 0]; }
     }
@@ -331,7 +340,14 @@ export function createWorld(scene) {
 
       // where things touch
       const runs = [];
-      for (const [A, B] of pairs) { const run = []; scan(A, B, run); scan(B, A, run); if (run.length) runs.push(run); }
+      for (const [A, B] of pairs) {
+        const run = []; scan(A, B, run); scan(B, A, run);
+        if (!run.length) continue;
+        runs.push(run);
+        if (run[0].sensor) continue;
+        if (A.asleep && moving(B)) rest(A, false);
+        if (B.asleep && moving(A)) rest(B, false);
+      }
 
       for (let it = 0; it < ITER; it++) {
         for (const J of joints) {
@@ -409,7 +425,10 @@ export function createWorld(scene) {
         for (const c of act) {
           const pa = posOf(c.a), pb = posOf(c.b), vn = dot(sub(velOf(c.a, pa), velOf(c.b, pb)), c.n);
           const want = -c.vn > Math.max(4 * gl * h, 0.3) ? -c.e * c.vn : 0, w = wOf(c.a, c.n, pa) + wOf(c.b, c.n, pb);
-          if (vn < want && w > 0) back.push([c, (want - vn) / w, pa, pb, want - vn]);
+          // no faster apart than it struck or was already going: being pushed out of something it was
+          // drawn inside is not a blow
+          const most = Math.max(want, c.vn, 0);
+          if (w > 0 && (vn < want || (c.deep && vn > most + 1e-9))) { const d = vn < want ? want - vn : most - vn; back.push([c, d / w, pa, pb, d]); }
         }
         const kb = share(back, 4);
         for (const [c, f, pa, pb] of back) { kick(c.a, mul(c.n, f * kb), pa); kick(c.b, mul(c.n, -f * kb), pb); }
@@ -427,6 +446,23 @@ export function createWorld(scene) {
     }
 
     tick++;
+    // what has lain still long enough sleeps, but only together with all it lies against: a box does
+    // not turn to stone while the one under it can still move
+    const next = new Map(), link = (a, b) => { if (!next.has(a)) next.set(a, []); next.get(a).push(b); };
+    for (const hit of hits.values()) if (!hit.a.sensor && !hit.b.sensor) { link(hit.a, hit.b); link(hit.b, hit.a); }
+    const ready = new Set();
+    for (const b of bodies) {
+      if (b.rope || !b.im || b.asleep) continue;
+      // still: it has not left where it was when it was last seen to move (a slow start is not stillness)
+      const still = next.has(b) && !b.jointed && !b.force && !b.twist && len(sub(b.x, b.ax)) < 0.02 && len(sub(b.q, b.aq)) * b.reach < 0.02;
+      if (still) b.calm++; else { b.calm = 0; b.ax = b.x; b.aq = b.q; }
+      if (b.calm >= TPB / 2) ready.add(b);
+    }
+    for (let again = true; again;) {
+      again = false;
+      for (const b of ready) if (next.get(b).some((o) => !o.fixed && !o.asleep && !ready.has(o))) { ready.delete(b); again = true; }
+    }
+    for (const b of ready) rest(b, true);
     for (const [key, hit] of hits) {
       const last = touch.get(key);
       touch.set(key, tick);
@@ -488,7 +524,7 @@ export function createWorld(scene) {
       // a round thing touches at its rim, so what rubs there turns it
       const a = A.rope ? { b: A, i, j: i, t: 0 } : { b: A, l: rim > 0 ? add(A.L[i], irot(A.q, mul(n, -rim))) : A.L[i] };
       const b = B.rope ? { b: B, i: best.sg[0], j: best.sg[1], t: best.t } : { b: B, l: irot(B.q, sub(best.c, B.x)) };
-      out.push({ a, b, n, R, mu, e, sensor, key: pair(A, B), lam: 0, vn: dot(sub(velOf(a, p), velOf(b, best.c)), n) });
+      out.push({ a, b, n, R, mu, e, sensor, key: pair(A, B), lam: 0, deep: ra + best.sg[2] - (inside ? -best.d : best.d) > 0.02, vn: dot(sub(velOf(a, p), velOf(b, best.c)), n) });
     }
   }
 
@@ -529,7 +565,7 @@ export function createWorld(scene) {
 
 // ---- the drawing as a scene --------------------------------------------------------------
 
-const KINDS = { body: ['line', 'shape', 'point', 'mesh'], fixed: ['line', 'shape', 'point', 'mesh'], rope: ['line'], hinge: ['point'], weld: ['point'], spring: ['line'] };
+export const PHYS_KINDS = { body: ['line', 'shape', 'point', 'mesh'], fixed: ['line', 'shape', 'point', 'mesh'], rope: ['line'], hinge: ['point'], weld: ['point'], spring: ['line'] };
 const restPts = (o) => o.points.map((p) => [p[0] + (o.off?.[0] ?? 0), p[1] + (o.off?.[1] ?? 0), ...p.slice(2)]);
 const centreOf = (o) => {
   if (o.rect) return [o.rect.cx, o.rect.cy, o.z ?? 0];
@@ -558,7 +594,7 @@ export function sceneOf(objects, hooks = {}, world = worldOf()) {
   for (const o of objects.values()) {
     if (o.hidden) continue;
     const is = o.phys?.is;
-    if ((is === 'body' || is === 'fixed' || is === 'rope') && KINDS[is].includes(o.kind)) { solid.push(o); parts.set(o.id, partsOf(o)); }
+    if ((is === 'body' || is === 'fixed' || is === 'rope') && PHYS_KINDS[is].includes(o.kind)) { solid.push(o); parts.set(o.id, partsOf(o)); }
   }
   if (!solid.length) return null;
   const spaces = new Set(solid.map((o) => o.space ?? null));
@@ -598,7 +634,7 @@ export function sceneOf(objects, hooks = {}, world = worldOf()) {
   }
   // events that are not solid are felt: a body reaching one fires it
   for (const o of objects.values()) {
-    if (o.hidden || o.role !== 'event' || owner.has(o.id) || !spaces.has(o.space ?? null) || !KINDS.fixed.includes(o.kind)) continue;
+    if (o.hidden || o.role !== 'event' || owner.has(o.id) || !spaces.has(o.space ?? null) || !PHYS_KINDS.fixed.includes(o.kind)) continue;
     bodies.push({ id: o.id, is: 'fixed', sensor: true, parts: partsOf(o), flat: flat(o.space), space: o.space ?? null });
   }
 
@@ -630,6 +666,7 @@ export function sceneOf(objects, hooks = {}, world = worldOf()) {
       const pts = parts.get(o.id)[0].pts;
       joints.push({ id: o.id + '.from', is: 'hinge', a: o.id, b: owner.get(o.bind.from.id) ?? null, at: pts[0] }, { id: o.id + '.to', is: 'hinge', a: o.id, b: owner.get(o.bind.to.id) ?? null, at: pts[pts.length - 1] });
       wires.push({ id: o.id, from: o.bind.from, shake: physOf(o).shake });
+      bodies.find((b) => b.id === o.id).slack = 1.15; // a cable is a little longer than the way between its ports
     }
   }
   // how far the physical things of each space reach: where in it something was struck (ev.x, ev.y)
@@ -655,7 +692,7 @@ function posesOf(world, sc) {
 
 export function createSim() {
   let world = null, sc = null, version = -1, last = 0, logged = -1;
-  const log = new Map(), waiting = [];
+  const log = new Map(), waiting = [], carriedTo = new Map();
   return {
     // hooks: pointsOf, moved (where travelers are: id -> [x, y]), output(id, port) (what an object's code returned),
     //        fire(event object, ev), quant (beats: hits wait for the next division; 0: they sound at once)
@@ -671,11 +708,20 @@ export function createSim() {
       if (!playing && tick === 0) { log.clear(); logged = -1; waiting.length = 0; }
       // what comes from outside is taken as it is now, tick by tick, and kept: the past is as it was
       const live = playing && tick >= last && tick - last <= TPB;
+      const beat0 = (last + 0) / TPB; // (what was carried is where the last tick left it)
       const inputs = (k) => {
         if (k <= logged || !live) return log.get(k);
         logged = k;
         const inp = {};
-        for (const d of sc.driven) { const at = hooks.moved?.get(d.id); if (at) (inp.drive ??= {})[d.body] = [at[0] - d.at[0], at[1] - d.at[1], (at[2] ?? 0) - d.at[2]]; }
+        // (a frame is several ticks: what a traveler carries goes there evenly over them, not in one of them)
+        const part = beat > beat0 ? Math.max(0, Math.min(1, ((k + 1) / TPB - beat0) / (beat - beat0))) : 1;
+        for (const d of sc.driven) {
+          const at = hooks.moved?.get(d.id);
+          if (!at) continue;
+          const to = [at[0] - d.at[0], at[1] - d.at[1], (at[2] ?? 0) - d.at[2]], was = carriedTo.get(d.id) ?? to;
+          (inp.drive ??= {})[d.body] = was.map((v, i) => v + (to[i] - v) * part);
+          if (k + 1 >= tick) carriedTo.set(d.id, (inp.drive[d.body]));
+        }
         for (const [id, body] of sc.owner) {
           const o = objects.get(id);
           if (!o || !hasCode(o) || o.role === 'event') continue;
@@ -684,10 +730,11 @@ export function createSim() {
           if (spin) (inp.spin ??= {})[body] = spin;
         }
         for (const w of sc.wires) { const v = +hooks.output?.(w.from.id, w.from.port) || 0; if (v) (inp.shake ??= {})[w.id] = v * w.shake * 60; }
-        if (Object.keys(inp).length) log.set(k, inp);
+        // (what was worked out beyond here, by moving the playhead ahead, did not have this in it)
+        if (Object.keys(inp).length) { log.set(k, inp); world.forget(k); }
         return log.get(k);
       };
-      if (!live) { logged = Math.max(logged, tick); waiting.length = 0; }
+      if (!live) { waiting.length = 0; carriedTo.clear(); }
       const events = world.to(tick, inputs);
       last = tick;
       if (live && hooks.fire) {
@@ -741,7 +788,7 @@ define({
       if (a.is === null) { delete o.phys; n++; continue; }
       const is = a.is ?? o.phys?.is;
       if (!is) throw new Error(`${id} is not physical yet: say what it is (is: ${Object.keys(PHYS).join(', ')})`);
-      if (!KINDS[is].includes(o.kind) || (is === 'rope' && o.closed) || o.kind === 'group') throw new Error(`${id} is a ${o.kind}: a ${is} is a ${KINDS[is].join(' or ')}` + (is === 'hinge' || is === 'weld' ? ' (point.add puts one, over what it should hold)' : ''));
+      if (!PHYS_KINDS[is].includes(o.kind) || (is === 'rope' && o.closed) || o.kind === 'group') throw new Error(`${id} is a ${o.kind}: a ${is} is a ${PHYS_KINDS[is].join(' or ')}` + (is === 'hinge' || is === 'weld' ? ' (point.add puts one, over what it should hold)' : ''));
       const p = { is, ...(o.phys?.is === is ? o.phys : {}) };
       for (const k of NUMS) if (k in PHYS[is] && Number.isFinite(a[k])) p[k] = k === 'bounce' ? Math.max(0, Math.min(1, a[k])) : k === 'motor' || k === 'shake' ? a[k] : Math.max(0, a[k]);
       o.phys = p; n++;

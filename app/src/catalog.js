@@ -82,6 +82,7 @@ export function brief(o, rectOf, blanketOf) {
   if (o.verts) { b.verts = o.verts.length; b.faces = o.faces.length; }
   if (o.closed) b.closed = true;
   if (o.brush?.id) b.brush = o.brush.id;
+  if (o.phys?.is) b.phys = o.phys;
   if (o.text) b.text = String(o.text).slice(0, 80);
   if (typeof o.code === 'string') b.code = o.code.split('\n').filter((l) => /^\/\/ /.test(l)).slice(0, 4).map((l) => l.slice(3)).join(' | ');
   const bl = blanketOf?.(o);

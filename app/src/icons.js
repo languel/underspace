@@ -3,6 +3,15 @@ import { GLYPH_ICONS } from './glyphs.js';
 
 const PATHS = {
   select: 'M3 2l9 6-4.2 1 2.2 4.2-1.8 1L6 10 3 12.5z',
+  // what a thing is in the simulation (sim.js)
+  'phys.body': 'M5 2h6v6H5z M8 10v4 M6 12l2 2 2-2',
+  'phys.fixed': 'M2 8h12 M3 11l2-3 M7 11l2-3 M11 11l2-3 M5 8V4h6v4',
+  'phys.rope': 'M2 3c1 10 11 10 12 0',
+  'phys.hinge': 'M8 12a4 4 0 100-8 4 4 0 000 8z M8 8.800a.8 .8 0 100-1.600 .8 .8 0 000 1.600z',
+  'phys.weld': 'M4 4l8 8 M12 4l-8 8 M8 12a4 4 0 100-8 4 4 0 000 8z',
+  'phys.spring': 'M2 8h2l1-3 2 6 2-6 2 6 1-3h2',
+  'phys.none': 'M5 3h6v6H5z M3 13L13 3',
+  'phys.keep': 'M4 4h8v8H4z M8 6v4 M6 8h4',
   draw: 'M2 12c2-7 4 3 6-3s3-5 6-6',
   box: 'M4 4h8v8H4z M2.5 8h1.5 M12 8h1.5',
   code: 'M6 4L2 8l4 4 M10 4l4 4-4 4',

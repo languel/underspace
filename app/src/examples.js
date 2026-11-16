@@ -4,6 +4,7 @@
 //   path: where it sits in the collection, 'Music/Grids' (categories nest).
 
 import './publish.js'; // the nested synth example publishes parameters
+import './sim.js';     // the physical examples make things physical
 import { PRESETS } from './presets.js';
 import { GRID_PRESETS } from './grid.js';
 import { JUNCTIONS } from './joints.js';
@@ -13,6 +14,22 @@ import { nousPlan, applyNous, nodeCodeFor } from './nous.js';
 import { POINT_KINDS } from './glyphs.js';
 import { state } from './space.js';
 import { portPos } from './object.js';
+
+// What the physical examples share: a straight line; make things physical; a bar that sounds one note when struck.
+const STRAIGHT = { style: { path: 'straight' } };
+const phys = (c, ids, is, extra = {}) => { c('object.phys', { ids: [].concat(ids), is, ...extra }); return ids; };
+const struck = (c, points, midi, bounce = 0.4) => { const id = c('line.add', { points, ...STRAIGHT }); c('object.role', { id, role: 'event' }); c('object.code', { id, code: EVENTS['struck bar'] }); c('object.set', { id, name: 'midi', value: midi }); return phys(c, id, 'fixed', { bounce }); };
+const HOVER = `// hover
+// in: lift
+// out: fx fy height
+// param: lift 1.5
+// param: pull 60
+// a physical object's code reads how it moves (geom.body) and what it returns as fx, fy pushes it:
+// here, toward a height above where it began, and against the gravity that takes it down
+const b = geom?.body;
+if (!b) return {};
+mem.y ??= b.y;
+return { fx: 0, fy: (mem.y + p.lift + inp.lift - b.y) * p.pull - b.vy * 8 + 16, height: b.y - mem.y };`;
 
 const wave = (x, y, n, step, f) => Array.from({ length: n }, (_, i) => [+(x + i * step).toFixed(3), +(y + f(i)).toFixed(3)]);
 
@@ -380,4 +397,72 @@ export const EXAMPLES = [
     { key: 'out', kind: 'out', at: [4, 1.5] },
     { key: 'env', line: ADSR, kind: 'env', at: [-3.5, -1.2], straight: true, params: { dur: 0.7 } },
   ], ['osc.audio -> shape.audio', 'shape.audio -> amp.audio', 'env.level -> amp.level', 'amp.audio -> out.audio'], [0, 2, 3, 5]) },
+  // ---- what is physical (sim.js): the drawing is where everything starts; press play, or move the playhead ----
+  { path: 'Physical', title: 'Balls down a stair of bars', icon: 'phys.body', build: (c, at) => {
+    const [x, y] = at;
+    // each bar leaves a gap at one wall, in turn: a ball rolls down it, drops through, and lands on the next
+    [72, 67, 64, 60, 55, 48].forEach((midi, k) => { const y0 = y + 4 - k * 1.7; struck(c, k % 2 ? [[x + 3.4, y0 + 0.9], [x - 1.2, y0]] : [[x - 3.4, y0 + 0.9], [x + 1.2, y0]], midi); });
+    phys(c, c('line.add', { points: [[x - 3.4, y + 16], [x - 3.4, y - 6.2], [x + 3.4, y - 6.2], [x + 3.4, y + 16]], ...STRAIGHT }), 'fixed');
+    phys(c, [[-2.6, 6, 0.8], [-2.2, 14, 0.6]].map(([dx, dy, d]) => c('shape.add', { shape: 'ellipse', rect: { cx: x + dx, cy: y + dy, w: d, h: d } })), 'body', { bounce: 0.35, friction: 0.1 }); // smooth, so they do not lock against each other
+  } },
+  { path: 'Physical', title: 'A car on a hill: hinges with motors', icon: 'phys.hinge', build: (c, at) => {
+    const [x, y] = at;
+    phys(c, c('line.add', { points: [[x - 8, y], [x - 8, y - 1], [x - 2, y - 1], [x + 1, y], [x + 4, y - 1], [x + 9, y - 1], [x + 9, y]], ...STRAIGHT }), 'fixed', { friction: 1 });
+    phys(c, c('shape.add', { rect: { cx: x - 6, cy: y - 0.2, w: 2.6, h: 0.8 } }), 'body');
+    for (const dx of [-6.8, -5.2]) {
+      phys(c, c('shape.add', { shape: 'ellipse', rect: { cx: x + dx, cy: y - 0.5, w: 0.9, h: 0.9 } }), 'body', { friction: 1 });
+      phys(c, c('point.add', { at: [x + dx, y - 0.5], glyph: 'ring', size: 0.25 }), 'hinge', { motor: -0.5 }); // a turn every two beats
+    }
+  } },
+  { path: 'Physical', title: 'Pendulums that drift apart and come back', icon: 'phys.hinge', build: (c, at) => {
+    const [x, y] = at;
+    // each a little shorter: 8, 9, 10, 11 and 12 swings in 16 beats, so they meet again every 16
+    [60, 64, 67, 71, 74].forEach((midi, k) => {
+      const T = 16 / (8 + k), L = 0.6079 * T * T, px = x - 4 + k * 2, py = y + 3;
+      phys(c, c('line.add', { points: [[px, py], [px + L * 0.5, py - L * 0.866]], ...STRAIGHT }), 'body');
+      phys(c, c('point.add', { at: [px, py], glyph: 'ring', size: 0.25 }), 'hinge');
+      const ev = c('point.add', { at: [px, py - L], role: 'event', size: 0.3, glyph: 'note' });
+      c('object.code', { id: ev, code: EVENTS['fixed note'] }); c('object.set', { id: ev, name: 'midi', value: midi }); c('object.set', { id: ev, name: 'vel', value: 70 });
+    });
+  } },
+  { path: 'Physical', title: 'A rope bridge', icon: 'phys.rope', build: (c, at) => {
+    const [x, y] = at;
+    phys(c, c('line.add', { points: [[x - 4, y], [x - 2, y - 0.5], [x, y - 0.7], [x + 2, y - 0.5], [x + 4, y]] }), 'rope');
+    for (const dx of [-4, 4]) phys(c, c('point.add', { at: [x + dx, y], glyph: 'ring', size: 0.25 }), 'hinge');
+    phys(c, [[-1.5, 2], [0.2, 3.5], [1.4, 5]].map(([dx, dy]) => c('shape.add', { rect: { cx: x + dx, cy: y + dy, w: 0.8, h: 0.8 } })), 'body');
+  } },
+  { path: 'Physical', title: 'A traveler bats a ball: the score moves the world', icon: 'traveler', build: (c, at) => {
+    const [x, y] = at;
+    [[[x - 4, y - 2.5], [x - 4, y + 3], 55], [[x + 4, y - 2.5], [x + 4, y + 3], 62], [[x - 4, y + 3], [x + 4, y + 3], 67], [[x - 4, y - 2.5], [x + 4, y - 2.5], 48]].forEach(([a, b, midi]) => struck(c, [a, b], midi, 0.85));
+    const rail = c('line.add', { points: [[x - 2.6, y - 1.6], [x + 2.6, y - 1.6]], style: { path: 'straight', opacity: 0.3 } });
+    const bat = c('shape.add', { rect: { cx: x - 2.6, cy: y - 1.6, w: 2.4, h: 0.3 } });
+    c('traveler.attach', { id: bat, on: rail, u: 0 }); c('object.set', { id: bat, name: 'dur', value: 4 }); c('object.set', { id: bat, name: 'loop', value: 2 });
+    phys(c, bat, 'fixed', { bounce: 1, friction: 0.8 });
+    phys(c, c('shape.add', { shape: 'ellipse', rect: { cx: x - 2.2, cy: y + 1.5, w: 0.6, h: 0.6 } }), 'body', { bounce: 0.9 });
+  } },
+  { path: 'Physical', title: 'Code as a muscle: a box that holds its height', icon: 'box', build: (c, at) => {
+    const [x, y] = at;
+    phys(c, c('line.add', { points: [[x - 4, y - 2], [x + 4, y - 2]], ...STRAIGHT }), 'fixed');
+    const box = c('shape.add', { role: 'code', code: HOVER, rect: { cx: x, cy: y - 1.4, w: 2.4, h: 1 } });
+    phys(c, box, 'body');
+    phys(c, c('shape.add', { shape: 'ellipse', rect: { cx: x + 0.2, cy: y + 1, w: 0.7, h: 0.7 } }), 'body', { bounce: 0.2 });
+    const r = c('patch.add', { at: [x - 6, y + 2], nodes: [{ key: 'osc', preset: 'osc' }] });
+    return { connect: [[r.ids.osc, 'y', box, 'lift']] };
+  } },
+  { path: 'Physical', title: 'Cables that hang, shaken by what passes through', icon: 'phys.rope', build: (c, at) => {
+    const r = c('patch.add', { at, nodes: [{ key: 'osc', preset: 'osc' }, { key: 'scale', preset: 'scale' }, { key: 'view', role: 'target' }], links: ['osc.y -> scale.x', 'scale.y -> view.spin'] });
+    const made = new Set(Object.values(r.ids));
+    phys(c, [...state.objects.values()].filter((o) => o.bind && made.has(o.bind.from.id)).map((o) => o.id), 'rope');
+  } },
+  { path: 'Physical', title: 'A spring, a weld, and no gravity to try', icon: 'phys.spring', build: (c, at) => {
+    const [x, y] = at;
+    phys(c, c('line.add', { points: [[x - 4, y + 3], [x + 4, y + 3]], ...STRAIGHT }), 'fixed');
+    const a = c('shape.add', { rect: { cx: x - 2, cy: y, w: 1, h: 1 } }), b = c('shape.add', { rect: { cx: x - 1, cy: y, w: 1, h: 1 } });
+    phys(c, [a, b], 'body');
+    phys(c, c('point.add', { at: [x - 1.5, y], glyph: 'plus', size: 0.25 }), 'weld');
+    phys(c, c('line.add', { points: [[x - 2, y + 3], [x - 2.3, y + 2.4], [x - 1.7, y + 1.8], [x - 2.3, y + 1.2], [x - 1.7, y + 0.6], [x - 2, y + 0.2]], ...STRAIGHT }), 'spring');
+    const ball = c('shape.add', { shape: 'ellipse', rect: { cx: x + 2, cy: y - 0.5, w: 1, h: 1 } });
+    phys(c, ball, 'body');
+    phys(c, c('line.add', { points: [[x + 2, y + 3], [x + 2.3, y + 2], [x + 1.7, y + 1], [x + 2, y - 0.2]], ...STRAIGHT }), 'spring', { stiff: 20, damp: 0.5 });
+  } },
 ];

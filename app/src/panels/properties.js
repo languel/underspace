@@ -20,6 +20,9 @@ function brushSection(app, role, id, params, onBrush, onParam) {
   return section('Brush', ...rows);
 }
 
+const PHYS_TITLE = { body: 'It falls and collides', fixed: 'It stays: ground, walls (a traveler: carried by its line)', rope: 'It hangs: a rope', hinge: 'A hinge: what is under it turns about it', weld: 'A weld: the two things under it are one', spring: 'A spring between what is under its ends' };
+const PHYS_TIP = { density: 'How heavy for its size', friction: '0: ice; 1: rubber', bounce: '0: it stops; 1: it comes back as fast', shake: 'How much what passes through the wire shakes it', motor: 'Turns a beat (0: free; negative: the other way)', torque: 'How hard the motor can push', stiff: 'How hard it pulls back', damp: 'How quickly it stops bouncing', rest: 'Its length at rest, as a part of its drawn length' };
+const PHYS_STEP = { motor: 0.125, torque: 50, stiff: 5, rest: 0.05, bounce: 0.05, friction: 0.05 };
 const shared = (list, get) => { const v = get(list[0]); return list.every((o) => get(o) === v) ? v : undefined; };
 
 const TOOL_TITLE = { point: 'Point', polyline: 'Polyline', polygon: 'Polygon', sculpt: 'Sculpt', select: 'Select', pan: 'Pan', draw: 'Draw', line: 'Straight line', rect: 'Rectangle', ellipse: 'Ellipse', note: 'Note', code: 'Code container', target: 'Render target', score: 'Score' };
@@ -112,6 +115,14 @@ export function selectionProps(app, sel, live = null) {
       const next = row('next: smooth', chk('smooth')), tol = row('next: simplify', numberField(settings.simplify, (v) => setSetting('simplify', Math.max(0, v)), { step: 0.5, min: 0 }));
       next.title = 'New lines are drawn smooth, not as straight segments'; tol.title = 'New lines drop the points within this many pixels of the stroke';
       out.push(section('Smoothing', simple, next, tol));
+    }
+    // Physical (sim.js): what the selection is in the simulation, and that kind's parameters
+    const kinds = Object.keys(app.PHYS).filter((is) => sel.every((o) => app.PHYS_KINDS[is].includes(o.kind) && !(is === 'rope' && o.closed) && !(is === 'spring' && o.bind)));
+    if (kinds.length) {
+      const is = shared(sel, (o) => o.phys?.is ?? null), bar = h('div', 'glyph-row');
+      bar.append(...kinds.map((k) => glyphButton('phys.' + k, PHYS_TITLE[k], () => app.call('object.phys', { ids, is: is === k ? null : k }), is === k)));
+      const rows = is ? Object.entries(app.PHYS[is]).map(([k, def]) => { const r = row(k, numberField(shared(sel, (o) => o.phys?.[k] ?? def) ?? def, (v) => app.call('object.phys', { ids, [k]: v }), { step: PHYS_STEP[k] ?? 0.1 })); r.title = PHYS_TIP[k] ?? ''; return r; }) : [];
+      out.push(section('Physical', bar, ...rows));
     }
     if (one?.rect) {
       const r = one.rect, set = (k) => (v) => app.call('object.resize', { id: one.id, rect: { ...one.rect, [k]: v } });
