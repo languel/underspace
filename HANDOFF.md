@@ -1618,8 +1618,7 @@ Also asked for:
   a caller cannot be recorded as "human"; colours from settings no longer
   reach `innerHTML` as markup; sketch reports are taken only from the page's
   own frames. Open by decision: no token on the hub, agents write code,
-  every localhost page and all of `languel.github.io` is let in. **For the
-  owner to decide** (D1 in the file): opening a take, pasting objects or a
+  every localhost page and all of `languel.github.io` is let in. **Decided: left as it is** (the owner, 15 Nov 2026; D1 in the file): opening a take, pasting objects or a
   sketch runs their code with the page's rights, which matters once students
   exchange files; the options are holding a file's code until the person
   lets it run, sketch frames without same-origin, or all object code in a

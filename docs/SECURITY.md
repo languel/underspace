@@ -78,7 +78,8 @@ where people open each other's work.
   with CORS headers; (c) all object code in a worker or a sandboxed frame,
   which is the real boundary and the largest change (code objects read and
   return plain data already, so it is feasible). Recommended: (a) now, (c)
-  before students exchange files.
+  before students exchange files. **Decided by the owner, 15 Nov 2026: left
+  as it is.** Raise it again when files start to pass between people.
 - **D2. The deployed page shares its origin** with every other project at
   `languel.github.io`: the same localStorage (takes, settings, the error
   log) and the same standing with the hub. A custom domain or a separate
