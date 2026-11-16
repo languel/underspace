@@ -27,10 +27,14 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "underspace",
     label: "underspace",
-    description: 'Run a command in the open underspace tab (a drawing-first environment where every element is a code object) by its name, for example "space.read" (what is drawn), "view.look" (a picture), "tools.search" {query} (find a command), "line.add", "action.run" {id}. Start with space.read and tools.search.',
+    description: 'Run a command in the open underspace tab (a drawing-first environment where every element is a code object) by its name, for example "space.read" (what is drawn), "view.look" (a picture), "tools.search" {query} (find a command), "line.add", "action.run" {id}. Start with space.read and tools.search; before building anything that plays, moves or runs code, call "code.help" with no args and follow its recipes.',
     parameters: Type.Object({ name: Type.String({ description: "The command, e.g. line.add" }), args: Type.Optional(Type.Any({ description: "Its arguments, an object" })) }),
     async execute(_id, params: any) { return call(params.name, params.args); },
   });
+  // Pi is a coding agent: told nothing, it writes a program where a drawing is wanted. This says what underspace is.
+  pi.on("before_agent_start", async (e: any) => ({
+    systemPrompt: e.systemPrompt + "\n\nYou can also drive underspace, a drawing-first environment open in the user's browser: lines, shapes, 3D frames, scores (frames whose lines play as sound), travelers that move along lines, and code on any object. Use the underspace tools (space_read, line_add, shape_add, joint_add, traveler_add, ...), not files or shell commands, for anything asked for there. Sound comes only from scores, travelers and joints: before building anything that plays, moves or runs code, call code_help with no arguments and follow its recipes exactly. After building, check with play_toggle and play_state.",
+  }));
   const known = new Set<string>();
   pi.on("session_start", async () => {
     let tools: any[] = [];

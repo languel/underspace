@@ -127,3 +127,14 @@ test('a quick turn hands a request it cannot do over to the whole loop', async (
   assert.equal([...state.objects.values()].filter((o) => o.role === 'traveler' && o.on === line).length, 1);
   assert.equal(r.say, 'A traveler is on the line.');
 });
+
+test('code from an agent that cannot compile is refused, with the reason', async () => {
+  const { badCode } = await import('../src/agent.js');
+  const get = (id) => ({ o1: { role: 'event' }, o2: { role: 'code' } })[id];
+  assert.match(badCode('joint.add', { code: 'const ways = [0, 1];\nreturn 0;' }), /ways is given to the code/);
+  assert.equal(badCode('joint_add', { code: 'note(36, 110, 0.1, 10);\nreturn Math.floor(rng() * ways.length);' }), '');
+  assert.match(badCode('object.code', { id: 'o1', code: 'note(60, 100, ;' }, get), /does not compile/);
+  assert.equal(badCode('object.code', { id: 'o1', code: 'note(pitch(ev.y), 100, p.dur);' }, get), '');
+  assert.equal(badCode('object.code', { id: 'o2', code: 'function setup() { createCanvas(100, 100); }\nfunction draw() {}' }, get), ''); // a sketch
+  assert.equal(badCode('line.add', { points: [[0, 0]] }, get), '');
+});

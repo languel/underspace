@@ -92,10 +92,20 @@ export const CODE_DOC = {
 };
 export const CODE_ROLES = Object.keys(CODE_DOC);
 
+// How the things an agent is asked for are made from the commands there are. Short on purpose:
+// a model that does not know these builds something that looks right and does nothing.
+export const RECIPES = {
+  'how sound is made': 'Nothing plays by itself and there is no function to "run". Sound comes from three things only: (1) a score frame plays the lines inside it; (2) a traveler moving along a line fires the events it meets; (3) a traveler arriving at a joint runs that joint\'s code. play.toggle starts and stops all of them. Never write a loop or a timer in code: the traveler is the loop.',
+  'glissandi, a drawing as a score': 'shape.add { role: "score", rect } makes the frame; every line.add whose points lie inside the frame\'s box is a voice: left to right is time, up is pitch, a curve is a glissando. music.set { scale, root, bpm } sets what it is read on. A curve is a line of many points (it is drawn smooth through them): work the points out yourself, for example 12 points of y = tanh(x) for an s-curve.',
+  'triggers on a line': 'line.add the path, traveler.add { on: line, dur: beats, loop: 1 } to move along it, and for each trigger point.add { at: a point on the line, role: "event" } (or shape.add role "event" over it). An event\'s code runs when the traveler reaches it: by default note(pitch(ev.y), 100, p.dur); set your own with object.code, e.g. note(step(57, 2), 100, 0.3).',
+  'a graph that plays (a Markov chain, a sequencer, a drum loop)': 'line.add each edge as a straight line between two node positions (same positions for edges that share a node). Then for each node one joint.add { at: [{ id: line, u: 0 for the line\'s start or 1 for its end }, ...every line end at that node], glyph: "note", code }. The code plays and chooses: "// kick\\nnote(36, 110, 0.1, 10);\\nreturn Math.floor(rng() * ways.length);" (channel 10 is drums: 36 kick, 38 snare, 42 hat; another channel is a pitched instrument). Then traveler.add { on: one line } and object.set { id: traveler, name: "speed", value: 4 } (grid cells a beat). Every node having a way on makes it perpetual.',
+  'check what you built': 'play.toggle, wait a few seconds, then play.state: scores lists each voice\'s pitches, notes the last notes played (beat, midi, channel). Empty notes means nothing fires. view.look is a picture. play.toggle again stops.',
+};
+
 // For code.help. No role: what each kind is, in a line. A role: what its code gets and returns,
 // and the names of its presets. A role and a preset: that preset's source, to copy and change.
 export function codeHelp(role, preset) {
-  if (!role) return Object.fromEntries(CODE_ROLES.map((r) => [r, CODE_DOC[r].what.split(/(?<=[.:)])\s/)[0]]));
+  if (!role) return { recipes: RECIPES, kinds: Object.fromEntries(CODE_ROLES.map((r) => [r, CODE_DOC[r].what.split(/(?<=[.:)])\s/)[0]])), more: 'code.help { role } for what that kind of code is given and returns' };
   const d = CODE_DOC[role];
   if (!d) throw new Error(`no such kind of code: ${role} (one of ${CODE_ROLES.join(', ')})`);
   if (preset != null) {
@@ -104,4 +114,23 @@ export function codeHelp(role, preset) {
     return { role, preset, code: src };
   }
   return { role, what: d.what, gets: Object.fromEntries(d.gets), returns: d.returns, presets: Object.keys(d.presets), example: Object.values(d.presets)[0] ?? null };
+}
+
+// What each kind of code is compiled with (the names it is given). For checkCode.
+const ARGS = {
+  code: ['inp', 'p', 't', 'geom', 'mem', 'along'], path: ['inp', 'p', 't', 'geom', 'mem', 'along'], target: ['inp', 'p', 't', 'geom', 'mem', 'along'],
+  event: ['ev', 'p', 'note', 'mem', 'pitch', 'step', 'snap', 'rng', 'cc', 'light', 'lit', 'tool'],
+  junction: ['ways', 'ev', 'p', 'mem', 'note', 'pitch', 'step', 'snap', 'rng', 'cc', 'light', 'lit', 'tool'],
+  score: ['voices', 'ctx'],
+};
+// Would this code compile as that kind? -> '' or what is wrong, in words an agent can act on. A whole
+// sketch (it has import, setup or draw) is not a function body and is not checked.
+export function checkCode(role, code) {
+  const args = ARGS[role];
+  if (!args || typeof code !== 'string' || /^\s*import\s|\bfunction\s+(setup|draw)\s*\(|\bcreateCanvas\s*\(|\bnew\s+THREE\./m.test(code)) return '';
+  try { new Function(...args, code); return ''; } // eslint-disable-line no-new-func
+  catch (e) {
+    const again = String(e.message).match(/Identifier '(\w+)' has already been declared/);
+    return `this ${role} code does not compile: ${e.message}.` + (again && args.includes(again[1]) ? ` ${again[1]} is given to the code: use it, do not declare it.` : '') + ` It is a function body given ${args.join(', ')} (code.help { role: "${role}" }).`;
+  }
 }

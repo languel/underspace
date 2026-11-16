@@ -9,6 +9,17 @@
 //     a short core of tools and tools.search for the rest: a small model cannot hold them all.
 // A turn of the loop is one step of undo. Everything is open while this is built (HANDOFF).
 
+import { checkCode } from './codedoc.js';
+
+// Code from an agent that cannot compile is refused with the reason (a command keeps whatever code it
+// is given, since a person types code a letter at a time; an agent's is whole, and wrong is wrong).
+// get(id) -> the object. -> a message, or ''.
+export function badCode(name, args, get) {
+  const n = String(name).replace('_', '.');
+  if (typeof args?.code !== 'string') return '';
+  const role = n === 'joint.add' ? 'junction' : n === 'object.code' ? get?.(args.id)?.role : n === 'shape.add' || n === 'point.add' || n === 'line.add' ? args.role : null;
+  return role ? checkCode(role, args.code) : '';
+}
 const OUTSIDE = new Set(['human', 'palette', 'example', 'demo', 'assistant']); // callers that are not agents
 
 // The tools a model is shown from the start (the rest it finds with tools.search and runs with `call`).
@@ -17,6 +28,7 @@ export const SYSTEM = `You work inside underspace, a drawing-first environment: 
 How to work:
 - What is drawn is listed below under "Now" (ids, kinds, boxes [x0, y0, x1, y1] in canvas units, y up); space_read gives it again, or objects in full by id. Use the ids from there.
 - You have a few tools listed. Every other command is found with tools_search {query} and run with call {name, args}. action_run {id} does anything a key or menu does (find ids with call {name: "action.list", args: {query}}).
+- Before building anything that plays, moves or runs code (a score, triggers, a drum loop, a Markov chain), run call {name: "code.help"} and follow its recipes: sound comes only from scores, travelers and joints.
 - Make several changes in one batch_run when you can.
 - Do exactly what was asked and nothing more: no extra shapes, no decoration, no moving the view unless asked. Then stop.
 - Do the thing; do not describe plans. When something is unclear and it matters, ask with user_ask (give choices). Otherwise choose sensibly.
@@ -156,6 +168,7 @@ export async function runTurn({ text, history = [], engine, port, by = 'assistan
       try {
         if (signal?.aborted || port.held()) throw new Error('stopped by the person');
         const miss = port.has ? missingIds(args, port.has, schemaOf(port.tools(), name)) : ''; if (miss) throw new Error(miss);
+        const bad = badCode(name, args, port.get); if (bad) throw new Error(bad);
         const r = await port.call(name, args, by); raw = r;
         if (engine.sees && typeof r?.image === 'string') { picture = r.image; out = JSON.stringify({ ...r, image: '(the picture follows)' }); } else out = 'OK. Result: ' + asText(r);
       } catch (e) { ok = false; out = 'Error: ' + (e?.message ?? e); }
@@ -263,7 +276,7 @@ export function install(h) {
     h.beginStep();
     try {
       let over = false; // a quick turn that handed itself over became a whole one
-      const r = await runTurn({ text, history, engine, quick, by: engine.name ?? 'assistant', context, signal: ac.signal, on: (e) => { if (e.type === 'handover') over = true; emit(e); }, port: { call: h.call, tools: h.tools, held: () => held, has: (id) => !!h.get(id), objects: () => [...h.state.objects.values()], selection: () => [...h.state.selection] } });
+      const r = await runTurn({ text, history, engine, quick, by: engine.name ?? 'assistant', context, signal: ac.signal, on: (e) => { if (e.type === 'handover') over = true; emit(e); }, port: { call: h.call, tools: h.tools, held: () => held, has: (id) => !!h.get(id), get: h.get, objects: () => [...h.state.objects.values()], selection: () => [...h.state.selection] } });
       if (!quick || over) history = r.messages.slice(-24); // what was said and done, for the next turn (a quick turn leaves none)
       return r.say;
     } catch (e) { emit({ type: 'error', text: e?.message ?? String(e) }); throw e; }
@@ -272,7 +285,7 @@ export function install(h) {
   return {
     run, say, emit,
     // an agent's call from outside the page (the relay, WebMCP): refused while held, and checked for ids that name nothing
-    guard(args, name) { if (held) throw new Error('stopped by the person: agents are held until they let them go on'); const miss = missingIds(args, (id) => !!h.get(id), name ? schemaOf(h.tools(), name) : undefined); if (miss) throw new Error(miss); },
+    guard(args, name) { if (held) throw new Error('stopped by the person: agents are held until they let them go on'); const miss = missingIds(args, (id) => !!h.get(id), name ? schemaOf(h.tools(), name) : undefined); if (miss) throw new Error(miss); const bad = badCode(name, args, h.get); if (bad) throw new Error(bad); },
     stop() { running?.abort(); settle(null); },
     forget() { history = []; },
     busy: () => !!running, held: () => held,

@@ -168,7 +168,7 @@ export function install(h) {
       return { image: c.toDataURL('image/png'), width: c.width, height: c.height, view: where() };
     } });
 
-  define({ ...ui, name: 'code.help', doc: 'What the code of an object is given and may return, before writing any (object.code). No role: the kinds of code. role: what that code gets (ev, ways, voices, note(), pitch() ...), what it returns and the names of its presets. role and preset: that preset\'s source, to copy and change.', args: { role: { enum: CODE_ROLES }, preset: T.str },
+  define({ ...ui, name: 'code.help', doc: 'How things are made here, and what object code is given. Call it with no arguments before building anything that plays, moves or runs code: it returns short recipes (how sound is made, a score of glissandi, triggers on a line, a graph that plays such as a Markov chain or a drum loop, how to check the result) and the kinds of code. role: what that code gets (ev, ways, voices, note(), pitch() ...), what it returns and the names of its presets. role and preset: that preset\'s source, to copy and change.', args: { role: { enum: CODE_ROLES }, preset: T.str },
     run: (a) => codeHelp(a.role, a.preset) });
 
   define({ ...ui, name: 'example.list', doc: 'The examples that can be added, each with its index, path and title.', run: () => h.EXAMPLES.map((e, i) => ({ index: i, path: e.path, title: e.title })) });

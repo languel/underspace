@@ -30,7 +30,8 @@ test('an object in short says what and where it is', () => {
 });
 
 test('code.help says what each kind of code is given, and hands out presets', () => {
-  assert.deepEqual(Object.keys(codeHelp()), CODE_ROLES);
+  assert.deepEqual(Object.keys(codeHelp().kinds), CODE_ROLES);
+  assert.ok(Object.keys(codeHelp().recipes).length >= 4);
   const ev = codeHelp('event');
   assert.ok('ev' in ev.gets && 'pitch(v)' in ev.gets && ev.presets.includes('reflect'));
   assert.match(ev.example, /note\(/);

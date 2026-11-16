@@ -1639,6 +1639,47 @@ Also asked for:
   with a provider that works (Ollama is now 0.40.16: retry it with `gemma4`
   or `lfm3`); the same two requests given to `gemma4` through the whole
   loop in the Assistant panel, to see how far a local model gets.
+- **Pi, at last (16 Nov 2026).** Pi 0.67.1 drives the tab through
+  `.pi/extensions/underspace.ts` with a local model. Two things had stopped
+  it before: with `-p` Pi waits on standard input unless it is closed
+  (`< /dev/null`: that was the "four minutes without loading the model"),
+  and Ollama's models must be given in `models.json` in Pi's agent
+  directory (`PI_CODING_AGENT_DIR` for a throwaway one): provider `ollama`,
+  `baseUrl` `http://127.0.0.1:11434/v1`, `api` `openai-completions`, any
+  `apiKey`, and each model with `contextWindow` and `maxTokens`. Run:
+  `pi --no-extensions -e .pi/extensions/underspace.ts --no-tools --provider
+  ollama --model gemma4:latest -p "…" < /dev/null` (`--mode json` shows the
+  calls). Pi gives the model all 75 tools (about 9600 tokens of prompt).
+  - One line asked for: drawn in 15 s. Then "make a perpetual markov chain
+    drum and bass graph loop", three runs with `gemma4`: (1) 12 calls, a
+    picture of a graph and an invented `runMarkovLoop()` in a code box:
+    nothing told it how sound is made here; (2) after the changes below,
+    it called `code_help` first and built lines, joints with drum code and a
+    traveler with a speed, in 55 s: the right kind of thing, with faults (it
+    declared `ways` again in the joint code, so that code could not compile,
+    one joint held two ends that do not meet, no bass); (3) it read the
+    recipes, drew one line and stopped: the model ended its turn on a
+    thought. So: one in three near, none right. The larger local models
+    (`bonsai-2:27b`, the qwen 27b) and a hosted one were not tried.
+  - **What changed for it.** `code.help` with no arguments now returns
+    **recipes** (`RECIPES` in `codedoc.js`): how sound is made (scores,
+    travelers, joints; never a loop in code), a score of glissandi, triggers
+    on a line, a graph that plays, how to check. The relay's MCP
+    instructions, the whole loop's prompt and Pi's system prompt (the
+    extension adds to it on `before_agent_start`) say to read them before
+    building anything that plays. **Code that cannot compile is refused at
+    the agent port** with the reason (`badCode` in `agent.js`, `checkCode`
+    in `codedoc.js`: the command itself still keeps any code, since a person
+    types it a letter at a time). `play.state` returns `errors` (object id
+    -> what is wrong with its code). 135 tests.
+  - Local and web so far, same requests where measured: the eval's simple
+    requests are best with LFM3 in the browser on quick turns (11 of 12,
+    1.5 s); `gemma4` on Ollama 23 of 24 at 2.6 s; `lfm3` on Ollama 20 of 24
+    at 6.7 s. A scene from a sentence is beyond all the small ones as yet;
+    an agent of Claude's size does it in three calls.
+  - Next: the same request to a larger model through Pi; the s-curve
+    request; an eval case for a scene (does anything sound, on the scale
+    asked for), so this can be measured rather than read.
 - `README.md`: how to run and try spike A.
 - The claude.ai project "underspace" holds two earlier drafts
   (`underspace-foundations-v0.md`, `spike-a-notes.md`). Everything in them is

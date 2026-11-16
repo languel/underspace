@@ -301,7 +301,8 @@ outside the page reaches the same commands through the relay:
 1. Open the app with `?relay` (for example `http://localhost:5310/app/?relay`).
 2. Claude Code: start it in this folder; `.mcp.json` registers the `underspace` server.
    opencode: `opencode.json` does the same. Pi: `node app/relay.mjs --hub`, then
-   `pi -e .pi/extensions/underspace.ts`. Anything else: `node app/relay.mjs --hub` and
+   `pi -e .pi/extensions/underspace.ts`. (With `-p`, close its input: `< /dev/null`, or it waits.
+   For a local model, list Ollama's in `models.json` in Pi's agent directory.) Anything else: `node app/relay.mjs --hub` and
    `POST http://127.0.0.1:5311/call {"name": "space.read", "args": {}}`.
 
 Good first calls: `space.read` (what is drawn), `view.look` (a picture), `tools.search`
