@@ -128,7 +128,12 @@ export const penOf = (o) => live?.get(o.id)?.pen ?? o.pen;
 export function ptsOf(o) {
   const now = live?.get(o.id);
   if (now) return now.points;
-  if (!o.points) return o.verts ?? []; // a mesh's points are its vertices
+  const ps = posed?.get(o.id);
+  if (!o.points) return ps?.q && o.verts ? o.verts.map((p) => carried(ps, p)) : o.verts ?? []; // a mesh's points are its vertices
+  if (ps) {
+    const flat = o.points[0].length < 3, sx = o.off?.[0] ?? 0, sy = o.off?.[1] ?? 0;
+    return (ps.pts ?? o.points.map((p) => carried(ps, [p[0] + sx, p[1] + sy, p[2] ?? 0]))).map((p) => (flat ? [p[0], p[1]] : p));
+  }
   // A line that travels is shown where playing has carried it, keeping its own shape.
   const go = o.role === 'traveler' ? moved?.get(o.id) : null;
   if (go) {
@@ -142,6 +147,23 @@ export function ptsOf(o) {
   return o.points.map((p) => (p.length > 2 ? [p[0] + ox, p[1] + oy, p[2]] : [p[0] + ox, p[1] + oy]));
 }
 
+// Where the simulation has things now (sim.js): id -> { x0, x, q } (carried and turned as a whole) or
+// { pts } (its points, each where it now is). Set for the frame that is drawn; the drawing itself
+// is what it was at the start, and commands read that.
+let posed = null;
+export function setPosed(map) { posed = map; }
+export const poseOf = (o) => posed?.get(o.id) ?? null;
+// a vector turned by a quaternion [x, y, z, w]
+export function qrot(q, v) {
+  const tx = 2 * (q[1] * v[2] - q[2] * v[1]), ty = 2 * (q[2] * v[0] - q[0] * v[2]), tz = 2 * (q[0] * v[1] - q[1] * v[0]);
+  return [v[0] + q[3] * tx + (q[1] * tz - q[2] * ty), v[1] + q[3] * ty + (q[2] * tx - q[0] * tz), v[2] + q[3] * tz + (q[0] * ty - q[1] * tx)];
+}
+// a point of something at rest, where a pose { x0, x, q } has carried it
+export function carried(ps, p) { const v = qrot(ps.q, [p[0] - ps.x0[0], p[1] - ps.x0[1], (p[2] ?? 0) - ps.x0[2]]); return [ps.x[0] + v[0], ps.x[1] + v[1], ps.x[2] + v[2]]; }
+// the outline of a shape (about its centre c), turned as its pose turns it; and that turn, in radians
+export function turned(o, pts, c) { const q = posed?.get(o.id)?.q; return q && q[2] ? pts.map((p) => { const v = qrot(q, [p[0] - c[0], p[1] - c[1], 0]); return [c[0] + v[0], c[1] + v[1]]; }) : pts; }
+export const turnOf = (o) => { const q = posed?.get(o.id)?.q; return q ? 2 * Math.atan2(q[2], q[3]) : 0; };
+
 const LINE_PAD = 0.25;
 // Where playing has carried a traveler: id -> [x, y].
 let moved = null;
@@ -151,6 +173,8 @@ export function rectOf(o) {
   const d = dragOf(o), at = moved?.get(o.id);
   if (at && !d) return { cx: at[0], cy: at[1], w: o.rect.w, h: o.rect.h };
   if (o.rect) {
+    const ps = !d && posed?.get(o.id);
+    if (ps?.q) { const c = carried(ps, [o.rect.cx, o.rect.cy, o.z ?? 0]); return { cx: c[0], cy: c[1], w: o.rect.w, h: o.rect.h }; }
     if (d?.rects?.has(o.id)) return d.rects.get(o.id); // a transform in progress: one rectangle each
     if (d?.rect) return d.rect;
     return { cx: o.rect.cx + (d?.dx ?? 0), cy: o.rect.cy + (d?.dy ?? 0), w: o.rect.w, h: o.rect.h };

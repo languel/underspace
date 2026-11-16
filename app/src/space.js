@@ -24,6 +24,7 @@ export const state = {
   objects: new Map(),   // id -> object, see object.js
   music: { ...DEFAULT_MUSIC }, // the context everything is heard in (music.js)
   grid: { ...DEFAULT_GRID },
+  sim: {},                     // the world physical things are in, where it is not the default (sim.js)
   brushes: {},                 // ink brushes written in this drawing: id -> source (ink/brushes.js)
   sculpts: {},                 // sculpt tools written in this drawing: id -> source (ink/sculpt.js)   // the global grid: how space, time and pitch are quantized (grid.js)
   clips: new Map(),     // id -> a recorded clip: { id, name, at (beats), notes: [{ beat, midi, vel, len }] }
@@ -739,7 +740,7 @@ define({
 // Run a command from inside another, without recording it separately.
 export const exec = (name, args) => commands.get(name).run(args);
 
-function reset() { state.objects.clear(); state.selection.clear(); state.n = 0; state.music = { ...DEFAULT_MUSIC }; state.grid = { ...DEFAULT_GRID }; state.sculpts = {}; state.brushes = {}; syncBrushes({}); state.clips.clear(); }
+function reset() { state.objects.clear(); state.selection.clear(); state.n = 0; state.music = { ...DEFAULT_MUSIC }; state.grid = { ...DEFAULT_GRID }; state.sim = {}; state.sculpts = {}; state.brushes = {}; syncBrushes({}); state.clips.clear(); }
 
 // ---- the take ---------------------------------------------------------------
 
